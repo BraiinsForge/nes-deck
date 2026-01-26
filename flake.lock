@@ -1,0 +1,44 @@
+{
+  "nodes": {
+    "infones-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1594116344,
+        "narHash": "sha256-JRFGMxPMDjLMe6PhhhY2/xXvHsnnjOtJnzigKtc/rms=",
+        "owner": "nejidev",
+        "repo": "arm-NES-linux",
+        "rev": "e14ec579b3fb58f4c061ca38c103cc11d58d1673",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nejidev",
+        "repo": "arm-NES-linux",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1767313136,
+        "narHash": "sha256-16KkgfdYqjaeRGBaYsNrhPRRENs0qzkQVUooNHtoy2w=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "ac62194c3917d5f474c1a844b6fd6da2db95077d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-25.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "infones-src": "infones-src",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
