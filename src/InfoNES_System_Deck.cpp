@@ -483,21 +483,25 @@ void InfoNES_LoadFrame(void)
 
             // Apply transformation: offset, mirror X, map to rotated display
             // Same coordinate transformation as fbDOOM
+            int offset_x = x * fb_scaling + FB_OFFSET_X;
+            int phys_col = (FB_PHYS_WIDTH - 1) - offset_x;
+            int phys_row = y * fb_scaling + FB_OFFSET_Y;
+
+            // Draw scaled pixel
             for (sy = 0; sy < fb_scaling; sy++) {
                 for (sx = 0; sx < fb_scaling; sx++) {
-                    int offset_x = x * fb_scaling + FB_OFFSET_X;
-                    int phys_col = (FB_PHYS_WIDTH - 1) - offset_x - sx;
-                    int phys_row = y * fb_scaling + FB_OFFSET_Y + sy;
+                    int px = phys_row + sy;
+                    int py = phys_col + sx;
 
                     // Bounds check against display dimensions
-                    if (phys_row >= 0 && phys_row < DISPLAY_HEIGHT &&
-                        phys_col >= 0 && phys_col < DISPLAY_WIDTH) {
+                    if (px >= 0 && px < DISPLAY_HEIGHT &&
+                        py >= 0 && py < DISPLAY_WIDTH) {
 
                         // Write pixel to frame buffer
-                        // Row = phys_col (in rotated space), Col = phys_row
+                        // py (col) indexes rows, px (row) indexes columns (rotation swap)
                         unsigned char *pixel = frame_buffer +
-                                               (phys_col * fb_stride) +
-                                               (phys_row * bpp);
+                                               (py * fb_stride) +
+                                               (px * bpp);
 
                         if (bpp == 2) {
                             *(uint16_t *)pixel = color;
