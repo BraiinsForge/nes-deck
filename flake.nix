@@ -31,29 +31,29 @@
           nativeBuildInputs = [ pkgs.gnumake ];
           buildInputs = [ pkgsCross.glibc.static ];
 
-          NIX_CFLAGS_COMPILE = "-static -O2 -fsigned-char";
+          NIX_CFLAGS_COMPILE = "-static -O3 -fsigned-char";
           NIX_LDFLAGS = "-static";
 
-          # Patch for Deck framebuffer support and remove ALSA dependency
+          # Patch for Deck framebuffer support
           postPatch = ''
-            # Install Deck-specific system file (no ALSA, deck framebuffer)
+            # Install Deck-specific system file
             cat > linux/InfoNES_System_Linux.cpp << 'DECK_SYS_EOF'
             ${deckSystemSrc}
             DECK_SYS_EOF
 
-            # Install simple input handler (keyboard via /dev/input)
+            # Install TTY input handler
             cat > linux/joypad_input.cpp << 'JOYPAD_EOF'
             ${joypadSrc}
             JOYPAD_EOF
 
-            # Create Makefile for static build without ALSA
+            # Create Makefile for static build
             cat > linux/Makefile << 'MAKEFILE_EOF'
             CROSS_COMPILE ?=
             CC = $(CROSS_COMPILE)gcc
             CXX = $(CROSS_COMPILE)g++
-            CFLAGS = -O2 -fsigned-char -DNDEBUG
+            CFLAGS = -O3 -fsigned-char -DNDEBUG
             CXXFLAGS = $(CFLAGS)
-            LDFLAGS = -lpthread -lm
+            LDFLAGS = -static -lpthread -lm
 
             OBJS = ../K6502.o ../InfoNES.o ../InfoNES_Mapper.o ../InfoNES_pAPU.o \
                    InfoNES_System_Linux.o joypad_input.o
@@ -114,7 +114,7 @@
           export CROSS_COMPILE="${pkgsCross.stdenv.cc.targetPrefix}"
           export CC="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}gcc"
           export CXX="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}g++"
-          export CFLAGS="-static -O2 -fsigned-char"
+          export CFLAGS="-static -O3 -fsigned-char"
           export LDFLAGS="-static -lpthread -lm"
 
           echo "InfoNES cross-compile environment for Braiins Forge Deck"

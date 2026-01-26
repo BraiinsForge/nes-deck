@@ -15,6 +15,7 @@
 
 #include <fcntl.h>
 #include <linux/fb.h>
+#include <linux/soundcard.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -545,21 +546,97 @@ void InfoNES_PadState(DWORD *pdwPad1, DWORD *pdwPad2, DWORD *pdwSystem) {
 }
 
 /*===================================================================*/
-/*                Sound functions (stubs - no ALSA)                  */
+/*                Sound functions (OSS /dev/dsp)                     */
 /*===================================================================*/
+
+static int sound_fd = -1;
+static unsigned char *sound_buf = NULL;
+static int sound_buf_size = 0;
 
 void InfoNES_SoundInit(void) {}
 
 int InfoNES_SoundOpen(int samples_per_sync, int sample_rate) {
-  // Sound disabled for static build
-  return 0;
+  int format = AFMT_U8;
+  int channels = 1;
+  int rate = sample_rate;
+  int frag;
+
+  sound_fd = open("/dev/dsp", O_WRONLY);
+  if (sound_fd < 0) {
+    printf("InfoNES: Cannot open /dev/dsp - sound disabled\n");
+    return 0;
+  }
+
+  // Set fragment size for low latency
+  frag = (4 << 16) | 7;  // 4 fragments of 128 bytes
+  ioctl(sound_fd, SNDCTL_DSP_SETFRAGMENT, &frag);
+
+  // Set format (8-bit unsigned)
+  if (ioctl(sound_fd, SNDCTL_DSP_SETFMT, &format) < 0) {
+    printf("InfoNES: Cannot set audio format\n");
+    close(sound_fd);
+    sound_fd = -1;
+    return 0;
+  }
+
+  // Set mono
+  if (ioctl(sound_fd, SNDCTL_DSP_CHANNELS, &channels) < 0) {
+    printf("InfoNES: Cannot set mono\n");
+    close(sound_fd);
+    sound_fd = -1;
+    return 0;
+  }
+
+  // Set sample rate
+  if (ioctl(sound_fd, SNDCTL_DSP_SPEED, &rate) < 0) {
+    printf("InfoNES: Cannot set sample rate\n");
+    close(sound_fd);
+    sound_fd = -1;
+    return 0;
+  }
+
+  sound_buf_size = samples_per_sync;
+  sound_buf = (unsigned char *)malloc(sound_buf_size);
+
+  printf("InfoNES: OSS sound opened - %d Hz (requested %d), %d samples\n",
+         rate, sample_rate, samples_per_sync);
+  return 1;
 }
 
-void InfoNES_SoundClose(void) {}
+void InfoNES_SoundClose(void) {
+  if (sound_fd >= 0) {
+    close(sound_fd);
+    sound_fd = -1;
+  }
+  if (sound_buf) {
+    free(sound_buf);
+    sound_buf = NULL;
+  }
+}
 
 void InfoNES_SoundOutput(int samples, BYTE *wave1, BYTE *wave2, BYTE *wave3,
                          BYTE *wave4, BYTE *wave5) {
-  // Sound disabled
+  if (sound_fd < 0 || !sound_buf)
+    return;
+
+  // Mix NES channels with approximate NES APU weighting
+  // Square channels are louder in the original hardware
+  for (int i = 0; i < samples; i++) {
+    // Weight channels similar to NES hardware mix
+    int pulse = ((int)wave1[i] + (int)wave2[i]);      // Pulse channels
+    int tnd = ((int)wave3[i] + (int)wave4[i] + (int)wave5[i]);  // Triangle/Noise/DMC
+
+    // NES mixes pulse and TND separately then combines
+    // Approximate with: pulse * 0.5 + tnd * 0.4
+    int mixed = (pulse * 5 + tnd * 4) / 10;
+
+    // 128 = silence, scale for volume
+    int out = 128 + (mixed / 8);
+    if (out > 255) out = 255;
+    sound_buf[i] = (unsigned char)out;
+  }
+
+  write(sound_fd, sound_buf, samples);
 }
 
 /*===================================================================*/
