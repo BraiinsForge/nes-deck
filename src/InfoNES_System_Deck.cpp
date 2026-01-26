@@ -567,7 +567,7 @@ int InfoNES_SoundOpen(int samples_per_sync, int sample_rate) {
     return 0;
   }
 
-  // Set fragment size for low latency
+  // Set fragment size for low latency (blocking writes will throttle emulation)
   frag = (4 << 16) | 7;  // 4 fragments of 128 bytes
   ioctl(sound_fd, SNDCTL_DSP_SETFRAGMENT, &frag);
 
@@ -619,19 +619,30 @@ void InfoNES_SoundOutput(int samples, BYTE *wave1, BYTE *wave2, BYTE *wave3,
   if (sound_fd < 0 || !sound_buf)
     return;
 
-  // Mix NES channels with approximate NES APU weighting
-  // Square channels are louder in the original hardware
+  // Safety check: don't exceed buffer
+  if (samples > sound_buf_size) samples = sound_buf_size;
+
+  // Mix NES channels with scaling to prevent clipping
   for (int i = 0; i < samples; i++) {
-    // Weight channels similar to NES hardware mix
-    int pulse = ((int)wave1[i] + (int)wave2[i]);      // Pulse channels
-    int tnd = ((int)wave3[i] + (int)wave4[i] + (int)wave5[i]);  // Triangle/Noise/DMC
+    // Clamp inputs to expected ranges
+    int p1 = wave1[i] & 0xFF;
+    int p2 = wave2[i] & 0xFF;
+    int tr = wave3[i] & 0xFF;
+    int ns = wave4[i] & 0x0F;
+    int dp = wave5[i] & 0x7F;
 
-    // NES mixes pulse and TND separately then combines
-    // Approximate with: pulse * 0.5 + tnd * 0.4
-    int mixed = (pulse * 5 + tnd * 4) / 10;
+    int pulse1 = p1 * 9 / 10;  // 0-255 -> 0-229
+    int pulse2 = p2 * 9 / 10;  // 0-255 -> 0-229
+    int tri    = tr * 9 / 10;  // 0-255 -> 0-229
+    int noise  = ns;           // 0-15 (no scaling)
+    int dpcm   = dp;           // 0-127 (no scaling)
 
-    // 128 = silence, scale for volume
-    int out = 128 + (mixed / 8);
+    // Mix all channels
+    int mixed = (pulse1 + pulse2 + tri + noise + dpcm) / 5;
+
+    // Center at 128, scale down for volume
+    int out = 128 + ((mixed - 128) / 4);
+    if (out < 0) out = 0;
     if (out > 255) out = 255;
     sound_buf[i] = (unsigned char)out;
   }
