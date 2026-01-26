@@ -33,7 +33,7 @@
 /*  Braiins Forge Deck display configuration                         */
 /*-------------------------------------------------------------------*/
 
-// STM32MP1 display configuration (same as fbDOOM)
+// Display configuration (same as fbDOOM)
 #define FB_ROTATION_90 1   // Portrait LCD used in landscape mode
 #define FB_LINE_OFFSET 120 // First 120 lines are invisible
 #define FB_OFFSET_X -320   // Horizontal offset
@@ -445,7 +445,7 @@ void *InfoNES_MemorySet(void *dest, int c, int count) {
 
 /*===================================================================*/
 /*                   InfoNES_LoadFrame()                             */
-/*  Transfer NES frame to STM32MP1 rotated framebuffer               */
+/*  Transfer NES frame to rotated framebuffer                        */
 /*===================================================================*/
 
 void InfoNES_LoadFrame(void) {

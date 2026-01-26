@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+
+    - name: Build infones-deck
+      run: nix build -L
+
+    - name: Test binary
+      run: |
+        file ./result/bin/infones
+        ls -lh ./result/bin/infones
+
+    - name: Create release archive
+      if: github.event_name == 'release'
+      run: |
+        VERSION=$GITHUB_REF_NAME
+        echo "Building release for version: $VERSION"
+
+        mkdir -p deck-infones-release
+        cp result/bin/infones deck-infones-release/
+        cp README.md deck-infones-release/
+        zip -r deck-infones-${VERSION}-armv7l.zip deck-infones-release/
+
+    - name: Upload release asset
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./deck-infones-${{ github.ref_name }}-armv7l.zip
+        asset_name: deck-infones-${{ github.ref_name }}-armv7l.zip
+        asset_content_type: application/zip
