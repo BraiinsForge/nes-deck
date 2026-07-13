@@ -73,8 +73,8 @@ const int kPhysicalWidth = 600;
 const int kPhysicalHeight = 1280;
 const int kMaxGames = 18;
 const off_t kMaximumManifestBytes = 65536;
-const int kMaximumCoverWidth = 320;
-const int kMaximumCoverHeight = 268;
+const int kMaximumCoverWidth = 600;
+const int kMaximumCoverHeight = 378;
 const off_t kMaximumCoverBytes =
     1024 + kMaximumCoverWidth * kMaximumCoverHeight * 3;
 const off_t kMaximumPngCoverBytes = 4 * 1024 * 1024;
@@ -1495,6 +1495,7 @@ struct MenuLayout {
   Rect game_previous_button;
   Rect game_next_button;
   Rect game_art;
+  Rect game_placeholder;
   bool game_view;
   std::vector<std::string> systems;
   std::vector<Rect> game_buttons;
@@ -1622,10 +1623,29 @@ void draw_wifi_icon(Canvas *canvas, const Rect &button, uint16_t color) {
   fill_rect(canvas, Rect{center_x - 3, top + 36, 6, 6}, color);
 }
 
+void draw_cover_placeholder(Canvas *canvas, const Rect &bounds,
+                            const std::string &title, uint16_t accent) {
+  stroke_rect(canvas, bounds, 4, accent);
+  stroke_rect(canvas,
+              Rect{bounds.x + 14, bounds.y + 14, bounds.width - 28,
+                   bounds.height - 28},
+              2, xterm_pixel(kColorInactiveBorder));
+  draw_centered_text(canvas,
+                     Rect{bounds.x + 24, bounds.y + 58,
+                          bounds.width - 48, 150},
+                     "?", 8, accent);
+  const std::string shown_title =
+      fit_text_width(title, bounds.width - 48, kGameTitleScale);
+  draw_centered_text(canvas,
+                     Rect{bounds.x + 24, bounds.y + 260,
+                          bounds.width - 48, 54},
+                     shown_title, kGameTitleScale, xterm_pixel(kColorText));
+}
+
 void render_top_controls(unsigned int volume, const std::string &keymap,
                          Canvas *canvas, MenuLayout *layout) {
   const int gap = 0;
-  int x = 447;
+  int x = 537;
   layout->terminal_button = Rect{x, 10, 68, 52};
   draw_terminal_icon(canvas, layout->terminal_button,
                      xterm_pixel(kColorText));
@@ -1700,6 +1720,7 @@ void render_menu(const std::vector<GameEntry> &games,
   layout->game_previous_button = Rect{0, 0, 0, 0};
   layout->game_next_button = Rect{0, 0, 0, 0};
   layout->game_art = Rect{0, 0, 0, 0};
+  layout->game_placeholder = Rect{0, 0, 0, 0};
 
   const RgbColor console_color = xterm_color(202);
   if (!game_view) {
@@ -1717,14 +1738,19 @@ void render_menu(const std::vector<GameEntry> &games,
     draw_arrow_icon(canvas, layout->system_down_button, ArrowDown,
                     console_color.pixel());
   } else if (!layout->game_indices.empty()) {
-    layout->system_button = Rect{500, 84, 280, 48};
-    fill_rect(canvas, layout->system_button, console_color.pixel());
+    layout->system_button = Rect{357, 10, 180, 52};
+    const Rect system_label_bounds{layout->system_button.x,
+                                   layout->system_button.y + 8,
+                                   layout->system_button.width, 36};
+    fill_rect(canvas, system_label_bounds, console_color.pixel());
     draw_centered_text(canvas, layout->system_button,
-                       system_label(active_system), 2,
+                       system_label(active_system),
+                       fit_text_scale(system_label(active_system),
+                                      layout->system_button.width - 8, 2, 1),
                        xterm_pixel(kColorBackground));
 
-    layout->game_previous_button = Rect{24, 203, 128, 150};
-    layout->game_next_button = Rect{1128, 203, 128, 150};
+    layout->game_previous_button = Rect{24, 188, 128, 150};
+    layout->game_next_button = Rect{1128, 188, 128, 150};
     draw_arrow_icon(canvas, layout->game_previous_button, ArrowLeft,
                     console_color.pixel());
     draw_arrow_icon(canvas, layout->game_next_button, ArrowRight,
@@ -1733,17 +1759,17 @@ void render_menu(const std::vector<GameEntry> &games,
     const size_t shown_position = game_position % layout->game_indices.size();
     const size_t game_index = layout->game_indices[shown_position];
     layout->shown_game_index = game_index;
-    const Rect game_button{174, 144, 932, 302};
-    layout->game_art = Rect{174, 144, 932, 268};
+    const Rect game_button{174, 70, 932, 386};
+    layout->game_art = game_button;
     layout->game_buttons.push_back(game_button);
-    fill_rect(canvas, layout->game_art, games[game_index].color.pixel());
-    draw_cover(canvas, layout->game_art, games[game_index].cover);
-    const std::string shown_title = fit_text_width(
-        games[game_index].title, game_button.width - 40, kGameTitleScale);
-    draw_centered_text(canvas,
-                       Rect{game_button.x + 20, 418,
-                            game_button.width - 40, 22},
-                       shown_title, kGameTitleScale, xterm_pixel(kColorText));
+    if (games[game_index].cover.available()) {
+      draw_cover(canvas, layout->game_art, games[game_index].cover);
+    } else {
+      layout->game_placeholder = Rect{430, 88, 420, 350};
+      draw_cover_placeholder(canvas, layout->game_placeholder,
+                             games[game_index].title,
+                             games[game_index].color.pixel());
+    }
     const int indicator_width = 16;
     const int indicator_height = 8;
     const int indicator_gap = 8;
@@ -1754,7 +1780,7 @@ void render_menu(const std::vector<GameEntry> &games,
         std::max(0, indicator_count - 1) * indicator_gap;
     int indicator_x = (kLogicalWidth - indicator_row_width) / 2;
     for (int indicator = 0; indicator < indicator_count; ++indicator) {
-      const Rect bounds{indicator_x, 458, indicator_width, indicator_height};
+      const Rect bounds{indicator_x, 464, indicator_width, indicator_height};
       layout->game_position_indicators.push_back(bounds);
       stroke_rect(canvas, bounds, 2,
                   xterm_pixel(static_cast<size_t>(indicator) == shown_position
@@ -1765,10 +1791,10 @@ void render_menu(const std::vector<GameEntry> &games,
   }
 
   if (!status.empty()) {
-    fill_rect(canvas, Rect{0, 446, kLogicalWidth, 34},
+    fill_rect(canvas, Rect{0, 456, kLogicalWidth, 24},
               xterm_pixel(kColorBackground));
     const int footer_scale = fit_text_scale(status, kLogicalWidth - 24, 2, 1);
-    draw_centered_text(canvas, Rect{12, 450, kLogicalWidth - 24, 26}, status,
+    draw_centered_text(canvas, Rect{12, 456, kLogicalWidth - 24, 24}, status,
                        footer_scale, xterm_pixel(kColorFooter));
   }
 }

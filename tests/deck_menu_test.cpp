@@ -264,7 +264,9 @@ int main() {
   expect(volume_after_menu_target(MenuTargetVolumeDown, 0, 42) == 0,
          "volume minus leaves mute enabled");
   expect(kGameTitleScale == 2,
-         "all game titles use one compact fixed font scale");
+         "coverless game titles use one compact fixed font scale");
+  expect(kMaximumCoverWidth == 600 && kMaximumCoverHeight == 378,
+         "cover decoding uses the expanded carousel art budget");
 
   std::string keymap;
   expect(load_keymap_state(keymap_state, &keymap, &error),
@@ -351,6 +353,7 @@ int main() {
     second_nes.id = "fixture-two";
     second_nes.title = "FIXTURE TWO";
     second_nes.color = xterm_color(174);
+    second_nes.cover = CoverImage();
     tab_games.push_back(second_nes);
   }
   const char *additional_systems[] = {"gb", "gbc", "chip8", "deck"};
@@ -444,11 +447,15 @@ int main() {
 
   render_menu(tab_games, "nes", 42, "us", true, 0, std::string(), &canvas,
               &menu_layout);
-  expect(menu_layout.terminal_button.x == 447 &&
+  expect(menu_layout.system_button.x == 357 &&
+             menu_layout.terminal_button.x == 537 &&
              menu_layout.volume_up_button.x +
                      menu_layout.volume_up_button.width ==
-                 833,
-         "game view centers the compact operational controls");
+                 923 &&
+             menu_layout.system_button.x +
+                     menu_layout.system_button.width ==
+                 menu_layout.terminal_button.x,
+         "game view centers the console label and controls as one top nav");
   expect(menu_layout.terminal_button.height == 52 &&
              menu_layout.keymap_button.width == 52 &&
              menu_layout.wifi_button.width == 52 &&
@@ -528,12 +535,12 @@ int main() {
              menu_layout.game_indices.size() == 2 &&
              menu_layout.shown_game_index == 0,
          "carousel exposes one game from the active console");
-  expect(menu_layout.game_art.height == 268 &&
-             menu_layout.game_art.y + menu_layout.game_art.height == 412 &&
+  expect(menu_layout.game_art.y == 70 && menu_layout.game_art.height == 386 &&
+             menu_layout.game_art.y + menu_layout.game_art.height == 456 &&
              menu_layout.game_buttons[0].y +
                      menu_layout.game_buttons[0].height ==
-                 446,
-         "cover art uses the lower space while the title remains tappable");
+                 456,
+         "cover art uses the space freed by the old console and title rows");
   expect(menu_layout.game_previous_button.y * 2 +
                  menu_layout.game_previous_button.height ==
              menu_layout.game_art.y * 2 + menu_layout.game_art.height &&
@@ -545,9 +552,17 @@ int main() {
                         kLogicalWidth +
                     menu_layout.game_art.x + menu_layout.game_art.width / 2] ==
              cover_color.pixel(),
-         "carousel centers the local cover inside the colored art tile");
+         "carousel centers the local cover in the expanded art area");
+  expect(canvas[static_cast<size_t>(menu_layout.game_art.y) * kLogicalWidth +
+                    menu_layout.game_art.x] ==
+                 xterm_pixel(kColorBackground) &&
+             menu_layout.game_placeholder.width == 0,
+         "covered games render without a colored backing tile or placeholder");
+  expect(!rect_contains_color(canvas, Rect{174, 420, 932, 30},
+                              xterm_pixel(kColorText)),
+         "covered games omit the redundant title row");
   expect(menu_layout.game_position_indicators.size() == 2 &&
-             menu_layout.game_position_indicators[0].y == 458 &&
+             menu_layout.game_position_indicators[0].y == 464 &&
              canvas[static_cast<size_t>(
                         menu_layout.game_position_indicators[0].y) *
                             kLogicalWidth +
@@ -565,8 +580,13 @@ int main() {
                  xterm_pixel(kColorBackground),
          "carousel position uses hollow bright and muted markers");
   expect(rect_contains_color(canvas, menu_layout.system_button,
-                             xterm_pixel(kColorBackground)),
-         "carousel console button uses black label text");
+                             xterm_pixel(202)) &&
+             rect_contains_color(canvas, menu_layout.system_button,
+                                 xterm_pixel(kColorBackground)) &&
+             canvas[static_cast<size_t>(menu_layout.system_button.y) *
+                        kLogicalWidth + menu_layout.system_button.x] ==
+                 xterm_pixel(kColorBackground),
+         "carousel console label is a thin orange strip in the top nav");
   expect(target_at(menu_layout, menu_layout.system_button.x + 1,
                    menu_layout.system_button.y + 1) == MenuTargetSystemBack &&
              target_at(menu_layout, menu_layout.game_previous_button.x + 1,
@@ -579,8 +599,8 @@ int main() {
   if (!menu_layout.game_buttons.empty()) {
     const Rect &game_button = menu_layout.game_buttons[0];
     expect(canvas[static_cast<size_t>(game_button.y) * kLogicalWidth +
-                  game_button.x] == tab_games[0].color.pixel(),
-           "carousel game uses its catalog color through the edge");
+                  game_button.x] == xterm_pixel(kColorBackground),
+           "carousel game touch area stays black through the edge");
     expect(target_at(menu_layout, game_button.x + 1, game_button.y + 1) == 0,
            "carousel game launches its catalog entry");
   }
@@ -591,6 +611,14 @@ int main() {
              target_at(menu_layout, menu_layout.game_buttons[0].x + 1,
                        menu_layout.game_buttons[0].y + 1) == 1,
          "carousel position selects the next game mapping");
+  expect(menu_layout.game_placeholder.width == 420 &&
+             menu_layout.game_placeholder.height == 350 &&
+             canvas[static_cast<size_t>(menu_layout.game_placeholder.y) *
+                        kLogicalWidth + menu_layout.game_placeholder.x] ==
+                 tab_games[1].color.pixel() &&
+             rect_contains_color(canvas, menu_layout.game_placeholder,
+                                 xterm_pixel(kColorText)),
+         "coverless games render a catalog-accented placeholder with a title");
   expect(menu_layout.game_position_indicators.size() == 2 &&
              canvas[static_cast<size_t>(
                         menu_layout.game_position_indicators[0].y) *
