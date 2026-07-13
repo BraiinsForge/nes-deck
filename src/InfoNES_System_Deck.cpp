@@ -61,7 +61,7 @@ static int fb_stride;
 static int fb_scaling = 1;
 
 extern "C" int InitJoypadInput(void);
-extern "C" int GetJoypadInput(void);
+extern "C" unsigned int GetJoypadInput(unsigned int player);
 
 /*-------------------------------------------------------------------*/
 /*  ROM image file information                                       */
@@ -239,7 +239,7 @@ int main(int argc, char **argv) {
   bThread = FALSE;
 
   if (InitJoypadInput() < 0)
-    printf("InfoNES: Continuing without keyboard input\n");
+    printf("InfoNES: Continuing without controller input\n");
 
   if (lcd_fb_init() < 0) {
     printf("InfoNES: Framebuffer initialization failed\n");
@@ -257,7 +257,8 @@ int main(int argc, char **argv) {
 
   // Main loop - handle input
   while (!shutdown_requested) {
-    dwKeyPad1 = GetJoypadInput();
+    dwKeyPad1 = GetJoypadInput(0);
+    dwKeyPad2 = GetJoypadInput(1);
     usleep(1000);
   }
 
