@@ -264,6 +264,12 @@ int main() {
   expect(canvas[0] == rgb565(0, 0, 0), "menu background is solid black");
   expect(canvas[static_cast<size_t>(82) * kLogicalWidth] == rgb565(0, 0, 0),
          "menu has no colored header divider");
+  expect(canvas[static_cast<size_t>(12) * kLogicalWidth + 26] ==
+             rgb565(255, 245, 171),
+         "menu title uses its enlarged header scale");
+  expect(canvas[static_cast<size_t>(68) * kLogicalWidth + 26] ==
+             rgb565(0, 0, 0),
+         "menu omits the instructional subtitle");
   expect(target_at(menu_layout, menu_layout.volume_down_button.x + 1,
                    menu_layout.volume_down_button.y + 1) == -2,
          "volume down action has its own target");
@@ -279,14 +285,38 @@ int main() {
   expect(target_at(menu_layout, menu_layout.terminal_button.x + 1,
                    menu_layout.terminal_button.y + 1) == -4,
          "terminal action has its own target");
+  expect(canvas[static_cast<size_t>(menu_layout.terminal_button.y) *
+                        kLogicalWidth +
+                    menu_layout.terminal_button.x] == rgb565(25, 25, 25) &&
+             canvas[static_cast<size_t>(menu_layout.keymap_button.y) *
+                        kLogicalWidth +
+                    menu_layout.keymap_button.x] == rgb565(25, 25, 25) &&
+             canvas[static_cast<size_t>(menu_layout.wifi_button.y) *
+                        kLogicalWidth +
+                    menu_layout.wifi_button.x] == rgb565(25, 25, 25) &&
+             canvas[static_cast<size_t>(menu_layout.volume_down_button.y) *
+                        kLogicalWidth +
+                    menu_layout.volume_down_button.x] == rgb565(25, 25, 25) &&
+             canvas[static_cast<size_t>(menu_layout.volume_up_button.y) *
+                        kLogicalWidth +
+                    menu_layout.volume_up_button.x] == rgb565(25, 25, 25),
+         "top control buttons stay flat through their edges");
+  expect(canvas[static_cast<size_t>(menu_layout.volume_display.y) *
+                        kLogicalWidth +
+                    menu_layout.volume_display.x] ==
+             RgbColor{116, 169, 137}.pixel(),
+         "volume display stays flat through its edge");
   expect(menu_layout.system_tabs.size() == 5,
          "menu exposes one tab for each populated system");
   if (menu_layout.system_tabs.size() == 5) {
     const Rect &selected_tab = menu_layout.system_tabs[0].bounds;
     const Rect &inactive_tab = menu_layout.system_tabs[1].bounds;
     expect(canvas[static_cast<size_t>(selected_tab.y) * kLogicalWidth +
-                  selected_tab.x] == rgb565(216, 205, 164),
-           "selected system tab stays flat through its edge");
+                  selected_tab.x] == rgb565(126, 159, 174),
+           "selected system tab uses a cool color through its edge");
+    expect(canvas[static_cast<size_t>(selected_tab.y) * kLogicalWidth +
+                  selected_tab.x] != rgb565(255, 245, 171),
+           "selected system tab differs from the title color");
     expect(canvas[static_cast<size_t>(inactive_tab.y) * kLogicalWidth +
                   inactive_tab.x] == rgb565(25, 25, 25),
            "inactive system tab stays flat through its edge");

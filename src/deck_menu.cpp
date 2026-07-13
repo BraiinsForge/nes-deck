@@ -1052,11 +1052,6 @@ uint16_t contrasting_text(const RgbColor &color) {
   return luminance >= 145000 ? rgb565(10, 16, 26) : rgb565(255, 255, 255);
 }
 
-uint16_t darker(const RgbColor &color) {
-  return rgb565(color.red * 55 / 100, color.green * 55 / 100,
-                color.blue * 55 / 100);
-}
-
 struct MenuLayout {
   Rect volume_down_button;
   Rect volume_display;
@@ -1134,25 +1129,20 @@ void render_menu(const std::vector<GameEntry> &games,
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
                  rgb565(0, 0, 0));
 
-  draw_text(canvas, 20, 13, "RETRO DECK", 5, rgb565(255, 245, 171));
-  draw_text(canvas, 22, 57, "TOUCH A GAME TO PLAY", 2,
-            rgb565(180, 180, 180));
+  draw_text(canvas, 20, 12, "RETRO DECK", 7, rgb565(255, 245, 171));
 
   layout->terminal_button = Rect{682, 10, 82, 62};
   fill_rect(canvas, layout->terminal_button, rgb565(25, 25, 25));
-  stroke_rect(canvas, layout->terminal_button, 3, rgb565(130, 130, 130));
   draw_terminal_icon(canvas, layout->terminal_button, rgb565(245, 245, 245));
 
   layout->keymap_button = Rect{774, 10, 102, 62};
   fill_rect(canvas, layout->keymap_button, rgb565(25, 25, 25));
-  stroke_rect(canvas, layout->keymap_button, 3, rgb565(130, 130, 130));
   draw_centered_text(canvas, layout->keymap_button,
                      keymap == "cz" ? "KEYS CZ" : "KEYS US", 2,
                      rgb565(245, 245, 245));
 
   layout->wifi_button = Rect{886, 10, 98, 62};
   fill_rect(canvas, layout->wifi_button, rgb565(25, 25, 25));
-  stroke_rect(canvas, layout->wifi_button, 3, rgb565(130, 130, 130));
   draw_centered_text(canvas, layout->wifi_button, "WIFI", 2,
                      rgb565(245, 245, 245));
 
@@ -1162,16 +1152,13 @@ void render_menu(const std::vector<GameEntry> &games,
   const RgbColor volume_color =
       volume == 0 ? RgbColor{189, 121, 124} : RgbColor{116, 169, 137};
   fill_rect(canvas, layout->volume_down_button, rgb565(25, 25, 25));
-  stroke_rect(canvas, layout->volume_down_button, 3, rgb565(130, 130, 130));
   draw_centered_text(canvas, layout->volume_down_button, "-", 4,
                      rgb565(245, 245, 245));
   fill_rect(canvas, layout->volume_display, volume_color.pixel());
-  stroke_rect(canvas, layout->volume_display, 4, darker(volume_color));
   draw_centered_text(canvas, layout->volume_display,
                      "VOL " + std::to_string(volume) + "%", 2,
                      contrasting_text(volume_color));
   fill_rect(canvas, layout->volume_up_button, rgb565(25, 25, 25));
-  stroke_rect(canvas, layout->volume_up_button, 3, rgb565(130, 130, 130));
   draw_centered_text(canvas, layout->volume_up_button, "+", 4,
                      rgb565(245, 245, 245));
 
@@ -1185,7 +1172,7 @@ void render_menu(const std::vector<GameEntry> &games,
     const Rect tab{tab_x, 84, kSystemDefinitions[definition].width, 48};
     const bool selected = active_system == kSystemDefinitions[definition].system;
     const RgbColor tab_color =
-        selected ? RgbColor{216, 205, 164} : RgbColor{25, 25, 25};
+        selected ? RgbColor{126, 159, 174} : RgbColor{25, 25, 25};
     fill_rect(canvas, tab, tab_color.pixel());
     draw_centered_text(canvas, tab, kSystemDefinitions[definition].label, 2,
                        selected ? contrasting_text(tab_color)
