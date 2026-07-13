@@ -281,6 +281,16 @@ int main() {
          "terminal action has its own target");
   expect(menu_layout.system_tabs.size() == 5,
          "menu exposes one tab for each populated system");
+  if (menu_layout.system_tabs.size() == 5) {
+    const Rect &selected_tab = menu_layout.system_tabs[0].bounds;
+    const Rect &inactive_tab = menu_layout.system_tabs[1].bounds;
+    expect(canvas[static_cast<size_t>(selected_tab.y) * kLogicalWidth +
+                  selected_tab.x] == rgb565(255, 245, 171),
+           "selected system tab stays flat through its edge");
+    expect(canvas[static_cast<size_t>(inactive_tab.y) * kLogicalWidth +
+                  inactive_tab.x] == rgb565(25, 25, 25),
+           "inactive system tab stays flat through its edge");
+  }
   expect(menu_layout.game_buttons.size() == 1 &&
              menu_layout.game_indices.size() == 1 &&
              menu_layout.game_indices[0] == 0,

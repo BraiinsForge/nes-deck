@@ -1187,8 +1187,6 @@ void render_menu(const std::vector<GameEntry> &games,
     const RgbColor tab_color =
         selected ? RgbColor{255, 245, 171} : RgbColor{25, 25, 25};
     fill_rect(canvas, tab, tab_color.pixel());
-    stroke_rect(canvas, tab, 3,
-                selected ? darker(tab_color) : rgb565(95, 95, 95));
     draw_centered_text(canvas, tab, kSystemDefinitions[definition].label, 2,
                        selected ? contrasting_text(tab_color)
                                 : rgb565(220, 220, 220));
