@@ -45,7 +45,7 @@ and the native menu explicitly unblanks fb0 whenever it reopens the display.
 At runtime, select the NES, Game Boy, Game Boy Color, CHIP-8, or Deck tab, then
 tap a flat game tile to launch it. Only the active system's tiles are shown,
 and each tile retains its original catalog index for launch routing. Tiles
-display only the game title;
+display only the game title in one compact fixed font size;
 descriptions and license labels stay out of the launcher. Redistribution and
 license details remain in `FOSS_GAMES.md` and the installed license files. The
 top-right minus and plus buttons atomically persist volume in 5-point steps.

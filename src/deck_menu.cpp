@@ -78,6 +78,7 @@ const int kExitHoldHeight = kLogicalHeight;
 const int64_t kExitHoldMs = 2000;
 const int64_t kChildTermGraceMs = 4000;
 const unsigned int kVolumeStep = 5;
+const int kGameTitleScale = 2;
 
 volatile sig_atomic_t g_shutdown_requested = 0;
 
@@ -1295,13 +1296,12 @@ void render_menu(const std::vector<GameEntry> &games,
     fill_rect(canvas, cell, games[game_index].color.pixel());
     const uint16_t text_color = contrasting_text(games[game_index].color);
 
-    const int title_scale =
-        fit_text_scale(games[game_index].title, cell.width - 28, 6, 2);
     const std::string shown_title =
-        fit_text_width(games[game_index].title, cell.width - 28, title_scale);
+        fit_text_width(games[game_index].title, cell.width - 28,
+                       kGameTitleScale);
     draw_centered_text(canvas,
                        Rect{cell.x + 14, cell.y, cell.width - 28, cell.height},
-                       shown_title, title_scale, text_color);
+                       shown_title, kGameTitleScale, text_color);
   }
 
   const std::string footer =

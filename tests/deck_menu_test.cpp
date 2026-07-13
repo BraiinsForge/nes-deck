@@ -192,6 +192,8 @@ int main() {
          "volume plus restores the last audible level");
   expect(volume_after_menu_target(MenuTargetVolumeDown, 0, 42) == 0,
          "volume minus leaves mute enabled");
+  expect(kGameTitleScale == 2,
+         "all game titles use one compact fixed font scale");
 
   std::string keymap;
   expect(load_keymap_state(keymap_state, &keymap, &error),

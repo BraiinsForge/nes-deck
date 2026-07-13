@@ -132,7 +132,8 @@ ssh root@<deck-ip> '
 Use the **NES**, **GAME BOY**, **GAME BOY COLOR**, **CHIP-8**, and **DECK** tabs to
 filter the title-only game cards, then tap a card to start it. The selected
 tab is highlighted and cards retain stable catalog-to-launch mappings after
-filtering. The **- / VOL / +** control changes the next game's PCM volume in
+filtering. Every game name uses the same compact font size. The **- / VOL / +**
+control changes the next game's PCM volume in
 5-point steps from 0 through 100. Tap the green volume display to mute it; the
 display turns red and reads **VOL OFF**. Tap that display or **+** to restore
 the last audible level. Each nonzero adjustment plays a short two-note
