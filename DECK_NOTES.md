@@ -32,9 +32,12 @@ passphrases, WireGuard private keys, or ROM data.
 
 ## Touchscreen
 
-- `/dev/input/event0` is `Goodix Capacitive TouchScreen`. It reports the
-  intended landscape coordinates directly: ABS_X 0..1279, ABS_Y 0..479, and
-  BTN_TOUCH, plus multitouch slots. No rotation or calibration is required.
+- The `Goodix Capacitive TouchScreen` reports the intended landscape
+  coordinates directly: ABS_X 0..1279, ABS_Y 0..479, and BTN_TOUCH, plus
+  multitouch slots. No rotation or calibration is required. Event node numbers
+  are not stable: with a USB gamepad attached on 2026-07-13, THEGamepad was
+  `/dev/input/event0` and Goodix moved to `/dev/input/event1`. The menu discovers
+  Goodix by name and capabilities instead of assuming an event number.
 - The S99 menu exclusively grabs the Goodix event device while it is active.
   It releases the framebuffer before starting InfoNES but retains touch input
   so a continuous two-second hold anywhere on the touchscreen can terminate
@@ -42,6 +45,29 @@ passphrases, WireGuard private keys, or ROM data.
 - The menu maps its 1280x480 logical canvas onto the portrait framebuffer as
   `column = y`, `row = 1279 - x`. Its host test verifies every logical pixel
   maps in bounds and exactly once.
+
+## Controllers
+
+- The deployed emulator discovers up to two Retro Games THEGamepad controllers
+  with USB ID `1c59:0026` through evdev. Controllers are ordered by physical USB
+  path so leaving them in the same Deck or hub ports keeps Player 1 and Player 2
+  assignments stable across game launches; keyboard input remains a Player 1
+  fallback.
+- Retro Games' published mapping is used: D-pad axes are NES directions, A/X
+  are NES A, B/Y are NES B, Back is Select, and Start is Start. Disconnects,
+  reconnects, hotplug, dropped-event resynchronization, and independent P1/P2
+  state are covered by the host test. Setting `INFONES_INPUT_DIAGNOSTICS=1`
+  prints state changes for an explicit hardware audit without enabling routine
+  input logging.
+- On 2026-07-13 the current path-sorted build assigned
+  `usb-49000000.usb-otg-1.1/input0` to Player 1 and
+  `usb-49000000.usb-otg-1.3/input0` to Player 2. An earlier diagnostic before
+  stable path ordering had observed the reverse assignment.
+  Each independently produced the exact released sequence Right `0x80`, A
+  `0x01`, B `0x02`, Start `0x08`, with state returning to `0x00` after every
+  press. The user also started Mario and played successfully with Player 1.
+  Diagnostic mode was then stopped, and the normal menu was verified running
+  again with both controllers still attached.
 
 ## Audio
 
@@ -66,14 +92,33 @@ passphrases, WireGuard private keys, or ROM data.
   about 42% of that old path because the fixed-gain MAX98357A is loud on the
   Deck speaker. The launcher exposes this as `VOLUME_PERCENT=42` (valid range
   0-100) instead of relying on ALSA softvol.
-- The menu's top-right sound button persists exact `on\n` or `off\n` state in
-  `/mnt/data/nes-deck/state/menu-sound.state`. ON launches the emulator with
-  inherited `INFONES_VOLUME_PERCENT=42`; OFF launches it with 0. The selection
-  affects the next game and survives service restarts and reboot. Toggling
-  from OFF to ON also plays a short two-note confirmation through `/dev/dsp`,
-  so the setting can be checked without starting a game.
-- The deployed S16 build has SHA-256
-  `08c4b58a491552e41bda095c8e83081b115d1110cc5e032135ee8b95ac8cd0fa`.
+- The menu's top-right minus/display/plus group persists a canonical 0-100
+  value in `/mnt/data/nes-deck/state/menu-volume.state`. Adjustments move in
+  5-point steps, zero mutes, and each nonzero adjustment plays a two-note
+  confirmation through `/dev/dsp`. The selected value is passed to every
+  emulator and survives service restarts and reboot. The launcher migrates the
+  former exact `on\n`/`off\n` state to 42/0 once.
+- On 2026-07-13 a reported Mario-muted launch was traced to the persisted sound
+  state being `off\n`: logd showed the preceding emulator launch opening at 42%
+  and the later launch opening at exactly 0%. Mario's title and attract demo are
+  also intentionally silent until Start; this was not evidence of a new APU
+  regression.
+- The deployment reset the persisted state to `on\n`; the subsequent Mario
+  launch was logged at 42%, ALSA was RUNNING at 44100 Hz, and the user confirmed
+  that Mario gameplay audio worked. The Deck was 95% idle after the temporary
+  SSH framebuffer and audio sampling ended.
+- Gambatte produces 32768 Hz audio. The OSS compatibility ioctl echoed that
+  requested rate even though `/proc/asound/.../hw_params` showed the live
+  hardware stream at exactly 32000 Hz. One OSS application frame was consumed
+  per hardware frame, slowing emulation by `32768/32000`. The shared runtime
+  now requests 32000 Hz explicitly and resamples with one fixed-point step per
+  callback instead of a 64-bit division per output sample. Muted Gambatte
+  diagnostics held the native 59.728 FPS at 1.004-1.005 seconds per 60 frames;
+  the final active-audio probe held approximately 59.4 FPS without recurring
+  XRUN noise, and the user confirmed Adjustris no longer produced distorted
+  audio.
+- The deployed S16/two-gamepad build has SHA-256
+  `5316aa458de8430c3edb08a15e3c126b52697ac02ff66e8df789c3f76e4fe390`.
   Its live ALSA stream was verified as RUNNING at exact 44100 Hz with 512-frame
   hardware periods and a 4096-frame hardware buffer. The OSS ring is filled
   while its trigger is paused and playback begins on the first callback. During
@@ -86,7 +131,10 @@ passphrases, WireGuard private keys, or ROM data.
   before the centering fix is saved as
   `/mnt/data/nes-deck/infones.pre-centering-b90b3857`; the preceding S16 build
   is `infones.pre-noise-buffer42-b3e51b0d`, and older builds remain alongside
-  them for rollback.
+  them for rollback. The immediately preceding deployed build is also in the
+  timestamped
+  `/mnt/data/nes-deck/backups/20260713-095726-two-gamepads-title-only/`
+  deployment backup.
 - Super Mario Bros. deliberately disables all APU channels on its title and
   attract demo; silence there is expected. The inspected Deck had only the
   Goodix touchscreen attached, and touch is not mapped to an NES controller,
@@ -108,9 +156,11 @@ passphrases, WireGuard private keys, or ROM data.
   exits before the S99 emulator launcher and is not the long-running BMC
   service.
 - `/etc/init.d/nes-deck` is a procd service at S99. It starts the persistent
-  `/mnt/data/nes-deck/menu/deck-menu-launcher`, sends output to logd, and uses
-  bounded crash respawning. The launcher validates the source catalog with ECL
-  and then execs the native menu. The previous direct-Mario init script is
+  `/mnt/data/nes-deck/menu/deck-menu-launcher` and uses bounded crash
+  respawning. The launcher validates the source catalog with ECL and then
+  execs the native menu. Launcher milestones go to logd; catalog output plus
+  native menu, emulator, terminal, exit-status, and signal details append to
+  the bounded persistent `/mnt/data/nes-deck/log/deck-menu.log`. The previous direct-Mario init script is
   retained as `/etc/init.d/nes-deck.pre-touch-menu-20260711` for rollback.
 - `pre-exec-runner` is unrelated to internal storage: it looks for a signed
   script on USB media and is not used by this deployment.
@@ -125,21 +175,118 @@ passphrases, WireGuard private keys, or ROM data.
   `f80d7c10da0e0a09bde089c8e9ad650701befa14a76f1fc740ddae036dacd536`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `14d5cd74c88abc4b502e3981a0b2b964aeee440d7222b3c50829b6c0dd19ebf2`.
-  It validates the manifest and iNES headers before opening the framebuffer,
-  supervises one emulator child, and restores tty state after the child exits.
-  This build includes the full-screen two-second return hold, the two-line
-  `NEXT GAME / SOUND ON|OFF` button, and the sound-on confirmation chime.
-- `games.sexp` is the editable schema-checked source. At each service start,
+  `505c91a34f425d063be6e8f21e0e447702470e2c91156214066af0240f22f8bd`.
+  It validates the manifest and system-specific NES/GB/GBC/CHIP-8 ROM format
+  before opening the framebuffer, supervises one emulator child, logs its
+  exact exit status or signal, and restores tty state after the child exits.
+  This build includes the full-screen two-second return hold, persistent
+  volume controls, a persistent US/Czech terminal keymap toggle, the Wi-Fi
+  editor, and a supervised framebuffer-terminal action. The installed launcher
+  SHA-256 is
+  `824b484837a1a3a024311affebe2991e38ee9d070229de54a3a205f060d7a9eb`.
+- A post-deployment capture of the live 1280x480 framebuffer verified that all
+  game cards render only their centered names on a solid black background.
+  Four compact tabs labeled `NES`, `GAME BOY`, `GAME BOY COLOR`, and `CHIP-8`
+  filter the catalog; the selected tab uses the pale-yellow title color. NES
+  uses a consistent 3x2 card grid, and the smaller libraries retain the same
+  slots rather than stretching a single game across the display. The title is
+  `RETRO DECK`, the old blue divider is gone, and no description or license
+  text remains in the launcher. A later capture verified the computer,
+  `KEYS US`, Wi-Fi, minus, `VOL 42%`, and plus controls fit above those tabs
+  without overlap.
+- `games.sexp` is the editable schema-checked source. Schema version 3 keeps
+  id, title, system, ROM path, and card color; game cards render only the
+  centered title, while redistribution details remain in `FOSS_GAMES.md` and
+  installed license files. At each service start,
   the ECL compiler atomically generates
   `/mnt/data/nes-deck/state/games.tsv`; the checked-in TSV is a known-good
   fallback. The actual Deck ECL output was verified byte-for-byte against that
-  fallback for all five entries. The final deployed catalog/fallback SHA-256
-  was `190e128f5d0f7ca06c0df8fca61f4c171331d98b54986be773f1f71a940fef6d`.
+  fallback for all ten entries. The final deployed catalog/fallback SHA-256
+  is `efc59bba6b5f2b70dfe4827690be4c822ea3aa156c441b781a80623c83dacb8e`.
 - Four pinned, freely licensed mapper-0 homebrew releases are installed:
   Falling, Thwaite, Concentration Room, and robotfindskitten. Provenance,
   license texts, and ROM hashes are recorded in [FOSS_GAMES.md](FOSS_GAMES.md).
-  The fifth entry, `mario.nes`, is user-supplied and is not redistributed.
+  `mario.nes` and `micro-mages.nes` are user-supplied and are not
+  redistributed. The deployed Micro Mages ROM SHA-256 is
+  `a4b5b736a84b260314c18783381fe2dca7b803f7c29e78fb403a0f9087a7e570`.
+
+## GB, GBC, and CHIP-8 emulators
+
+- `/mnt/data/nes-deck/gb-deck` statically hosts the pinned Gambatte libretro
+  core at `dfc165599f3f1068c40a0b7ad6fe5f161283d483` for both GB and GBC. It is
+  GPL-2.0-only, built with Cortex-A7/NEON tuning and LTO, and emits native
+  RGB565 frames. Its deployed SHA-256 is
+  `21cdda99e34d8d6747bdcb11e15f71d7a9658582bc3c85705e2b0ea7c2f9bfd8`.
+  SRAM and RTC data are saved beside the ROM as `.sav` and `.rtc` files.
+- `/mnt/data/nes-deck/chip8-deck` statically hosts the pinned c-octo core for
+  CHIP-8, SCHIP, and XO-CHIP. Its deployed SHA-256 is
+  `8fa537720f4f496479cf7c8ca98353ac126bc8a26e4bee19d47709c2c830df9b`.
+  ROM sidecars hold tickrate, palette, quirk, and controller-profile settings.
+- Both frontends share exact framebuffer validation, nearest-neighbor integer
+  scaling inside a 16-pixel rounded-panel safe area, OSS S16 mono audio,
+  volume inheritance, frame pacing, and the stable two-controller discovery
+  code. Completed frames are built in cacheable RAM and only the active
+  rotated rectangle is published to the live scanout, preventing the moving
+  black triangle caused by partial framebuffer writes. The RGB565 path writes
+  one complete physical row at a time. GB's 160x144 image renders at 3x;
+  64x32 CHIP-8 renders at 14x, and 128x64 high-resolution modes render at 7x.
+- The first hardware smoke run exposed a frontend-only ROM-read bug: a C++
+  stream-buffer iterator does not set `ifstream::eof()`, so complete ROMs were
+  rejected. The loaders now perform exact-size reads and reject only short or
+  bad reads. After that fix, Adjustris, Geometrix, Outlaw, and Space Racer each
+  ran on the Deck, rendered a distinct framebuffer, detected Player 1 at
+  `usb-49000000.usb-otg-1.1/input0` and Player 2 at
+  `usb-49000000.usb-otg-1.3/input0`, and shut down on SIGTERM with status 0.
+  The muted probes still opened and exercised `/dev/dsp`; their logs and raw
+  framebuffer captures are under
+  `/mnt/data/nes-deck/log/live-smoke-20260713-120753-readfix/`.
+- SameBoy v1.0.3 could produce only about 32 FPS on the dual Cortex-A7 Deck;
+  Cortex-A7/NEON/LTO tuning improved it only to about 35 FPS, and suppressing
+  video callbacks did not materially change that result. The core was replaced
+  with Gambatte rather than hiding the deficit with frameskip. Final live
+  Adjustris and Geometrix probes rendered distinct framebuffer hashes and ran
+  near the native 59.728 FPS with sound enabled.
+- c-octo's low-resolution pixels use a 64-byte row pitch. The first wrapper
+  passed 128, which displayed only the top half with every other line missing;
+  the wrapper and host test now require pitch 64. Final Outlaw and Space Racer
+  probes rendered distinct framebuffer hashes, and the user confirmed CHIP-8
+  rendering was substantially improved. Minor sprite flicker in Outlaw is
+  consistent with the game's own draw/erase behavior.
+- The pre-Gambatte GB binary is backed up under
+  `/mnt/data/nes-deck/backups/20260713-124317-pre-gambatte/`. The preceding
+  CHIP-8 runtime is under
+  `/mnt/data/nes-deck/backups/20260713-124625-pre-final-runtime/`.
+  Final GB/GBC/CHIP-8 smoke logs are retained under
+  `/mnt/data/nes-deck/log/live-smoke-20260713-1246-final/`.
+
+## Framebuffer terminal
+
+- The terminal source is integrated under `terminal/` from the Braiins Forge
+  fbterm fork, with exact upstream commits and licenses recorded in
+  `terminal/PROVENANCE.md`.
+- `/mnt/data/nes-deck/terminal/fbterm` is a statically linked ARMv7 hard-float
+  executable, SHA-256
+  `9e70e6091926cdff75196c419a031a1acaddd613b51f543ebe1bbb741567df89`.
+  The bundled DejaVu Sans Mono font SHA-256 is
+  `9d9bfebceb1c3f6f4ad383ded568a6926086208f43f7f92f92f7e93a1383fa38`.
+- fbterm validates the actual 600x1280 RGB565 framebuffer and its stride. It
+  rotates the visible 1280x480 region, then keeps a 16-pixel black safe area on
+  all four sides for the panel's rounded corners. The resulting terminal
+  viewport is 1248x448.
+- A live framebuffer capture verified fixed-width `M`, `i`, `W`, digits, and
+  punctuation with no old glyph smear. A bottom-row marker remained inside
+  the padded viewport. The terminal launcher uses the active `/dev/tty1` and a
+  private fontconfig file; its SHA-256 is
+  `d8f475eeee6e66a24294bcf6817fa241f8b4e7ea4e9cad893bd30a12b20450db`.
+  A live launch reached the interactive `root@braiins-deck` prompt. Exiting the
+  shell or using the two-second touch hold returns to the menu.
+- The terminal package includes static ARM `loadkeys`, SHA-256
+  `a4c1f63d21bd95708e868079a54be54c012021f4bc8bc1a44fd7140f8eb3e984`,
+  plus self-contained US ANSI and Czech QWERTZ maps from kbd 2.7.1. The menu
+  persists exactly `us\n` or `cz\n` in `terminal-keymap.state`. The launcher
+  loads that selection before fbterm and restores US after fbterm has fully
+  exited, including menu-requested TERM. Both packaged maps passed parse-only
+  `loadkeys -p` checks on the live Deck before installation.
 
 ## Wi-Fi
 
@@ -155,16 +302,30 @@ passphrases, WireGuard private keys, or ROM data.
 - Imported profiles are kept root-only and a selector changes the single STA
   section only after it is disconnected. See the installed selector itself
   for operational details; do not copy credentials into this repository.
+- The menu's profile helper is `/usr/sbin/deck-wifi-profile-add`, SHA-256
+  `52a2fe71bab65cc77818dd6a51b026581cc92d7e51ace22bcf189b482e0e467b`.
+  It receives credentials on stdin, commits a root-only canonical profile
+  atomically, and only then removes every older spelling of the same SSID. It
+  never reloads wireless, scans, roams, or edits `/etc/config/wireless`, so
+  saving cannot interrupt the current association.
 - The first deployed selector had no boot grace and began active scans while
   the Realtek driver was still in its ~155-second startup recovery. After both
   the workstation and Deck were rebooted, the Deck was reachable on both LAN
   and WireGuard; the earlier conclusion that Ethernet recovery was required
   was incorrect.
-- The installed scripts now match the hardened repository copies: a 240-second
+- The installed scripts match the hardened repository copies: a 240-second
   grace, three confirming scans, PSK-only candidate selection, and automatic
-  rollback. At the user's direction the `deck-wifi` watcher is currently
-  stopped and disabled so it cannot disturb the working link. All 32 imported
-  root-only profiles remain stored, but automatic profile failover is inactive.
+  rollback. On 2026-07-13 the existing root-only `net1` profile was verified
+  against the passphrase supplied by the user and had `AutoConnect=true`; the
+  credential is intentionally not recorded here. The `deck-wifi` watcher was
+  then enabled and started without reloading wireless. The live association,
+  IPv4 default route, and WireGuard tunnel remained up. The user then disabled
+  the original hotspot for a live failover test. After the grace and confirming
+  scans, the selector switched to `net1` and reached associated IPv4
+  default-route state in 17 seconds; the Deck obtained `10.0.1.6/24`, and
+  WireGuard resumed with a fresh bidirectional handshake. All 32 imported
+  root-only profiles remain stored, and automatic failover is active only after
+  the current association has been lost repeatedly.
 
 ## WireGuard
 
@@ -195,20 +356,18 @@ passphrases, WireGuard private keys, or ROM data.
 
 ## Useful checks
 
-The last remote session ended while restoring the supervised menu after a
-direct Mario audio diagnostic, and the Deck was then taken off-site. Do not
-assume the final restore command completed. On the next connection, first
-ensure there is no unmanaged `infones` process and that procd owns exactly one
-`deck-menu`; if necessary, stop the exact diagnostic emulator process and
-start `/etc/init.d/nes-deck`. Do not reboot or alter Wi-Fi/WireGuard merely to
-perform this check. The Deck retains its Wi-Fi profiles and WireGuard key, so
-the user's other laptop should be able to reach it over the existing tunnel
-when both are online; no credential migration is required. The two newest
-interaction changes still need physical
-confirmation: tap SOUND OFF and then SOUND ON to hear the chime, then launch a
-game and hold anywhere continuously for two seconds to return. Relevant log
-messages are `return hold started`, `return hold cancelled`, and `return hold
-complete`.
+As of 2026-07-13 the supervised tabbed menu is running with one `deck-menu`
+process and no unmanaged emulator process. The live generated ten-game catalog matches
+the fallback, `net1` remains associated with its IPv4 default route, all 32
+saved PSK profiles remain present, and WireGuard is reachable. No wireless
+reload or UCI edit was used during deployment. The rollback copy for this
+multi-system deployment is
+`/mnt/data/nes-deck/backups/20260713-115636-pre-multisystem/`; the immediately
+preceding menu and emulator binaries are additionally retained in
+`20260713-120436-pre-console-tabs/` and
+`20260713-120736-pre-rom-read-fix/`. The volume/keymap deployment backup is
+`/mnt/data/nes-deck/backup-controls-20260713-1535/`; the restarted service
+initialized volume 42 and US terminal keys without changing Wi-Fi.
 
 ```sh
 # Stock UI must stay disabled
@@ -219,8 +378,9 @@ pgrep -x bmc                         # expected no output
 /etc/init.d/nes-deck status
 pidof deck-menu
 pidof infones
-logread -e nes-deck-menu
-hexdump -C /mnt/data/nes-deck/state/menu-sound.state
+tail -n 100 /mnt/data/nes-deck/log/deck-menu.log
+hexdump -C /mnt/data/nes-deck/state/menu-volume.state
+hexdump -C /mnt/data/nes-deck/state/terminal-keymap.state
 
 # ECL and generated catalog
 /usr/bin/ecl --norc --eval '(format t "~A~%" (lisp-implementation-version))' \

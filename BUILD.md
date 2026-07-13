@@ -1,6 +1,7 @@
-# Building InfoNES for Braiins Forge Deck
+# Building Retro Deck emulators for Braiins Forge Deck
 
-This guide explains how to build InfoNES from source for the Braiins Forge Deck.
+This guide explains how to build the NES, GB/GBC, and CHIP-8 emulators and
+launcher for the Braiins Forge Deck.
 
 ## Prerequisites
 
@@ -51,7 +52,7 @@ For active development and iteration, use the Nix development environment:
 
    **Note:** The first run downloads the ARM toolchain and builds dependencies, which can take several minutes.
 
-3. Build using nix:
+3. Build using Nix:
    ```bash
    nix build
    ```
@@ -61,6 +62,9 @@ For active development and iteration, use the Nix development environment:
    Build the static ARM touch launcher and the minimal ECL runtime separately:
    ```bash
    nix build .#deck-menu -o result-menu
+   nix build .#gb-deck -o result-gb-deck
+   nix build .#chip8-deck -o result-chip8-deck
+   nix build .#fbterm-deck -o result-fbterm
    nix build -f nix/ecl-arm-static.nix -o result-ecl
    ```
 
@@ -75,12 +79,35 @@ For active development and iteration, use the Nix development environment:
    ./nes_audio_test
 
    g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
+     tests/joypad_input_test.cpp -pthread -o joypad-input-test
+   ./joypad-input-test
+
+   g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
      src/deck_menu.cpp -o deck-menu-host
    ./deck-menu-host --geometry-test
    g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
      tests/deck_menu_test.cpp -o deck-menu-test
    ./deck-menu-test
+   tests/deck_wifi_profile_add_test.sh
+   tests/retro_terminal_test.sh
+
+   g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
+     tests/deck_runtime_test.cpp src/deck_runtime.cpp -o deck-runtime-test
+   ./deck-runtime-test
+
+   octo_src=$(nix eval --raw --impure --expr \
+     '(builtins.getFlake ("path:" + toString ./.)).inputs."c-octo-src".outPath')
+   cc -std=c99 -O2 -Wall -Wextra -Werror -I"$octo_src/src" \
+     tests/chip8_core_test.c src/chip8_core.c -o chip8-core-test
+   ./chip8-core-test
    ```
+
+The GB/GBC package builds the GPL-2.0-only Gambatte libretro core at the exact
+revision in `flake.lock`, using Cortex-A7/NEON flags, LTO, and native RGB565
+output, then statically links it to `src/gb_deck.cpp`. The CHIP-8 package
+statically links the pinned MIT c-octo core through `src/chip8_core.c`. Both use
+the shared framebuffer/audio implementation in `src/deck_runtime.cpp` and the
+same stable two-controller discovery as InfoNES.
 
 ## Option 2: Manual Toolchain Setup
 
@@ -148,6 +175,14 @@ arm-linux-gnueabihf-g++ -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
   -static src/deck_menu.cpp -o deck-menu
 ```
 
+The integrated terminal is built from the vendored GPL-2 source and bundles a
+DejaVu Sans Mono runtime font, a static `loadkeys`, and self-contained US ANSI
+and Czech QWERTZ console maps:
+
+```bash
+nix build .#fbterm-deck -o result-fbterm
+```
+
 ## Display Configuration
 
 The Braiins Forge Deck uses a portrait LCD in landscape mode with specific framebuffer requirements. Our patches include:
@@ -162,17 +197,26 @@ These modifications are in `src/InfoNES_System_Deck.cpp` and `src/joypad_input.c
 The Deck framebuffer is 600x1280 RGB565 with a 1280-byte pitch (80 bytes of
 padding per row). The port reads `line_length` and `smem_len` from
 `FBIOGET_FSCREENINFO`; do not replace the pitch with `xres * bytes_per_pixel`.
+Only physical columns 0 through 479 are visible. The menu maps that exact
+region to a 1280x480 logical surface. fbterm validates the same geometry and
+uses a 16-pixel safe area for the rounded panel, leaving a 1248x448 terminal
+viewport. Both reject unexpected geometry or RGB channel offsets instead of
+guessing.
 
 Audio uses `/dev/dsp`, backed by ALSA's OSS compatibility plugin. The physical
-I2S device is S16_LE stereo; the emulator supplies S16_LE mono at 44100 Hz and
-the plugin duplicates it to the hardware channels. The port requests eight
-1024-byte periods and retains a signed-16-bit resampling fallback in case
-`SNDCTL_DSP_SPEED` is coerced on another image. PCM gain is intentionally set
-in the mixer because the kernel OSS path bypasses ALSA's userspace softvol.
-The touch launcher passes `INFONES_VOLUME_PERCENT=42` when its sound setting is
-on and `0` when it is off. Change `VOLUME_ON` in
-`deploy/menu/deck-menu-launcher` and `deploy/menu/nes-deck.init` together to
-tune the enabled level from 0 through 100.
+I2S device is S16_LE stereo; the emulators supply S16_LE mono and the plugin
+duplicates it to the hardware channels. InfoNES and CHIP-8 use 44100 Hz.
+Gambatte produces 32768 Hz, but this Deck's OSS layer falsely echoes that rate
+while the live ALSA stream runs at 32000 Hz. The shared runtime therefore
+requests the real 32000 Hz rate and explicitly resamples Gambatte audio. The
+port requests eight 1024-byte periods. PCM gain is intentionally set in the
+mixer because the kernel OSS path bypasses ALSA's userspace softvol.
+The touch launcher persists an exact volume from 0 through 100 in
+`menu-volume.state` and passes it through both `INFONES_VOLUME_PERCENT` and
+`RETRO_DECK_VOLUME_PERCENT`. The header's minus and plus actions move in
+5-point steps; 0 is mute. `VOLUME_ON` in `deploy/menu/deck-menu-launcher` and
+`deploy/menu/nes-deck.init` is the initial value and the migration value for
+the former `on` sound state.
 
 ## Project Structure
 
@@ -181,8 +225,12 @@ deck-infones/
 ├── flake.nix              # Nix build configuration
 ├── src/
 │   ├── InfoNES_System_Deck.cpp  # Deck framebuffer/display code
-│   ├── deck_menu.cpp            # Touch launcher and persistent sound toggle
-│   ├── joypad_input.cpp         # Optional TTY keyboard input handler
+│   ├── gb_deck.cpp              # Gambatte libretro host
+│   ├── chip8_deck.cpp           # CHIP-8 Deck frontend
+│   ├── chip8_core.c             # c-octo adaptation boundary
+│   ├── deck_runtime.cpp         # Shared framebuffer/audio/frame clock
+│   ├── deck_menu.cpp            # Games, volume, keymap, Wi-Fi, and terminal
+│   ├── joypad_input.cpp         # Two THEGamepads plus keyboard fallback
 │   ├── nes_audio_mixer.h        # Mixer, DC blocker, and rate conversion
 │   └── nes_apu_noise.h          # Tested 15-bit noise clock helpers
 ├── patches/
@@ -191,10 +239,16 @@ deck-infones/
 │   ├── infones-apu-quality.patch  # Event, noise, triangle, and DPCM fixes
 │   └── infones-apu-noise.patch    # Exact noise clocks/length and pulse guard
 ├── tests/
-│   ├── deck_menu_test.cpp      # Catalog, sound state, and geometry checks
+│   ├── deck_menu_test.cpp      # Menu, Wi-Fi UI, child, state, and geometry
+│   ├── deck_wifi_profile_add_test.sh # Atomic profile replacement checks
+│   ├── retro_terminal_test.sh   # Scoped layout load and restoration checks
+│   ├── joypad_input_test.cpp    # THEGamepad mapping and two-player state
+│   ├── chip8_core_test.c        # CHIP-8 pitch and real-ROM core smoke checks
 │   ├── nes_audio_test.cpp       # Host-side mixer/resampler checks
 │   └── nes_apu_noise_test.cpp   # LFSR period and high-rate clock checks
 ├── deploy/menu/                 # Catalog compiler, fallback, and S99 service
+├── deploy/terminal/             # Terminal launcher and private fontconfig
+├── terminal/                    # Vendored GPL-2 fbterm source and provenance
 ├── nix/ecl-arm-static.nix       # Minimal static ARM ECL 26.5.5 runtime
 ├── ops/deck-menu/               # Pinned FOSS ROM/license fetcher
 ├── FOSS_GAMES.md                # Homebrew provenance, licenses, and hashes

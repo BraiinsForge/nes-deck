@@ -1,7 +1,7 @@
 # Deck menu deployment bundle
 
 This directory contains the catalog and boot plumbing for the persistent
-touchscreen menu.  It does not contain ROMs, the emulator, ECL, or the native
+touchscreen menu.  It does not contain ROMs, emulators, ECL, or the native
 `deck-menu` binary.
 
 ## Installed layout
@@ -20,37 +20,59 @@ The launcher also expects:
 
 - `/mnt/data/nes-deck/menu/deck-menu`
 - `/mnt/data/nes-deck/infones`
+- `/mnt/data/nes-deck/gb-deck`
+- `/mnt/data/nes-deck/chip8-deck`
 - `/mnt/data/nes-deck/ecl/bin/ecl.bin` (ECL 26.5.5)
 - `/mnt/data/nes-deck/ecl/lib/ecl/` (the ECL runtime directory)
+- `/mnt/data/nes-deck/terminal/retro-terminal`
+- `/mnt/data/nes-deck/terminal/{fbterm,loadkeys,keymaps/}`
+- `/usr/sbin/deck-wifi-profile-add`
 - the ROM paths listed in `games.sexp`
 
 The launcher exports the exact trailing-slash runtime path
-`ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/`.  It initializes persistent sound
-state at `/mnt/data/nes-deck/state/menu-sound.state` to `on`; enabled emulator
-volume is 42 percent through `INFONES_VOLUME_PERCENT=42`.  The generated
-manifest and sound state stay under `/mnt/data/nes-deck/state`.  A bounded
-persistent launcher log is kept at `/mnt/data/nes-deck/log/deck-menu.log`, and
-procd also sends standard output and errors to logd.
+`ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/`. It initializes persistent volume at
+`/mnt/data/nes-deck/state/menu-volume.state` to 42 and terminal layout at
+`/mnt/data/nes-deck/state/terminal-keymap.state` to `us`. A legacy exact
+`on`/`off` sound state migrates to 42/0. The generated manifest and persistent
+control state stay under `/mnt/data/nes-deck/state`. A bounded
+persistent launcher log is kept at `/mnt/data/nes-deck/log/deck-menu.log`.
+The native menu appends child start, exit-status, and signal details there;
+launcher milestones are also sent to logd.
 
-At runtime, tap a game card to launch it. The top-right sound button writes the
-canonical state atomically; ON passes the launcher's enabled volume to InfoNES
-and OFF passes zero. Switching from OFF to ON plays a short two-note
-confirmation chime. A continuous two-second hold anywhere on the touchscreen
-terminates the emulator child and redraws the menu. Touch does not supply NES
+At runtime, select the NES, Game Boy, Game Boy Color, or CHIP-8 tab, then tap a
+game card to launch it. Only the active console's cards are shown, and each
+card retains its original catalog index for launch routing. Cards display only
+the game title;
+descriptions and license labels stay out of the launcher. Redistribution and
+license details remain in `FOSS_GAMES.md` and the installed license files. The
+top-right minus and plus buttons atomically persist volume in 5-point steps;
+zero mutes and every nonzero adjustment plays a short confirmation chime. The
+selected volume is passed to every emulator. A continuous two-second hold
+anywhere on the touchscreen
+terminates the emulator child and redraws the menu. Touch does not supply
 controller input; a keyboard or mapped controller is still needed to press
 Start and play.
 
+The computer icon launches `/mnt/data/nes-deck/terminal/retro-terminal`. The
+adjacent keymap action toggles between US ANSI and Czech QWERTZ. The terminal
+launcher applies that map for fbterm and restores US when the shell exits or
+the menu terminates it. The WIFI button opens the on-screen keyboard and passes
+credentials to
+`deck-wifi-profile-add` over stdin, never argv. The helper only writes a
+root-only profile; it does not scan, reload, roam, or alter the active network.
+Saving an existing SSID commits the canonical replacement first and then
+removes duplicate plain/hex profile names.
+
 ## Catalog contract
 
-`games.sexp` contains one schema-versioned property list.  Each game has these
-six required keys:
+`games.sexp` contains one schema-versioned property list. Each game has these
+five required keys:
 
 1. `:id` - lowercase stable identifier
 2. `:title` - menu title
-3. `:rom` - normalized absolute `.nes` path under `/mnt/data/nes-deck/`
-4. `:description` - short menu copy
+3. `:system` - one of `:nes`, `:gb`, `:gbc`, or `:chip8`
+4. `:rom` - normalized absolute path with the system's required extension
 5. `:color` - `#RRGGBB` accent color
-6. `:license` - concise redistribution/license label
 
 `compile-catalog.lisp` permits no missing, duplicate, or unknown keys.  It
 rejects duplicate IDs and ROM paths, dotted/circular/oversized forms, reader
