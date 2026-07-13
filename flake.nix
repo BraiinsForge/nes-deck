@@ -48,7 +48,7 @@
           nativeBuildInputs = [ pkgs.gnumake ];
           buildInputs = [ pkgsCross.glibc.static ];
 
-          NIX_CFLAGS_COMPILE = "-static -O3 -fsigned-char";
+          NIX_CFLAGS_COMPILE = "-static -O3 -fsigned-char -fomit-frame-pointer -marm -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard";
           NIX_LDFLAGS = "-static";
 
           # The pinned upstream file uses CRLF; normalize it so our focused
@@ -86,7 +86,9 @@
             CROSS_COMPILE ?=
             CC = $(CROSS_COMPILE)gcc
             CXX = $(CROSS_COMPILE)g++
-            CFLAGS = -O3 -fsigned-char -DNDEBUG
+            CFLAGS = -O3 -fsigned-char -fomit-frame-pointer -marm \
+                     -march=armv7-a -mtune=cortex-a7 \
+                     -mfpu=neon-vfpv4 -mfloat-abi=hard -DNDEBUG
             CXXFLAGS = $(CFLAGS)
             LDFLAGS = -static -lpthread -lm
 

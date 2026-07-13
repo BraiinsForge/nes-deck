@@ -29,6 +29,18 @@ passphrases, WireGuard private keys, or ROM data.
   centered at logical x=384..895 and fills the active y=0..479 panel. Earlier
   offsets shifted it 25 pixels left, left a 40-pixel gap above it, and clipped
   the final 20 NES scanlines.
+- A 2026-07-13 Mario benchmark found that the original per-pixel mapped writes
+  consumed 10.8 to 11.0 ms per frame, with a 14.9 ms observed maximum, despite
+  audio pacing holding roughly 60 FPS. Building a complete 491,520-byte frame
+  in cacheable RAM and publishing contiguous rows reduced the same path to
+  4.7 ms average and 7.4 ms maximum. The `stmdrmfb` driver implements
+  `FBIO_WAITFORVSYNC`, but synchronous use raised the average to roughly
+  11.8 ms and introduced 20 to 23 ms phase-miss spikes. It is therefore an
+  opt-in `INFONES_VSYNC=1` diagnostic; fast staged publication is the default.
+  A follow-up long Mario probe captured distinct framebuffer hashes at 3, 20,
+  and 40 seconds, confirming changing gameplay/demo frames. Every complete
+  120-frame window stayed between 59.73 and 60.53 FPS while render averages
+  remained between 4.41 and 4.77 ms.
 
 ## Touchscreen
 

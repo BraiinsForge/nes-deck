@@ -208,6 +208,12 @@ guessing.
 Audio uses `/dev/dsp`, backed by ALSA's OSS compatibility plugin. The physical
 I2S device is S16_LE stereo; the emulators supply S16_LE mono and the plugin
 duplicates it to the hardware channels. InfoNES and CHIP-8 use 44100 Hz.
+
+InfoNES builds each rotated 512x480 image in a cacheable staging buffer and
+then publishes contiguous framebuffer rows. Set `INFONES_RUNTIME_DIAGNOSTICS=1`
+for 120-frame FPS and render-time windows. `INFONES_VSYNC=1` enables the
+driver's blocking fbdev synchronization for experiments; it is disabled by
+default because live Mario measurements showed audio/panel phase stalls.
 Gambatte produces 32768 Hz, but this Deck's OSS layer falsely echoes that rate
 while the live ALSA stream runs at 32000 Hz. The shared runtime therefore
 requests the real 32000 Hz rate and explicitly resamples Gambatte audio. The

@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "../InfoNES.h"
@@ -59,6 +60,16 @@ static size_t fb_map_size;
 static int fb_bpp;
 static int fb_stride;
 static int fb_scaling = 1;
+static uint16_t *fb_staging = NULL;
+static int fb_staging_first_row = 0;
+static int fb_staging_rows = 0;
+static int fb_staging_columns = 0;
+static int fb_vsync_state = 0;
+static int runtime_diagnostics = 0;
+static uint64_t diagnostic_frames = 0;
+static uint64_t diagnostic_render_nanoseconds = 0;
+static uint64_t diagnostic_max_render_nanoseconds = 0;
+static int64_t diagnostic_window_started = 0;
 
 extern "C" int InitJoypadInput(void);
 extern "C" unsigned int GetJoypadInput(unsigned int player);
@@ -87,6 +98,72 @@ static volatile sig_atomic_t shutdown_requested = 0;
 static void request_shutdown(int signal_number) {
   (void)signal_number;
   shutdown_requested = 1;
+}
+
+static int64_t monotonic_nanoseconds(void) {
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    return 0;
+  return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
+}
+
+static int environment_flag(const char *name, int default_value) {
+  const char *value = getenv(name);
+  if (!value)
+    return default_value;
+  if (strcmp(value, "1") == 0)
+    return 1;
+  if (strcmp(value, "0") == 0)
+    return 0;
+  printf("InfoNES: Ignoring invalid %s=%s; expected 0 or 1\n", name, value);
+  return default_value;
+}
+
+static void record_render_time(int64_t started_at) {
+  if (!runtime_diagnostics || started_at <= 0)
+    return;
+  const int64_t finished_at = monotonic_nanoseconds();
+  if (finished_at <= started_at)
+    return;
+  const uint64_t elapsed = (uint64_t)(finished_at - started_at);
+  ++diagnostic_frames;
+  diagnostic_render_nanoseconds += elapsed;
+  if (elapsed > diagnostic_max_render_nanoseconds)
+    diagnostic_max_render_nanoseconds = elapsed;
+  if (diagnostic_window_started == 0)
+    diagnostic_window_started = started_at;
+  if (diagnostic_frames < 120)
+    return;
+  const double wall_seconds =
+      (double)(finished_at - diagnostic_window_started) / 1000000000.0;
+  const double average_ms =
+      (double)diagnostic_render_nanoseconds / diagnostic_frames / 1000000.0;
+  const double maximum_ms =
+      (double)diagnostic_max_render_nanoseconds / 1000000.0;
+  const double frames_per_second = diagnostic_frames / wall_seconds;
+  printf("InfoNES: Video diagnostics frames=%llu fps=%.2f render_avg_ms=%.3f "
+         "render_max_ms=%.3f\n",
+         (unsigned long long)diagnostic_frames, frames_per_second, average_ms,
+         maximum_ms);
+  diagnostic_frames = 0;
+  diagnostic_render_nanoseconds = 0;
+  diagnostic_max_render_nanoseconds = 0;
+  diagnostic_window_started = finished_at;
+}
+
+static void wait_for_vsync(void) {
+  if (fb_vsync_state == 0 || fb_fd < 0)
+    return;
+  int argument = 0;
+  if (ioctl(fb_fd, FBIO_WAITFORVSYNC, &argument) == 0) {
+    if (fb_vsync_state == 1)
+      printf("InfoNES: Framebuffer vsync enabled\n");
+    fb_vsync_state = 2;
+    return;
+  }
+  if (fb_vsync_state == 1)
+    printf("InfoNES: Framebuffer vsync unavailable: %s\n", strerror(errno));
+  fb_vsync_state = 0;
 }
 
 /*-------------------------------------------------------------------*/
@@ -206,6 +283,32 @@ static int lcd_fb_init(void) {
 
   printf("InfoNES: Display scaling: %dx\n", fb_scaling);
   printf("InfoNES: Rotation: %s\n", FB_ROTATION_90 ? "90 degrees" : "none");
+
+#if FB_ROTATION_90
+  if (fb_bpp == 2 && fb_scaling == 2) {
+    fb_staging_rows = NES_DISP_WIDTH * fb_scaling;
+    fb_staging_columns = NES_DISP_HEIGHT * fb_scaling;
+    fb_staging_first_row =
+        ((int)fb_var.xres - 1) -
+        (((NES_DISP_WIDTH - 1) * fb_scaling) + FB_OFFSET_X);
+    const size_t staging_pixels =
+        (size_t)fb_staging_rows * fb_staging_columns;
+    fb_staging = (uint16_t *)malloc(staging_pixels * sizeof(*fb_staging));
+    if (fb_staging)
+      printf("InfoNES: Staged video publisher enabled (%zu bytes)\n",
+             staging_pixels * sizeof(*fb_staging));
+    else
+      printf("InfoNES: Cannot allocate staged video frame; using direct "
+             "framebuffer writes\n");
+  }
+#endif
+  runtime_diagnostics =
+      environment_flag("INFONES_RUNTIME_DIAGNOSTICS", FALSE);
+  fb_vsync_state = environment_flag("INFONES_VSYNC", FALSE) ? 1 : 0;
+  if (runtime_diagnostics)
+    printf("InfoNES: Runtime video diagnostics enabled\n");
+  if (fb_vsync_state == 0)
+    printf("InfoNES: Framebuffer vsync disabled\n");
 
   return 0;
 }
@@ -508,46 +611,66 @@ void InfoNES_LoadFrame(void) {
   if (fb_fd < 0 || !fb_mem)
     return;
 
+  const int64_t render_started =
+      runtime_diagnostics ? monotonic_nanoseconds() : 0;
+
   int x, y, sx, sy;
   uint16_t color;
   int bpp = fb_bpp;
 
 #if FB_ROTATION_90
-  // Rotated rendering for landscape-oriented portrait display
-  // Same transformation as fbDOOM
-  for (y = 0; y < NES_DISP_HEIGHT; y++) {
+  if (fb_staging) {
+    const size_t staging_row_bytes =
+        (size_t)fb_staging_columns * sizeof(*fb_staging);
     for (x = 0; x < NES_DISP_WIDTH; x++) {
-      // Get NES pixel color (already in RGB565 from WorkFrame)
-      color = WorkFrame[y * NES_DISP_WIDTH + x];
+      const int first_physical_row =
+          ((int)fb_var.xres - 1) - (x * fb_scaling + FB_OFFSET_X);
+      uint16_t *destination =
+          fb_staging +
+          (size_t)(first_physical_row - fb_staging_first_row) *
+              fb_staging_columns;
+      for (y = 0; y < NES_DISP_HEIGHT; y++) {
+        color = rgb555_to_fb(WorkFrame[y * NES_DISP_WIDTH + x]);
+        destination[y * fb_scaling] = color;
+        destination[y * fb_scaling + 1] = color;
+      }
+      memcpy(destination + fb_staging_columns, destination,
+             staging_row_bytes);
+    }
 
-      // Convert to framebuffer format using actual FB offsets
-      color = rgb555_to_fb(color);
-
-      // Apply transformation: offset, mirror X, map to rotated display
-      // Same coordinate transformation as fbDOOM
-      int offset_x = x * fb_scaling + FB_OFFSET_X;
-      int phys_col = ((int)fb_var.xres - 1) - offset_x;
-      int phys_row = y * fb_scaling + FB_OFFSET_Y;
-
-      // Draw scaled pixel
-      for (sy = 0; sy < fb_scaling; sy++) {
-        for (sx = 0; sx < fb_scaling; sx++) {
-          int px = phys_row + sy;
-          int py = phys_col + sx;
-
-          // Bounds check against display dimensions
-          if (px >= 0 && px < DISPLAY_HEIGHT && px < (int)fb_var.xres &&
-              py >= 0 && py < DISPLAY_WIDTH && py < (int)fb_var.yres) {
-
-            // Write pixel to frame buffer
-            // py (col) indexes rows, px (row) indexes columns (rotation swap)
-            unsigned char *pixel = fb_mem + ((size_t)py * fb_stride) +
-                                   ((size_t)px * bpp);
-
-            if (bpp == 2) {
-              *(uint16_t *)pixel = color;
-            } else if (bpp == 4) {
-              *(uint32_t *)pixel = color;
+    // Build the complete rotated image in cacheable memory first. If optional
+    // scanout synchronization is enabled, wait only after staging is complete.
+    wait_for_vsync();
+    for (int row = 0; row < fb_staging_rows; row++) {
+      unsigned char *destination =
+          fb_mem + (size_t)(fb_staging_first_row + row) * fb_stride +
+          (size_t)FB_OFFSET_Y * fb_bpp;
+      memcpy(destination,
+             fb_staging + (size_t)row * fb_staging_columns,
+             staging_row_bytes);
+    }
+  } else {
+    wait_for_vsync();
+    // Compatibility path for framebuffer layouts other than the live Deck's
+    // 600x1280 RGB565 surface.
+    for (y = 0; y < NES_DISP_HEIGHT; y++) {
+      for (x = 0; x < NES_DISP_WIDTH; x++) {
+        color = rgb555_to_fb(WorkFrame[y * NES_DISP_WIDTH + x]);
+        int offset_x = x * fb_scaling + FB_OFFSET_X;
+        int phys_col = ((int)fb_var.xres - 1) - offset_x;
+        int phys_row = y * fb_scaling + FB_OFFSET_Y;
+        for (sy = 0; sy < fb_scaling; sy++) {
+          for (sx = 0; sx < fb_scaling; sx++) {
+            int px = phys_row + sy;
+            int py = phys_col + sx;
+            if (px >= 0 && px < DISPLAY_HEIGHT && px < (int)fb_var.xres &&
+                py >= 0 && py < DISPLAY_WIDTH && py < (int)fb_var.yres) {
+              unsigned char *pixel = fb_mem + ((size_t)py * fb_stride) +
+                                     ((size_t)px * bpp);
+              if (bpp == 2)
+                *(uint16_t *)pixel = color;
+              else if (bpp == 4)
+                *(uint32_t *)pixel = color;
             }
           }
         }
@@ -555,6 +678,7 @@ void InfoNES_LoadFrame(void) {
     }
   }
 #else
+  wait_for_vsync();
   // Non-rotated rendering (for reference/testing)
   for (y = 0; y < NES_DISP_HEIGHT; y++) {
     for (x = 0; x < NES_DISP_WIDTH; x++) {
@@ -583,7 +707,7 @@ void InfoNES_LoadFrame(void) {
     }
   }
 #endif
-
+  record_render_time(render_started);
 }
 
 /*===================================================================*/
