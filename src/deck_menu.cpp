@@ -914,6 +914,27 @@ struct Rect {
 
 typedef std::vector<uint16_t> Canvas;
 
+bool stage_canvas_for_scanout(const Canvas &canvas, size_t row_words,
+                              std::vector<uint16_t> *frame) {
+  if (!frame ||
+      canvas.size() !=
+          static_cast<size_t>(kLogicalWidth * kLogicalHeight) ||
+      row_words < static_cast<size_t>(kPhysicalWidth) ||
+      frame->size() < row_words * static_cast<size_t>(kPhysicalHeight))
+    return false;
+
+  for (int logical_x = 0; logical_x < kLogicalWidth; ++logical_x) {
+    const int physical_row = kPhysicalHeight - 1 - logical_x;
+    uint16_t *destination =
+        &(*frame)[static_cast<size_t>(physical_row) * row_words];
+    for (int logical_y = 0; logical_y < kLogicalHeight; ++logical_y) {
+      destination[logical_y] =
+          canvas[static_cast<size_t>(logical_y) * kLogicalWidth + logical_x];
+    }
+  }
+  return true;
+}
+
 void fill_rect(Canvas *canvas, const Rect &rect, uint16_t color) {
   if (!canvas || canvas->size() !=
                      static_cast<size_t>(kLogicalWidth * kLogicalHeight))
@@ -1518,6 +1539,7 @@ public:
       close_device();
       return false;
     }
+    frame_.assign(map_size_ / sizeof(uint16_t), 0);
     if (ioctl(fd_, FBIOBLANK, FB_BLANK_UNBLANK) != 0 && errno != EINVAL &&
         errno != ENOTTY) {
       std::cerr << "deck-menu: warning: cannot unblank framebuffer: "
@@ -1535,16 +1557,24 @@ public:
       return false;
     }
 
-    std::memset(memory_, 0, map_size_);
-    for (int logical_x = 0; logical_x < kLogicalWidth; ++logical_x) {
-      const int physical_row = kPhysicalHeight - 1 - logical_x;
-      uint16_t *destination = reinterpret_cast<uint16_t *>(
-          memory_ + static_cast<size_t>(physical_row) * stride_);
-      for (int logical_y = 0; logical_y < kLogicalHeight; ++logical_y) {
-        destination[logical_y] =
-            canvas[static_cast<size_t>(logical_y) * kLogicalWidth +
-                   logical_x];
-      }
+    const size_t row_words =
+        static_cast<size_t>(stride_) / sizeof(uint16_t);
+    if (!stage_canvas_for_scanout(canvas, row_words, &frame_)) {
+      if (error)
+        *error = "framebuffer staging buffer is unavailable";
+      return false;
+    }
+
+    // Build the complete rotated image in cacheable RAM before touching live
+    // scanout. Publishing finished rows avoids the visible black intermediate
+    // frame caused by clearing framebuffer memory between menu screens.
+    const size_t active_row_bytes =
+        static_cast<size_t>(kLogicalHeight) * sizeof(uint16_t);
+    for (int physical_row = 0; physical_row < kPhysicalHeight;
+         ++physical_row) {
+      const size_t offset = static_cast<size_t>(physical_row) * row_words;
+      std::memcpy(memory_ + static_cast<size_t>(physical_row) * stride_,
+                  &frame_[offset], active_row_bytes);
     }
     return true;
   }
@@ -1560,6 +1590,7 @@ public:
     }
     map_size_ = 0;
     stride_ = 0;
+    frame_.clear();
   }
 
 private:
@@ -1567,6 +1598,7 @@ private:
   unsigned char *memory_;
   size_t map_size_;
   int stride_;
+  std::vector<uint16_t> frame_;
 };
 
 bool bit_is_set(const unsigned long *bits, unsigned int bit) {
@@ -2376,6 +2408,20 @@ int geometry_test() {
       !seen[0 * kPhysicalWidth + 479] ||
       seen[0 * kPhysicalWidth + 480]) {
     std::cerr << "geometry-test: corner or unused-region check failed\n";
+    return 1;
+  }
+
+  Canvas canvas(static_cast<size_t>(kLogicalWidth * kLogicalHeight), 0);
+  canvas[0] = 0x1234;
+  canvas[canvas.size() - 1] = 0xabcd;
+  std::vector<uint16_t> frame(
+      static_cast<size_t>(kPhysicalWidth * kPhysicalHeight), 0xdead);
+  if (!stage_canvas_for_scanout(canvas, kPhysicalWidth, &frame) ||
+      frame[static_cast<size_t>(kPhysicalHeight - 1) * kPhysicalWidth] !=
+          0x1234 ||
+      frame[kLogicalHeight - 1] != 0xabcd ||
+      frame[kLogicalHeight] != 0xdead) {
+    std::cerr << "geometry-test: staged scanout transform failed\n";
     return 1;
   }
   std::cout << "geometry-test: OK logical=1280x480 physical=600x1280 "
