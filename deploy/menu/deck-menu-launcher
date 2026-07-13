@@ -15,11 +15,17 @@ LOG_DIR=$BASE/log
 TMP_DIR=$STATE_DIR/tmp
 TMPDIR=$TMP_DIR
 MENU=$MENU_DIR/deck-menu
-EMULATOR=$BASE/infones
+NES_EMULATOR=$BASE/infones
+GB_EMULATOR=$BASE/gb-deck
+CHIP8_EMULATOR=$BASE/chip8-deck
 CATALOG=$MENU_DIR/games.sexp
 FALLBACK_MANIFEST=$MENU_DIR/games.tsv
 GENERATED_MANIFEST=$STATE_DIR/games.tsv
-SOUND_STATE=$STATE_DIR/menu-sound.state
+VOLUME_STATE=$STATE_DIR/menu-volume.state
+LEGACY_SOUND_STATE=$STATE_DIR/menu-sound.state
+KEYMAP_STATE=$STATE_DIR/terminal-keymap.state
+TERMINAL=$BASE/terminal/retro-terminal
+WIFI_HELPER=/usr/sbin/deck-wifi-profile-add
 COMPILER=$MENU_DIR/compile-catalog.lisp
 ECL=$BASE/ecl/bin/ecl.bin
 ECLDIR=$BASE/ecl/lib/ecl/
@@ -28,6 +34,7 @@ VOLUME_ON=42
 
 export PATH LC_ALL ECLDIR TMPDIR
 export INFONES_VOLUME_PERCENT=$VOLUME_ON
+export RETRO_DECK_VOLUME_PERCENT=$VOLUME_ON
 
 umask 077
 
@@ -57,10 +64,12 @@ log_message() {
 	logger -t nes-deck-menu "$message" 2>/dev/null || :
 }
 
-write_default_sound_state() {
-	temporary_state=$SOUND_STATE.tmp.$$
-	if printf '%s\n' on > "$temporary_state" &&
-		mv -f "$temporary_state" "$SOUND_STATE"; then
+write_state() {
+	state_path=$1
+	state_value=$2
+	temporary_state=$state_path.tmp.$$
+	if printf '%s\n' "$state_value" > "$temporary_state" &&
+		mv -f "$temporary_state" "$state_path"; then
 		return 0
 	fi
 	rm -f "$temporary_state"
@@ -73,8 +82,24 @@ if [ ! -x "$MENU" ]; then
 	log_message "menu is missing or not executable: $MENU"
 	exit 1
 fi
-if [ ! -x "$EMULATOR" ]; then
-	log_message "emulator is missing or not executable: $EMULATOR"
+if [ ! -x "$NES_EMULATOR" ]; then
+	log_message "NES emulator is missing or not executable: $NES_EMULATOR"
+	exit 1
+fi
+if [ ! -x "$GB_EMULATOR" ]; then
+	log_message "GB/GBC emulator is missing or not executable: $GB_EMULATOR"
+	exit 1
+fi
+if [ ! -x "$CHIP8_EMULATOR" ]; then
+	log_message "CHIP-8 emulator is missing or not executable: $CHIP8_EMULATOR"
+	exit 1
+fi
+if [ ! -x "$TERMINAL" ]; then
+	log_message "terminal launcher is missing or not executable: $TERMINAL"
+	exit 1
+fi
+if [ ! -x "$WIFI_HELPER" ]; then
+	log_message "wifi profile helper is missing or not executable: $WIFI_HELPER"
 	exit 1
 fi
 if [ ! -r "$FALLBACK_MANIFEST" ] || [ ! -s "$FALLBACK_MANIFEST" ]; then
@@ -82,23 +107,57 @@ if [ ! -r "$FALLBACK_MANIFEST" ] || [ ! -s "$FALLBACK_MANIFEST" ]; then
 	exit 1
 fi
 
-sound_value=
-sound_size=0
-if [ -r "$SOUND_STATE" ]; then
-	IFS= read -r sound_value < "$SOUND_STATE" || sound_value=
-	sound_size=$(wc -c < "$SOUND_STATE" 2>/dev/null) || sound_size=0
-	case $sound_size in
-		''|*[!0-9]*) sound_size=0 ;;
+volume_value=
+volume_size=0
+if [ -r "$VOLUME_STATE" ]; then
+	IFS= read -r volume_value < "$VOLUME_STATE" || volume_value=
+	volume_size=$(wc -c < "$VOLUME_STATE" 2>/dev/null) || volume_size=0
+	case $volume_size in
+		''|*[!0-9]*) volume_size=0 ;;
 	esac
 fi
-case $sound_value:$sound_size in
-	on:3|off:4) ;;
+volume_valid=false
+case $volume_value in
+	0|[1-9]|[1-9][0-9]|100)
+		expected_size=$((${#volume_value} + 1))
+		if [ "$volume_size" -eq "$expected_size" ]; then
+			volume_valid=true
+		fi
+		;;
+esac
+if [ "$volume_valid" != true ]; then
+	initial_volume=$VOLUME_ON
+	legacy_value=
+	legacy_size=0
+	if [ -r "$LEGACY_SOUND_STATE" ]; then
+		IFS= read -r legacy_value < "$LEGACY_SOUND_STATE" || legacy_value=
+		legacy_size=$(wc -c < "$LEGACY_SOUND_STATE" 2>/dev/null) || legacy_size=0
+	fi
+	case $legacy_value:$legacy_size in
+		off:4) initial_volume=0 ;;
+		on:3) initial_volume=$VOLUME_ON ;;
+	esac
+	if ! write_state "$VOLUME_STATE" "$initial_volume"; then
+		log_message "cannot initialize volume state: $VOLUME_STATE"
+		exit 1
+	fi
+	log_message "initialized game volume to ${initial_volume}%"
+fi
+
+keymap_value=
+keymap_size=0
+if [ -r "$KEYMAP_STATE" ]; then
+	IFS= read -r keymap_value < "$KEYMAP_STATE" || keymap_value=
+	keymap_size=$(wc -c < "$KEYMAP_STATE" 2>/dev/null) || keymap_size=0
+fi
+case $keymap_value:$keymap_size in
+	us:3|cz:3) ;;
 	*)
-		if ! write_default_sound_state; then
-			log_message "cannot initialize sound state: $SOUND_STATE"
+		if ! write_state "$KEYMAP_STATE" us; then
+			log_message "cannot initialize terminal keymap state: $KEYMAP_STATE"
 			exit 1
 		fi
-		log_message "initialized sound state to on (emulator volume ${VOLUME_ON}%)"
+		log_message "initialized terminal keymap to US ANSI"
 		;;
 esac
 
@@ -117,8 +176,14 @@ else
 	log_message "ECL catalog compiler unavailable; using checked-in manifest: $FALLBACK_MANIFEST"
 fi
 
-log_message "starting deck-menu with sound state $SOUND_STATE"
+log_message "starting deck-menu with volume state $VOLUME_STATE and keymap state $KEYMAP_STATE"
 exec "$MENU" \
-	--emulator "$EMULATOR" \
-	--sound-state "$SOUND_STATE" \
-	--manifest "$manifest"
+	--nes-emulator "$NES_EMULATOR" \
+	--gb-emulator "$GB_EMULATOR" \
+	--chip8-emulator "$CHIP8_EMULATOR" \
+	--volume-state "$VOLUME_STATE" \
+	--keymap-state "$KEYMAP_STATE" \
+	--terminal "$TERMINAL" \
+	--wifi-helper "$WIFI_HELPER" \
+	--manifest "$manifest" \
+	>> "$LOG_FILE" 2>&1
