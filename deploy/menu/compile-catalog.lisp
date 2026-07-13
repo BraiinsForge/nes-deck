@@ -8,9 +8,10 @@
 (in-package #:nes-deck-catalog)
 
 (defconstant +schema-version+ 3)
-(defconstant +maximum-games+ 18)
+(defconstant +maximum-games+ 64)
 (defconstant +maximum-catalog-bytes+ 65536)
-(defconstant +rom-root+ "/mnt/data/nes-deck/")
+(defconstant +console-rom-root+ "/mnt/data/roms/")
+(defconstant +deck-game-root+ "/mnt/data/nes-deck/games/")
 (defparameter +catalog-keys+ '(:version :games))
 (defparameter +game-keys+
   '(:id :title :system :rom :color))
@@ -125,14 +126,19 @@
 
 (defun validate-rom-path (value system)
   (validate-text-field value "game :rom" 512)
-  (let ((expected-suffix
+  (let* ((system-name (string-downcase (symbol-name system)))
+         (expected-prefix
+           (if (eq system :deck)
+               +deck-game-root+
+               (format nil "~A~A/" +console-rom-root+ system-name)))
+         (expected-suffix
           (cond ((eq system :nes) ".nes")
                 ((eq system :gb) ".gb")
                 ((eq system :gbc) ".gbc")
                 ((eq system :chip8) ".ch8")
                 ((eq system :deck) ".sexp")
                 (t (catalog-error "unsupported game system ~S" system)))))
-    (unless (and (string-prefix-p +rom-root+ value)
+    (unless (and (string-prefix-p expected-prefix value)
                (string-suffix-p expected-suffix value)
                (every #'rom-path-character-p value)
                (not (search "//" value))
@@ -140,7 +146,7 @@
                (not (search "/../" value)))
       (catalog-error
        "game :rom must be a normalized ~A path below ~A"
-       expected-suffix +rom-root+)))
+       expected-suffix expected-prefix)))
   value)
 
 (defun hexadecimal-character-p (character)

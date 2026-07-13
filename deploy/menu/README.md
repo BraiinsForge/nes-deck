@@ -28,7 +28,8 @@ The launcher also expects:
 - `/mnt/data/nes-deck/terminal/retro-terminal`
 - `/mnt/data/nes-deck/terminal/{fbterm,loadkeys,keymaps/}`
 - `/usr/sbin/deck-wifi-profile-add`
-- the ROM paths listed in `games.sexp`
+- `/mnt/data/roms/{nes,gb,gbc,chip8}/` and the ROM paths listed in
+  `games.sexp`
 
 The launcher exports the exact trailing-slash runtime path
 `ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/`. It initializes persistent volume at
@@ -81,7 +82,9 @@ five required keys:
 1. `:id` - lowercase stable identifier
 2. `:title` - menu title
 3. `:system` - one of `:nes`, `:gb`, `:gbc`, `:chip8`, or `:deck`
-4. `:rom` - normalized absolute path with the system's required extension
+4. `:rom` - normalized absolute path below `/mnt/data/roms/<system>/` with the
+   system's required extension; Deck applications stay below
+   `/mnt/data/nes-deck/games/`
 5. `:color` - exact canonical xterm-256 `#RRGGBB` accent color
 
 `compile-catalog.lisp` permits no missing, duplicate, or unknown keys. It

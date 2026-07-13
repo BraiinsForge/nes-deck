@@ -7,67 +7,62 @@
   ((:id "mario"
    :title "SUPER MARIO BROS."
    :system :nes
-   :rom "/mnt/data/nes-deck/mario.nes"
+   :rom "/mnt/data/roms/nes/super-mario-bros.nes"
    :color "#D78787")
-  (:id "falling"
-   :title "FALLING"
-   :system :nes
-   :rom "/mnt/data/nes-deck/roms/falling.nes"
-   :color "#8787D7")
-  (:id "thwaite"
-   :title "THWAITE"
-   :system :nes
-   :rom "/mnt/data/nes-deck/roms/thwaite.nes"
-   :color "#D7AF87")
-  (:id "concentration-room"
-   :title "CONCENTRATION ROOM"
-   :system :nes
-   :rom "/mnt/data/nes-deck/roms/croom.nes"
-   :color "#87AFAF")
-  (:id "robotfindskitten"
-   :title "ROBOTFINDSKITTEN"
-   :system :nes
-   :rom "/mnt/data/nes-deck/roms/robotfindskitten.nes"
-   :color "#AFD787")
   (:id "micro-mages"
    :title "MICRO MAGES"
    :system :nes
-   :rom "/mnt/data/nes-deck/roms/micro-mages.nes"
+   :rom "/mnt/data/roms/nes/micro-mages.nes"
    :color "#D787AF")
-  (:id "adjustris"
-   :title "ADJUSTRIS"
-   :system :gb
-   :rom "/mnt/data/nes-deck/roms/adjustris.gb"
-   :color "#AFAF5F")
+  (:id "kirbys-adventure"
+   :title "KIRBY'S ADVENTURE"
+   :system :nes
+   :rom "/mnt/data/roms/nes/kirbys-adventure.nes"
+   :color "#D787AF")
+  (:id "metroid"
+   :title "METROID"
+   :system :nes
+   :rom "/mnt/data/roms/nes/metroid.nes"
+   :color "#8787D7")
+  (:id "tetris"
+   :title "TETRIS"
+   :system :nes
+   :rom "/mnt/data/roms/nes/tetris.nes"
+   :color "#87AFAF")
   (:id "pokemon-red"
    :title "POKEMON RED"
    :system :gb
-   :rom "/mnt/data/nes-deck/roms/pokemon-red.gb"
+   :rom "/mnt/data/roms/gb/pokemon-red.gb"
    :color "#D78787")
-  (:id "geometrix"
-   :title "GEOMETRIX"
-   :system :gbc
-   :rom "/mnt/data/nes-deck/roms/geometrix.gbc"
-   :color "#87AFD7")
+  (:id "final-fantasy-legend-iii"
+   :title "FINAL FANTASY LEGEND III"
+   :system :gb
+   :rom "/mnt/data/roms/gb/final-fantasy-legend-iii.gb"
+   :color "#D7D787")
+  (:id "kirbys-dream-land"
+   :title "KIRBY'S DREAM LAND"
+   :system :gb
+   :rom "/mnt/data/roms/gb/kirbys-dream-land.gb"
+   :color "#AFAFAF")
   (:id "donkey-kong-country"
    :title "DONKEY KONG COUNTRY"
    :system :gbc
-   :rom "/mnt/data/nes-deck/roms/donkey-kong-country.gbc"
+   :rom "/mnt/data/roms/gbc/donkey-kong-country.gbc"
    :color "#D7AF87")
   (:id "super-mario-bros-deluxe"
    :title "SUPER MARIO BROS. DELUXE"
    :system :gbc
-   :rom "/mnt/data/nes-deck/roms/super-mario-bros-deluxe.gbc"
+   :rom "/mnt/data/roms/gbc/super-mario-bros-deluxe.gbc"
    :color "#D78787")
   (:id "outlaw"
    :title "OUTLAW"
    :system :chip8
-   :rom "/mnt/data/nes-deck/roms/outlaw.ch8"
+   :rom "/mnt/data/roms/chip8/outlaw.ch8"
    :color "#AF875F")
   (:id "space-racer"
    :title "SPACE RACER"
    :system :chip8
-   :rom "/mnt/data/nes-deck/roms/spaceracer.ch8"
+   :rom "/mnt/data/roms/chip8/spaceracer.ch8"
    :color "#E4E4E4")
   (:id "ten-seconds"
    :title "10 SECONDS"

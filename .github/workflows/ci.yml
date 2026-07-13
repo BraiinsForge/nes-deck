@@ -50,6 +50,7 @@ jobs:
           tests/deck_menu_test.cpp $(pkg-config --cflags --libs libpng) \
           -o deck-menu-test
         ./deck-menu-test
+        tests/rom_library_test.sh
         tests/deck_wifi_profile_add_test.sh
         tests/retro_terminal_test.sh
 

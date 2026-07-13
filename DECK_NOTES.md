@@ -233,18 +233,11 @@ passphrases, WireGuard private keys, or ROM data.
   The installed compiler SHA-256 is
   `eeb68d83d8fddf0b9e2996f8c6005d4b91e816a9fb57b75b7cbb8253c4d4d44e`;
   both it and the native loader reject off-palette colors.
-- Four pinned, freely licensed mapper-0 homebrew releases are installed:
-  Falling, Thwaite, Concentration Room, and robotfindskitten. Provenance,
-  license texts, and ROM hashes are recorded in [FOSS_GAMES.md](FOSS_GAMES.md).
-  The private repository retains the owner's locally supplied ROM library
-  without claiming redistribution rights. The deployed catalog includes
-  Super Mario Bros., Micro Mages, Pokemon Red, Donkey Kong Country, and Super
-  Mario Bros. Deluxe from that library. Their deployed SHA-256 values are,
-  respectively, `f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de`,
-  `a4b5b736a84b260314c18783381fe2dca7b803f7c29e78fb403a0f9087a7e570`,
-  `5ca7ba01642a3b27b0cc0b5349b52792795b62d3ed977e98a09390659af96b7b`,
-  `e22324dfd7884a593d265bc3776af6d06c9cf049a060ac7d05613c5303672fca`,
-  and `db81dd4acbd0c7a3b9004f169ee278450c764c842ae777abd28073fbedf4078b`.
+- The only freely licensed games retained in the menu are the CHIP-8 titles
+  Outlaw and Space Racer. Their provenance, license, and ROM hashes are in
+  [FOSS_GAMES.md](FOSS_GAMES.md). The NES, GB, and GBC menus use the owner's
+  locally supplied library without claiming redistribution rights. Canonical
+  repository paths and hashes are recorded under [`roms/`](roms/README.md).
 
 ## GB, GBC, and CHIP-8 emulators
 

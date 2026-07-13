@@ -267,6 +267,8 @@ int main() {
          "coverless game titles use one compact fixed font scale");
   expect(kMaximumCoverWidth == 600 && kMaximumCoverHeight == 378,
          "cover decoding uses the expanded carousel art budget");
+  expect(kMaxGames == 64,
+         "catalog capacity leaves room for additional filed ROMs");
 
   std::string keymap;
   expect(load_keymap_state(keymap_state, &keymap, &error),

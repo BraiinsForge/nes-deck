@@ -7,7 +7,7 @@ STOP=05
 USE_PROCD=1
 
 PROGRAM=/mnt/data/nes-deck/infones
-ROM=/mnt/data/nes-deck/mario.nes
+ROM=/mnt/data/roms/nes/super-mario-bros.nes
 VOLUME_PERCENT=42
 
 start_service() {

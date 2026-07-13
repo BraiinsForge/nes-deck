@@ -77,9 +77,10 @@ The exact file map and catalog contract are documented in
 
 ```bash
 ssh root@<deck-ip> 'mkdir -p /mnt/data/nes-deck/menu \
-  /mnt/data/nes-deck/ecl /mnt/data/nes-deck/roms /mnt/data/nes-deck/games \
+  /mnt/data/nes-deck/ecl /mnt/data/nes-deck/games \
   /mnt/data/nes-deck/licenses /mnt/data/nes-deck/terminal/fonts \
-  /mnt/data/nes-deck/terminal/keymaps'
+  /mnt/data/nes-deck/terminal/keymaps /mnt/data/roms/nes \
+  /mnt/data/roms/gb /mnt/data/roms/gbc /mnt/data/roms/chip8'
 scp result-infones/bin/infones root@<deck-ip>:/mnt/data/nes-deck/infones
 scp result-gb-deck/bin/gb-deck root@<deck-ip>:/mnt/data/nes-deck/gb-deck
 scp result-chip8-deck/bin/chip8-deck root@<deck-ip>:/mnt/data/nes-deck/chip8-deck
@@ -100,7 +101,8 @@ scp -r result-chip8-deck/share/licenses/chip8-deck \
   root@<deck-ip>:/mnt/data/nes-deck/licenses/
 scp -r result-ecl/bin result-ecl/lib root@<deck-ip>:/mnt/data/nes-deck/ecl/
 scp deploy/ecl root@<deck-ip>:/usr/bin/ecl
-scp foss-games/roms/* root@<deck-ip>:/mnt/data/nes-deck/roms/
+scp -r foss-games/roms/* root@<deck-ip>:/mnt/data/roms/
+scp -r roms/nes roms/gb roms/gbc root@<deck-ip>:/mnt/data/roms/
 scp foss-games/licenses/* root@<deck-ip>:/mnt/data/nes-deck/licenses/
 scp deploy/menu/{games.sexp,games.tsv,compile-catalog.lisp,deck-menu-launcher} \
   root@<deck-ip>:/mnt/data/nes-deck/menu/
@@ -166,13 +168,13 @@ ssh root@<deck-ip> '/etc/init.d/nes-deck status; \
   tail -n 100 /mnt/data/nes-deck/log/deck-menu.log'
 ```
 
-The freely licensed catalog contains four NES games plus Adjustris (GB),
-Geometrix (GBC), Outlaw (CHIP-8), and the simultaneous two-player Space Racer
-(CHIP-8). Their pinned sources, licenses, and hashes are in
-[FOSS_GAMES.md](FOSS_GAMES.md). The private repository also retains the locally
-supplied Super Mario Bros., Micro Mages, Pokemon Red, Donkey Kong Country, and
-Super Mario Bros. Deluxe payloads so another clone can reproduce the working
-library.
+The freely licensed catalog contains Outlaw and the simultaneous two-player
+Space Racer for CHIP-8. Their pinned sources, license, and hashes are in
+[FOSS_GAMES.md](FOSS_GAMES.md). The private repository retains the
+owner-supplied library under `roms/<system>/` so another clone can reproduce
+the working collection. A ROM or single-ROM ZIP at the repository root is an
+unprocessed intake file; the filing contract is documented in
+[`roms/README.md`](roms/README.md).
 
 Hardware, framebuffer, audio, Wi-Fi, WireGuard, and recovery findings for the
 audited Deck are kept in [DECK_NOTES.md](DECK_NOTES.md). Wi-Fi selector source

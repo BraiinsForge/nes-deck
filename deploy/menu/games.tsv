@@ -1,14 +1,13 @@
-mario	SUPER MARIO BROS.	nes	/mnt/data/nes-deck/mario.nes	#D78787
-falling	FALLING	nes	/mnt/data/nes-deck/roms/falling.nes	#8787D7
-thwaite	THWAITE	nes	/mnt/data/nes-deck/roms/thwaite.nes	#D7AF87
-concentration-room	CONCENTRATION ROOM	nes	/mnt/data/nes-deck/roms/croom.nes	#87AFAF
-robotfindskitten	ROBOTFINDSKITTEN	nes	/mnt/data/nes-deck/roms/robotfindskitten.nes	#AFD787
-micro-mages	MICRO MAGES	nes	/mnt/data/nes-deck/roms/micro-mages.nes	#D787AF
-adjustris	ADJUSTRIS	gb	/mnt/data/nes-deck/roms/adjustris.gb	#AFAF5F
-pokemon-red	POKEMON RED	gb	/mnt/data/nes-deck/roms/pokemon-red.gb	#D78787
-geometrix	GEOMETRIX	gbc	/mnt/data/nes-deck/roms/geometrix.gbc	#87AFD7
-donkey-kong-country	DONKEY KONG COUNTRY	gbc	/mnt/data/nes-deck/roms/donkey-kong-country.gbc	#D7AF87
-super-mario-bros-deluxe	SUPER MARIO BROS. DELUXE	gbc	/mnt/data/nes-deck/roms/super-mario-bros-deluxe.gbc	#D78787
-outlaw	OUTLAW	chip8	/mnt/data/nes-deck/roms/outlaw.ch8	#AF875F
-space-racer	SPACE RACER	chip8	/mnt/data/nes-deck/roms/spaceracer.ch8	#E4E4E4
+mario	SUPER MARIO BROS.	nes	/mnt/data/roms/nes/super-mario-bros.nes	#D78787
+micro-mages	MICRO MAGES	nes	/mnt/data/roms/nes/micro-mages.nes	#D787AF
+kirbys-adventure	KIRBY'S ADVENTURE	nes	/mnt/data/roms/nes/kirbys-adventure.nes	#D787AF
+metroid	METROID	nes	/mnt/data/roms/nes/metroid.nes	#8787D7
+tetris	TETRIS	nes	/mnt/data/roms/nes/tetris.nes	#87AFAF
+pokemon-red	POKEMON RED	gb	/mnt/data/roms/gb/pokemon-red.gb	#D78787
+final-fantasy-legend-iii	FINAL FANTASY LEGEND III	gb	/mnt/data/roms/gb/final-fantasy-legend-iii.gb	#D7D787
+kirbys-dream-land	KIRBY'S DREAM LAND	gb	/mnt/data/roms/gb/kirbys-dream-land.gb	#AFAFAF
+donkey-kong-country	DONKEY KONG COUNTRY	gbc	/mnt/data/roms/gbc/donkey-kong-country.gbc	#D7AF87
+super-mario-bros-deluxe	SUPER MARIO BROS. DELUXE	gbc	/mnt/data/roms/gbc/super-mario-bros-deluxe.gbc	#D78787
+outlaw	OUTLAW	chip8	/mnt/data/roms/chip8/outlaw.ch8	#AF875F
+space-racer	SPACE RACER	chip8	/mnt/data/roms/chip8/spaceracer.ch8	#E4E4E4
 ten-seconds	10 SECONDS	deck	/mnt/data/nes-deck/games/ten-seconds	#FFAF87
