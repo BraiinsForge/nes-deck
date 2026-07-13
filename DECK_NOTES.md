@@ -193,7 +193,7 @@ passphrases, WireGuard private keys, or ROM data.
   `f80d7c10da0e0a09bde089c8e9ad650701befa14a76f1fc740ddae036dacd536`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `9b1efe36afee7be4d17b269ffb6a0dd8c142eb3b73f2b47b07d69e266ce1822a`.
+  `1eb15ee840b6d20521e02ca1892a9435b76c33baf91838108a2df58e2823c699`.
   It validates the manifest and system-specific NES/GB/GBC/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
@@ -201,7 +201,7 @@ passphrases, WireGuard private keys, or ROM data.
   volume controls, a persistent US/Czech terminal keymap toggle, the Wi-Fi
   editor, and a supervised framebuffer-terminal action. The installed launcher
   SHA-256 is
-  `93f65a76e6dfd7b50b07d399ec294dfaa6261961de00238be527c473d47afea8`.
+  `b210fcff0c3be84fa6845f18653bfe5457c16ae83b090c3b38641888758db0e9`.
 - A post-deployment capture of the live 1280x480 framebuffer verified that all
   game tiles render only their centered names on flat catalog colors. Five
   flat tabs labeled `NES`, `GAME BOY`, `GAME BOY COLOR`, `CHIP-8`, and `DECK`
