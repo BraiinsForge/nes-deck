@@ -40,8 +40,9 @@ case $keymap in
 esac
 
 # The menu daemon has no interactive stdio. fbterm needs the active virtual
-# console for keyboard input and VT ioctls.
-exec <"$TTY" >"$TTY" 2>&1
+# console for keyboard input and VT ioctls. Keep stderr on the inherited
+# persistent launcher log so initialization failures remain diagnosable.
+exec 0<>"$TTY" 1>&0
 
 restore_keymap() {
   "$LOADKEYS" -C "$TTY" -q -u "$US_KEYMAP" ||
@@ -59,7 +60,8 @@ trap 'signal_status=143' TERM
 "$LOADKEYS" -C "$TTY" -q -u "$selected_keymap" ||
   fail "cannot load selected $keymap keymap"
 
-"$FBTERM" -n 'DejaVu Sans Mono' -s 16 -f 7 -b 0 -- /bin/ash -l &
+"$FBTERM" -n 'DejaVu Sans Mono' -s 16 -f 7 -b 0 -- /bin/ash -l \
+  0<>"$TTY" 1>&0 &
 terminal_pid=$!
 terminal_status=0
 while kill -0 "$terminal_pid" 2>/dev/null; do

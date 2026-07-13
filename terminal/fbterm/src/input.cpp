@@ -43,14 +43,9 @@ DEFINE_INSTANCE(TtyInput)
 
 TtyInput *TtyInput::createInstance()
 {
-	s8 buf[64];
-	if (ttyname_r(STDIN_FILENO, buf, sizeof(buf))) {
-		fprintf(stderr, "stdin isn't a tty!\n");
-		return 0;
-	}
-
-	if (!strstr(buf, "/dev/tty") && !strstr(buf, "/dev/vc")) {
-		fprintf(stderr, "stdin isn't a interactive tty!\n");
+	struct vt_stat state;
+	if (ioctl(STDIN_FILENO, VT_GETSTATE, &state) == -1) {
+		fprintf(stderr, "stdin isn't a Linux virtual console!\n");
 		return 0;
 	}
 
