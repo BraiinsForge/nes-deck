@@ -11,24 +11,6 @@ LC_ALL=C
 export PATH LC_ALL
 umask 077
 
-manifest=${1:-}
-cover_dir=${2:-}
-if [ -z "$manifest" ] || [ -z "$cover_dir" ] || [ ! -r "$manifest" ]; then
-	echo "cover-cache: usage: fetch-covers MANIFEST COVER-DIRECTORY" >&2
-	exit 1
-fi
-case $cover_dir in
-	/*) ;;
-	*) echo "cover-cache: cover directory must be absolute" >&2; exit 1 ;;
-esac
-
-index_dir=$cover_dir/.libretro-index
-missing_dir=$cover_dir/.missing
-if ! mkdir -p "$cover_dir" "$index_dir" "$missing_dir"; then
-	echo "cover-cache: cannot create persistent cache" >&2
-	exit 1
-fi
-
 system_slug() {
 	case $1 in
 		nes) printf '%s' 'Nintendo%20-%20Nintendo%20Entertainment%20System' ;;
@@ -113,7 +95,17 @@ best_match() {
 			else if ($2 ~ /\(World\)/) score += 70
 			else if ($2 ~ /\(USA\)/) score += 60
 			else if ($2 ~ /\(Europe\)/) score += 40
+			metadata = $2
+			sub(/^[^(]*/, "", metadata)
+			if (metadata == "(USA).png") score += 300
+			else if (metadata == "(USA, Europe).png") score += 290
+			else if (metadata == "(World).png") score += 280
+			else if (metadata == "(Europe).png") score += 270
+			qualifiers = metadata
+			qualifier_count = gsub(/\(/, "(", qualifiers)
+			if (qualifier_count > 1) score -= 25 * (qualifier_count - 1)
 			if ($2 ~ /\(Sample\)|\(Proto\)|\(Beta\)|\[b/) score -= 300
+			if ($2 ~ /\(Unl\)|\(Hack\)|\(Aftermarket\)/) score -= 350
 			if ($2 ~ /Virtual Console/) score -= 100
 			if (score > best) {
 				best = score
@@ -127,6 +119,33 @@ best_match() {
 		}
 	' "$names"
 }
+
+if [ "${1:-}" = --best-match ]; then
+	if [ "$#" -ne 3 ] || [ ! -r "$3" ]; then
+		echo "cover-cache: usage: fetch-covers --best-match TITLE INDEX" >&2
+		exit 1
+	fi
+	best_match "$2" "$3"
+	exit $?
+fi
+
+manifest=${1:-}
+cover_dir=${2:-}
+if [ -z "$manifest" ] || [ -z "$cover_dir" ] || [ ! -r "$manifest" ]; then
+	echo "cover-cache: usage: fetch-covers MANIFEST COVER-DIRECTORY" >&2
+	exit 1
+fi
+case $cover_dir in
+	/*) ;;
+	*) echo "cover-cache: cover directory must be absolute" >&2; exit 1 ;;
+esac
+
+index_dir=$cover_dir/.libretro-index
+missing_dir=$cover_dir/.missing
+if ! mkdir -p "$cover_dir" "$index_dir" "$missing_dir"; then
+	echo "cover-cache: cannot create persistent cache" >&2
+	exit 1
+fi
 
 tab=$(printf '\t')
 while IFS="$tab" read -r id title system rom color extra; do

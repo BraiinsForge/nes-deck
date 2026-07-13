@@ -51,6 +51,7 @@ jobs:
           -o deck-menu-test
         ./deck-menu-test
         tests/rom_library_test.sh
+        tests/fetch_covers_test.sh
         tests/deck_wifi_profile_add_test.sh
         tests/retro_terminal_test.sh
 
