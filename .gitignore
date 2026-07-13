@@ -1,4 +1,3 @@
 /result*
-*.nes
-*.NES
+/foss-games/
 *.srm
