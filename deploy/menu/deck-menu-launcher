@@ -18,6 +18,7 @@ MENU=$MENU_DIR/deck-menu
 NES_EMULATOR=$BASE/infones
 GB_EMULATOR=$BASE/gb-deck
 CHIP8_EMULATOR=$BASE/chip8-deck
+DECK_GAME=$BASE/ten-seconds-deck
 CATALOG=$MENU_DIR/games.sexp
 FALLBACK_MANIFEST=$MENU_DIR/games.tsv
 GENERATED_MANIFEST=$STATE_DIR/games.tsv
@@ -92,6 +93,10 @@ if [ ! -x "$GB_EMULATOR" ]; then
 fi
 if [ ! -x "$CHIP8_EMULATOR" ]; then
 	log_message "CHIP-8 emulator is missing or not executable: $CHIP8_EMULATOR"
+	exit 1
+fi
+if [ ! -x "$DECK_GAME" ]; then
+	log_message "Deck game is missing or not executable: $DECK_GAME"
 	exit 1
 fi
 if [ ! -x "$TERMINAL" ]; then
@@ -181,6 +186,7 @@ exec "$MENU" \
 	--nes-emulator "$NES_EMULATOR" \
 	--gb-emulator "$GB_EMULATOR" \
 	--chip8-emulator "$CHIP8_EMULATOR" \
+	--deck-game "$DECK_GAME" \
 	--volume-state "$VOLUME_STATE" \
 	--keymap-state "$KEYMAP_STATE" \
 	--terminal "$TERMINAL" \

@@ -68,4 +68,9 @@
    :title "SPACE RACER"
    :system :chip8
    :rom "/mnt/data/nes-deck/roms/spaceracer.ch8"
-   :color "#FCFCFC")))
+   :color "#FCFCFC")
+  (:id "ten-seconds"
+   :title "10 SECONDS"
+   :system :deck
+   :rom "/mnt/data/nes-deck/games/ten-seconds"
+   :color "#FF7138")))

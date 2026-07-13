@@ -76,6 +76,9 @@ jobs:
     - name: Build CHIP-8 emulator
       run: nix build -L .#chip8-deck -o result-chip8-deck
 
+    - name: Build ten-second game
+      run: nix build -L .#ten-seconds-deck -o result-ten-seconds
+
     - name: Build fbterm-deck
       run: nix build -L .#fbterm-deck -o result-fbterm
 
@@ -85,6 +88,7 @@ jobs:
         file ./result-menu/bin/deck-menu
         file ./result-gb-deck/bin/gb-deck
         file ./result-chip8-deck/bin/chip8-deck
+        file ./result-ten-seconds/bin/ten-seconds-deck
         file ./result-fbterm/bin/fbterm
         file ./result-fbterm/bin/loadkeys
         test -s ./result-fbterm/share/retro-deck/keymaps/us.map
@@ -93,6 +97,7 @@ jobs:
         ls -lh ./result-menu/bin/deck-menu
         ls -lh ./result-gb-deck/bin/gb-deck
         ls -lh ./result-chip8-deck/bin/chip8-deck
+        ls -lh ./result-ten-seconds/bin/ten-seconds-deck
         ls -lh ./result-fbterm/bin/fbterm
         ls -lh ./result-fbterm/bin/loadkeys
 

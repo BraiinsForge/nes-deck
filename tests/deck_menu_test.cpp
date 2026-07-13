@@ -43,6 +43,7 @@ int main() {
   const std::string gb_rom = directory + "/fixture.gb";
   const std::string gbc_rom = directory + "/fixture.gbc";
   const std::string chip8_rom = directory + "/fixture.ch8";
+  const std::string deck_config = directory + "/fixture.sexp";
   const std::string manifest = directory + "/games.tsv";
   const std::string volume_state = directory + "/volume.state";
   const std::string keymap_state = directory + "/keymap.state";
@@ -79,6 +80,10 @@ int main() {
   const unsigned char chip8[] = {0x00, 0xe0, 0x12, 0x00};
   expect(write_file(chip8_rom, chip8, sizeof(chip8)),
          "write CHIP-8 fixture");
+  const std::string deck_config_text = "corrupted on purpose\n";
+  expect(write_file(deck_config, deck_config_text.data(),
+                    deck_config_text.size()),
+         "write Deck game config fixture");
 
   const std::string row =
       "fixture\tFIXTURE GAME\tnes\t" + rom + "\t#12ABEF\n";
@@ -117,6 +122,10 @@ int main() {
          "monochrome-only ROM is rejected as GBC");
   expect(validate_rom("chip8", chip8_rom, &error),
          "bounded CHIP-8 ROM is accepted");
+  expect(validate_rom("deck", deck_config, &error),
+         "Deck config remains launchable when its contents are corrupt");
+  expect(validate_rom("deck", directory + "/missing.sexp", &error),
+         "missing Deck config does not prevent launcher boot");
   expect(!validate_rom("nes", chip8_rom, &error),
          "CHIP-8 bytes are rejected as NES");
 
@@ -240,8 +249,8 @@ int main() {
   Canvas canvas;
   MenuLayout menu_layout;
   std::vector<GameEntry> tab_games = games;
-  const char *additional_systems[] = {"gb", "gbc", "chip8"};
-  for (size_t index = 0; index < 3 && !games.empty(); ++index) {
+  const char *additional_systems[] = {"gb", "gbc", "chip8", "deck"};
+  for (size_t index = 0; index < 4 && !games.empty(); ++index) {
     GameEntry entry = games[0];
     entry.id = additional_systems[index];
     entry.title = additional_systems[index];
@@ -270,8 +279,8 @@ int main() {
   expect(target_at(menu_layout, menu_layout.terminal_button.x + 1,
                    menu_layout.terminal_button.y + 1) == -4,
          "terminal action has its own target");
-  expect(menu_layout.system_tabs.size() == 4,
-         "menu exposes one tab for each populated console");
+  expect(menu_layout.system_tabs.size() == 5,
+         "menu exposes one tab for each populated system");
   expect(menu_layout.game_buttons.size() == 1 &&
              menu_layout.game_indices.size() == 1 &&
              menu_layout.game_indices[0] == 0,
@@ -282,11 +291,11 @@ int main() {
                   game_button.x] == tab_games[0].color.pixel(),
            "game tiles use their catalog color through the edge");
   }
-  if (menu_layout.system_tabs.size() == 4) {
-    expect(target_at(menu_layout, menu_layout.system_tabs[3].bounds.x + 1,
-                     menu_layout.system_tabs[3].bounds.y + 1) ==
-               kSystemTargetBase - 3,
-           "console tab has its own touch target");
+  if (menu_layout.system_tabs.size() == 5) {
+    expect(target_at(menu_layout, menu_layout.system_tabs[4].bounds.x + 1,
+                     menu_layout.system_tabs[4].bounds.y + 1) ==
+               kSystemTargetBase - 4,
+           "system tab has its own touch target");
   }
   render_menu(tab_games, "chip8", 0, "cz", std::string(), &canvas,
               &menu_layout);
@@ -347,7 +356,8 @@ int main() {
   const char *option_values[] = {
       "deck-menu",      "--nes-emulator",   "/bin/true",
       "--gb-emulator",  "/bin/false",       "--chip8-emulator",
-      "/bin/echo",      "--manifest",       "/tmp/games",
+      "/bin/echo",      "--deck-game",      "/bin/cat",
+      "--manifest",     "/tmp/games",
       "--volume-state", "/tmp/volume",      "--keymap-state",
       "/tmp/keymap",    "--terminal",       "/bin/false",
       "--wifi-helper",  "/bin/echo"};
@@ -375,6 +385,9 @@ int main() {
     routed.system = "chip8";
     expect(emulator_for_game(options, routed) == "/bin/echo",
            "CHIP-8 entry selects CHIP-8 emulator");
+    routed.system = "deck";
+    expect(emulator_for_game(options, routed) == "/bin/cat",
+           "Deck entry selects native Deck game");
   }
 
   expect(geometry_test() == 0, "framebuffer transform geometry");
@@ -388,6 +401,7 @@ int main() {
   unlink(volume_state.c_str());
   unlink(manifest.c_str());
   unlink(chip8_rom.c_str());
+  unlink(deck_config.c_str());
   unlink(gbc_rom.c_str());
   unlink(gb_rom.c_str());
   unlink(rom.c_str());

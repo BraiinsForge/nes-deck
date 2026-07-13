@@ -22,6 +22,7 @@ The launcher also expects:
 - `/mnt/data/nes-deck/infones`
 - `/mnt/data/nes-deck/gb-deck`
 - `/mnt/data/nes-deck/chip8-deck`
+- `/mnt/data/nes-deck/ten-seconds-deck`
 - `/mnt/data/nes-deck/ecl/bin/ecl.bin` (ECL 26.5.5)
 - `/mnt/data/nes-deck/ecl/lib/ecl/` (the ECL runtime directory)
 - `/mnt/data/nes-deck/terminal/retro-terminal`
@@ -39,10 +40,10 @@ persistent launcher log is kept at `/mnt/data/nes-deck/log/deck-menu.log`.
 The native menu appends child start, exit-status, and signal details there;
 launcher milestones are also sent to logd.
 
-At runtime, select the NES, Game Boy, Game Boy Color, or CHIP-8 tab, then tap a
-game card to launch it. Only the active console's cards are shown, and each
-card retains its original catalog index for launch routing. Cards display only
-the game title;
+At runtime, select the NES, Game Boy, Game Boy Color, CHIP-8, or Deck tab, then
+tap a flat game tile to launch it. Only the active system's tiles are shown,
+and each tile retains its original catalog index for launch routing. Tiles
+display only the game title;
 descriptions and license labels stay out of the launcher. Redistribution and
 license details remain in `FOSS_GAMES.md` and the installed license files. The
 top-right minus and plus buttons atomically persist volume in 5-point steps;
@@ -52,6 +53,10 @@ anywhere on the touchscreen
 terminates the emulator child and redraws the menu. Touch does not supply
 controller input; a keyboard or mapped controller is still needed to press
 Start and play.
+
+The Deck-native **10 SECONDS** game owns touch while it runs and has its own
+BACK action. Physical A on either controller also starts and stops it. Short
+start and result chiptunes follow the dashboard volume.
 
 The computer icon launches `/mnt/data/nes-deck/terminal/retro-terminal`. The
 adjacent keymap action toggles between US ANSI and Czech QWERTZ. The terminal
@@ -70,7 +75,7 @@ five required keys:
 
 1. `:id` - lowercase stable identifier
 2. `:title` - menu title
-3. `:system` - one of `:nes`, `:gb`, `:gbc`, or `:chip8`
+3. `:system` - one of `:nes`, `:gb`, `:gbc`, `:chip8`, or `:deck`
 4. `:rom` - normalized absolute path with the system's required extension
 5. `:color` - `#RRGGBB` accent color
 

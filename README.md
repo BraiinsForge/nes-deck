@@ -1,6 +1,6 @@
 # Retro Deck for Braiins Forge Deck
 
-Play NES, Game Boy, Game Boy Color, and CHIP-8 games on a Braiins Forge Deck
+Play NES, Game Boy, Game Boy Color, CHIP-8, and Deck-native games on a Braiins Forge Deck
 with a full-screen touch launcher. This project combines Deck-native InfoNES,
 [Gambatte](https://github.com/libretro/gambatte-libretro), and
 [c-octo](https://github.com/JohnEarnest/c-octo) frontends with a persistent
@@ -57,13 +57,14 @@ without a keyboard, which is important for unattended boot.
 ## Touch launcher on boot
 
 Deck firmware with a `/mnt/data` partition should keep the emulator and ROM
-there instead of filling the small OpenWrt overlay. Build the five ARM
+there instead of filling the small OpenWrt overlay. Build the six ARM
 payloads and fetch the checksum-pinned homebrew set first:
 
 ```bash
 nix build .#infones-deck -o result-infones
 nix build .#gb-deck -o result-gb-deck
 nix build .#chip8-deck -o result-chip8-deck
+nix build .#ten-seconds-deck -o result-ten-seconds
 nix build .#deck-menu -o result-menu
 nix build .#fbterm-deck -o result-fbterm
 nix build -f nix/ecl-arm-static.nix -o result-ecl
@@ -76,12 +77,14 @@ The exact file map and catalog contract are documented in
 
 ```bash
 ssh root@<deck-ip> 'mkdir -p /mnt/data/nes-deck/menu \
-  /mnt/data/nes-deck/ecl /mnt/data/nes-deck/roms \
+  /mnt/data/nes-deck/ecl /mnt/data/nes-deck/roms /mnt/data/nes-deck/games \
   /mnt/data/nes-deck/licenses /mnt/data/nes-deck/terminal/fonts \
   /mnt/data/nes-deck/terminal/keymaps'
 scp result-infones/bin/infones root@<deck-ip>:/mnt/data/nes-deck/infones
 scp result-gb-deck/bin/gb-deck root@<deck-ip>:/mnt/data/nes-deck/gb-deck
 scp result-chip8-deck/bin/chip8-deck root@<deck-ip>:/mnt/data/nes-deck/chip8-deck
+scp result-ten-seconds/bin/ten-seconds-deck \
+  root@<deck-ip>:/mnt/data/nes-deck/ten-seconds-deck
 scp result-menu/bin/deck-menu root@<deck-ip>:/mnt/data/nes-deck/menu/deck-menu
 scp result-fbterm/bin/fbterm root@<deck-ip>:/mnt/data/nes-deck/terminal/fbterm
 scp result-fbterm/bin/loadkeys root@<deck-ip>:/mnt/data/nes-deck/terminal/loadkeys
@@ -109,7 +112,8 @@ scp deploy/menu/nes-deck.init root@<deck-ip>:/etc/init.d/nes-deck.new
 
 ssh root@<deck-ip> '
   chmod 755 /mnt/data/nes-deck/infones /mnt/data/nes-deck/gb-deck \
-    /mnt/data/nes-deck/chip8-deck /mnt/data/nes-deck/menu/deck-menu \
+    /mnt/data/nes-deck/chip8-deck /mnt/data/nes-deck/ten-seconds-deck \
+    /mnt/data/nes-deck/menu/deck-menu \
     /mnt/data/nes-deck/menu/deck-menu-launcher \
     /mnt/data/nes-deck/terminal/fbterm \
     /mnt/data/nes-deck/terminal/loadkeys \
@@ -125,7 +129,7 @@ ssh root@<deck-ip> '
 '
 ```
 
-Use the **NES**, **GAME BOY**, **GAME BOY COLOR**, and **CHIP-8** tabs to
+Use the **NES**, **GAME BOY**, **GAME BOY COLOR**, **CHIP-8**, and **DECK** tabs to
 filter the title-only game cards, then tap a card to start it. The selected
 tab is highlighted and cards retain stable catalog-to-launch mappings after
 filtering. The **- / VOL / +** control changes the next game's PCM volume in
@@ -146,6 +150,8 @@ The **WIFI** action opens a touch keyboard for adding PSK
 networks. Saving a network never reloads or changes the live Wi-Fi connection.
 A profile with the same SSID atomically replaces all older records and becomes
 eligible only after the current connection is lost.
+
+The **10 SECONDS** Deck game starts and stops on touch press.
 
 The launcher is supervised by procd and shuts the emulator down cleanly so
 keyboard mode is restored. The bounded persistent log includes catalog,

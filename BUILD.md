@@ -1,6 +1,7 @@
 # Building Retro Deck emulators for Braiins Forge Deck
 
-This guide explains how to build the NES, GB/GBC, and CHIP-8 emulators and
+This guide explains how to build the NES, GB/GBC, and CHIP-8 emulators, the
+Deck-native ten-second game, and
 launcher for the Braiins Forge Deck.
 
 ## Prerequisites
@@ -64,6 +65,7 @@ For active development and iteration, use the Nix development environment:
    nix build .#deck-menu -o result-menu
    nix build .#gb-deck -o result-gb-deck
    nix build .#chip8-deck -o result-chip8-deck
+   nix build .#ten-seconds-deck -o result-ten-seconds
    nix build .#fbterm-deck -o result-fbterm
    nix build -f nix/ecl-arm-static.nix -o result-ecl
    ```

@@ -118,8 +118,9 @@
 
 (defun validate-system (value)
   (unless (and (symbolp value)
-               (member value '(:nes :gb :gbc :chip8) :test #'eq))
-    (catalog-error "game :system must be one of :nes, :gb, :gbc, or :chip8"))
+               (member value '(:nes :gb :gbc :chip8 :deck) :test #'eq))
+    (catalog-error
+     "game :system must be one of :nes, :gb, :gbc, :chip8, or :deck"))
   (string-downcase (symbol-name value)))
 
 (defun validate-rom-path (value system)
@@ -129,6 +130,7 @@
                 ((eq system :gb) ".gb")
                 ((eq system :gbc) ".gbc")
                 ((eq system :chip8) ".ch8")
+                ((eq system :deck) ".sexp")
                 (t (catalog-error "unsupported game system ~S" system)))))
     (unless (and (string-prefix-p +rom-root+ value)
                (string-suffix-p expected-suffix value)

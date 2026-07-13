@@ -6,6 +6,7 @@
  *   deck-menu --nes-emulator /absolute/path/to/infones \
  *             --gb-emulator /absolute/path/to/gb-deck \
  *             --chip8-emulator /absolute/path/to/chip8-deck \
+ *             --deck-game /absolute/path/to/ten-seconds-deck \
  *             --manifest /absolute/path/to/games.tsv \
  *             --volume-state /absolute/path/to/volume.state \
  *             --keymap-state /absolute/path/to/keymap.state \
@@ -236,7 +237,7 @@ bool parse_color(const std::string &text, RgbColor *color) {
 
 bool valid_system(const std::string &system) {
   return system == "nes" || system == "gb" || system == "gbc" ||
-         system == "chip8";
+         system == "chip8" || system == "deck";
 }
 
 bool read_exact_at(int fd, off_t offset, unsigned char *data, size_t size) {
@@ -263,14 +264,18 @@ bool validate_rom(const std::string &system, const std::string &path,
   }
   if (!is_absolute_path(path)) {
     if (error)
-      *error = "ROM path must be absolute: " + path;
+      *error = "game data path must be absolute: " + path;
     return false;
   }
+  // Deck-native applications own any optional data path. Missing application
+  // data must not prevent the launcher itself from booting.
+  if (system == "deck")
+    return true;
 
   const int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
   if (fd < 0) {
     if (error)
-      *error = errno_message("cannot open ROM " + path);
+      *error = errno_message("cannot open game data " + path);
     return false;
   }
 
@@ -278,11 +283,11 @@ bool validate_rom(const std::string &system, const std::string &path,
   bool ok = true;
   if (fstat(fd, &info) != 0) {
     if (error)
-      *error = errno_message("cannot stat ROM " + path);
+      *error = errno_message("cannot stat game data " + path);
     ok = false;
   } else if (!S_ISREG(info.st_mode)) {
     if (error)
-      *error = "ROM is not a regular file: " + path;
+      *error = "game data is not a regular file: " + path;
     ok = false;
   } else if (system == "nes") {
     unsigned char header[4] = {};
@@ -1087,6 +1092,7 @@ const SystemDefinition kSystemDefinitions[] = {
     {"gb", "GAME BOY", 180},
     {"gbc", "GAME BOY COLOR", 240},
     {"chip8", "CHIP-8", 160},
+    {"deck", "DECK", 120},
 };
 
 bool has_system(const std::vector<GameEntry> &games,
@@ -1237,7 +1243,9 @@ void render_menu(const std::vector<GameEntry> &games,
   }
 
   const std::string footer =
-      status.empty() ? "IN GAME: HOLD ANYWHERE FOR 2 SECONDS TO RETURN" : status;
+      status.empty()
+          ? "CONSOLE GAMES: HOLD ANYWHERE FOR 2 SECONDS TO RETURN"
+          : status;
   const int footer_scale = fit_text_scale(footer, kLogicalWidth - 24, 2, 1);
   const std::string shown_footer =
       fit_text_width(footer, kLogicalWidth - 24, footer_scale);
@@ -2011,8 +2019,14 @@ ChildResult run_game(const std::string &emulator, const GameEntry &game,
   environment.push_back(
       std::make_pair("RETRO_DECK_VOLUME_PERCENT", volume_text));
   std::cerr << "deck-menu: game volume " << volume_text << "%" << std::endl;
-  return run_managed_child(emulator, arguments, environment, game.id, touch,
-                           framebuffer);
+  TouchDevice *supervisor_touch = touch;
+  if (game.system == "deck") {
+    if (touch)
+      touch->close_device();
+    supervisor_touch = NULL;
+  }
+  return run_managed_child(emulator, arguments, environment, game.id,
+                           supervisor_touch, framebuffer);
 }
 
 ChildResult run_terminal(const std::string &launcher,
@@ -2285,6 +2299,7 @@ struct Options {
   std::string nes_emulator;
   std::string gb_emulator;
   std::string chip8_emulator;
+  std::string deck_game;
   std::string manifest;
   std::string volume_state;
   std::string keymap_state;
@@ -2301,13 +2316,16 @@ std::string emulator_for_game(const Options &options, const GameEntry &game) {
     return options.nes_emulator;
   if (game.system == "gb" || game.system == "gbc")
     return options.gb_emulator;
+  if (game.system == "deck")
+    return options.deck_game;
   return options.chip8_emulator;
 }
 
 void print_usage(const char *program) {
   std::cerr << "Usage:\n  " << program
             << " --nes-emulator PATH --gb-emulator PATH "
-               "--chip8-emulator PATH --manifest PATH --volume-state PATH "
+               "--chip8-emulator PATH --deck-game PATH --manifest PATH "
+               "--volume-state PATH "
                "--keymap-state PATH --terminal PATH --wifi-helper PATH\n  "
             << program << " --geometry-test\n";
 }
@@ -2325,6 +2343,7 @@ bool parse_options(int argc, char **argv, Options *options,
     } else if (argument == "--nes-emulator" ||
                argument == "--gb-emulator" ||
                argument == "--chip8-emulator" ||
+               argument == "--deck-game" ||
                argument == "--manifest" ||
                argument == "--volume-state" ||
                argument == "--keymap-state" || argument == "--terminal" ||
@@ -2341,6 +2360,8 @@ bool parse_options(int argc, char **argv, Options *options,
         destination = &options->gb_emulator;
       else if (argument == "--chip8-emulator")
         destination = &options->chip8_emulator;
+      else if (argument == "--deck-game")
+        destination = &options->deck_game;
       else if (argument == "--manifest")
         destination = &options->manifest;
       else if (argument == "--volume-state")
@@ -2375,13 +2396,14 @@ bool parse_options(int argc, char **argv, Options *options,
     return true;
   }
   if (options->nes_emulator.empty() || options->gb_emulator.empty() ||
-      options->chip8_emulator.empty() || options->manifest.empty() ||
+      options->chip8_emulator.empty() || options->deck_game.empty() ||
+      options->manifest.empty() ||
       options->volume_state.empty() || options->keymap_state.empty() ||
       options->terminal.empty() || options->wifi_helper.empty()) {
     if (error)
-      *error = "--nes-emulator, --gb-emulator, --chip8-emulator, --manifest, "
-               "--volume-state, --keymap-state, --terminal, and --wifi-helper "
-               "are required";
+      *error = "--nes-emulator, --gb-emulator, --chip8-emulator, --deck-game, "
+               "--manifest, --volume-state, --keymap-state, --terminal, and "
+               "--wifi-helper are required";
     return false;
   }
   return true;
@@ -2392,6 +2414,7 @@ int application_main(const Options &options) {
   if (!validate_executable(options.nes_emulator, "NES emulator", &error) ||
       !validate_executable(options.gb_emulator, "GB/GBC emulator", &error) ||
       !validate_executable(options.chip8_emulator, "CHIP-8 emulator", &error) ||
+      !validate_executable(options.deck_game, "Deck game", &error) ||
       !validate_executable(options.terminal, "terminal launcher", &error) ||
       !validate_executable(options.wifi_helper, "wifi helper", &error)) {
     std::cerr << "deck-menu: " << error << std::endl;

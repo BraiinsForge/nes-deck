@@ -162,6 +162,39 @@
           };
         };
 
+        ten-seconds-deck = pkgsCross.stdenv.mkDerivation {
+          pname = "ten-seconds-deck";
+          version = "1.0.0";
+
+          dontUnpack = true;
+          buildInputs = [ pkgsCross.glibc.static ];
+
+          NIX_CFLAGS_COMPILE = "-static -O3";
+          NIX_LDFLAGS = "-static";
+
+          buildPhase = ''
+            runHook preBuild
+            $CXX -std=c++11 -O3 -Wall -Wextra -Wpedantic -Werror \
+              -I${./src} \
+              ${./src/ten_seconds_deck.cpp} \
+              ${./src/deck_runtime.cpp} \
+              -static -pthread -lm -o ten-seconds-deck
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/bin
+            install -m755 ten-seconds-deck $out/bin/ten-seconds-deck
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Touch-controlled ten-second game for the Deck";
+            platforms = [ "armv7l-linux" ];
+          };
+        };
+
         gb-deck = pkgsCross.stdenv.mkDerivation {
           pname = "gb-deck";
           version = "0.5.0-20260703-deck";
