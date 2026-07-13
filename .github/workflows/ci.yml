@@ -32,6 +32,12 @@ jobs:
           tests/nes_apu_noise_test.cpp -o nes_apu_noise_test
         ./nes_apu_noise_test
 
+    - name: Test two-player input
+      run: |
+        g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
+          tests/joypad_input_test.cpp -pthread -o joypad-input-test
+        ./joypad-input-test
+
     - name: Test touchscreen menu
       run: |
         g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
@@ -40,6 +46,23 @@ jobs:
         g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
           tests/deck_menu_test.cpp -o deck-menu-test
         ./deck-menu-test
+        tests/deck_wifi_profile_add_test.sh
+        tests/retro_terminal_test.sh
+
+    - name: Test shared emulator runtime
+      run: |
+        g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
+          tests/deck_runtime_test.cpp src/deck_runtime.cpp \
+          -o deck-runtime-test
+        ./deck-runtime-test
+
+    - name: Test CHIP-8 core
+      run: |
+        octo_src=$(nix eval --raw --impure --expr \
+          '(builtins.getFlake ("path:" + toString ./.)).inputs."c-octo-src".outPath')
+        cc -std=c99 -O2 -Wall -Wextra -Werror -I"$octo_src/src" \
+          tests/chip8_core_test.c src/chip8_core.c -o chip8-core-test
+        ./chip8-core-test
 
     - name: Build infones-deck
       run: nix build -L
@@ -47,12 +70,31 @@ jobs:
     - name: Build deck-menu
       run: nix build -L .#deck-menu -o result-menu
 
+    - name: Build GB and GBC emulator
+      run: nix build -L .#gb-deck -o result-gb-deck
+
+    - name: Build CHIP-8 emulator
+      run: nix build -L .#chip8-deck -o result-chip8-deck
+
+    - name: Build fbterm-deck
+      run: nix build -L .#fbterm-deck -o result-fbterm
+
     - name: Test binary
       run: |
         file ./result/bin/infones
         file ./result-menu/bin/deck-menu
+        file ./result-gb-deck/bin/gb-deck
+        file ./result-chip8-deck/bin/chip8-deck
+        file ./result-fbterm/bin/fbterm
+        file ./result-fbterm/bin/loadkeys
+        test -s ./result-fbterm/share/retro-deck/keymaps/us.map
+        test -s ./result-fbterm/share/retro-deck/keymaps/cz.map
         ls -lh ./result/bin/infones
         ls -lh ./result-menu/bin/deck-menu
+        ls -lh ./result-gb-deck/bin/gb-deck
+        ls -lh ./result-chip8-deck/bin/chip8-deck
+        ls -lh ./result-fbterm/bin/fbterm
+        ls -lh ./result-fbterm/bin/loadkeys
 
     - name: Create release archive
       if: github.event_name == 'release'
