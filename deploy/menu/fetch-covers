@@ -1,0 +1,177 @@
+#!/bin/sh
+
+# Resolve missing game covers from Libretro's public Named_Boxarts indexes.
+# Successful PNGs, system indexes, and per-game misses are persistent so a
+# normal boot never downloads the same data twice.
+
+set -u
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+LC_ALL=C
+export PATH LC_ALL
+umask 077
+
+manifest=${1:-}
+cover_dir=${2:-}
+if [ -z "$manifest" ] || [ -z "$cover_dir" ] || [ ! -r "$manifest" ]; then
+	echo "cover-cache: usage: fetch-covers MANIFEST COVER-DIRECTORY" >&2
+	exit 1
+fi
+case $cover_dir in
+	/*) ;;
+	*) echo "cover-cache: cover directory must be absolute" >&2; exit 1 ;;
+esac
+
+index_dir=$cover_dir/.libretro-index
+missing_dir=$cover_dir/.missing
+if ! mkdir -p "$cover_dir" "$index_dir" "$missing_dir"; then
+	echo "cover-cache: cannot create persistent cache" >&2
+	exit 1
+fi
+
+system_slug() {
+	case $1 in
+		nes) printf '%s' 'Nintendo%20-%20Nintendo%20Entertainment%20System' ;;
+		gb) printf '%s' 'Nintendo%20-%20Game%20Boy' ;;
+		gbc) printf '%s' 'Nintendo%20-%20Game%20Boy%20Color' ;;
+		*) return 1 ;;
+	esac
+}
+
+decode_index() {
+	input=$1
+	output=$2
+	temporary=$output.tmp.$$
+	if ! sed -n 's/.*href="\([^"]*\.png\)".*/\1/p' "$input" |
+		while IFS= read -r href; do
+			case $href in
+				*/*|*\\*) continue ;;
+			esac
+			escaped=$(printf '%s' "$href" | sed 's/%/\\x/g')
+			decoded=$(printf '%b' "$escaped")
+			printf '%s\t%s\n' "$href" "$decoded"
+		done > "$temporary"; then
+		rm -f "$temporary"
+		return 1
+	fi
+	if [ ! -s "$temporary" ]; then
+		rm -f "$temporary"
+		return 1
+	fi
+	mv -f "$temporary" "$output"
+}
+
+ensure_index() {
+	system=$1
+	slug=$2
+	html=$index_dir/$system.html
+	names=$index_dir/$system.tsv
+	if [ -s "$names" ]; then
+		return 0
+	fi
+	if [ ! -s "$html" ]; then
+		temporary=$html.tmp.$$
+		url=https://thumbnails.libretro.com/$slug/Named_Boxarts/
+		echo "cover-cache: caching $system box-art index"
+		if ! wget -q -T 30 -O "$temporary" "$url" || [ ! -s "$temporary" ]; then
+			rm -f "$temporary"
+			echo "cover-cache: cannot download $system index" >&2
+			return 1
+		fi
+		mv -f "$temporary" "$html"
+	fi
+	if ! decode_index "$html" "$names"; then
+		echo "cover-cache: cannot parse $system index" >&2
+		return 1
+	fi
+}
+
+best_match() {
+	title=$1
+	names=$2
+	awk -F '\t' -v title="$title" '
+		function normalized(value, result) {
+			result = toupper(value)
+			gsub(/[^A-Z0-9]/, "", result)
+			return result
+		}
+		BEGIN {
+			wanted = normalized(title)
+			best = -100000
+		}
+		{
+			short_name = $2
+			sub(/ \(.*/, "", short_name)
+			candidate = normalized(short_name)
+			if (candidate == wanted)
+				score = 1000
+			else if (index(candidate, wanted) == 1)
+				score = 600 - (length(candidate) - length(wanted))
+			else
+				next
+			if ($2 ~ /\(USA, Europe\)/) score += 80
+			else if ($2 ~ /\(World\)/) score += 70
+			else if ($2 ~ /\(USA\)/) score += 60
+			else if ($2 ~ /\(Europe\)/) score += 40
+			if ($2 ~ /\(Sample\)|\(Proto\)|\(Beta\)|\[b/) score -= 300
+			if ($2 ~ /Virtual Console/) score -= 100
+			if (score > best) {
+				best = score
+				best_href = $1
+				best_name = $2
+			}
+		}
+		END {
+			if (best >= 500)
+				printf "%s\t%s\n", best_href, best_name
+		}
+	' "$names"
+}
+
+tab=$(printf '\t')
+while IFS="$tab" read -r id title system rom color extra; do
+	[ -n "$id" ] || continue
+	case $id in \#*) continue ;; esac
+	case $id in
+		*[!a-z0-9-]*|'')
+			echo "cover-cache: refusing invalid game id: $id" >&2
+			continue
+			;;
+	esac
+	cover=$cover_dir/$id.png
+	missing=$missing_dir/$id
+	if [ -s "$cover" ] || [ -e "$missing" ]; then
+		continue
+	fi
+	if ! slug=$(system_slug "$system"); then
+		: > "$missing"
+		continue
+	fi
+	if ! ensure_index "$system" "$slug"; then
+		continue
+	fi
+	match=$(best_match "$title" "$index_dir/$system.tsv")
+	if [ -z "$match" ]; then
+		echo "cover-cache: no Libretro match for $id ($title)"
+		: > "$missing"
+		continue
+	fi
+	href=${match%%"$tab"*}
+	matched_name=${match#*"$tab"}
+	temporary=$cover.tmp.$$
+	url=https://thumbnails.libretro.com/$slug/Named_Boxarts/$href
+	echo "cover-cache: $id <- $matched_name"
+	if wget -q -T 30 -O "$temporary" "$url" && [ -s "$temporary" ]; then
+		size=$(wc -c < "$temporary" 2>/dev/null) || size=0
+		case $size in ''|*[!0-9]*) size=0 ;; esac
+		if [ "$size" -ge 8 ] && [ "$size" -le 4194304 ]; then
+			mv -f "$temporary" "$cover"
+			printf '%s\n' "$url" > "$cover.source"
+			continue
+		fi
+	fi
+	rm -f "$temporary"
+	echo "cover-cache: download failed for $id; will retry later" >&2
+done < "$manifest"
+
+exit 0

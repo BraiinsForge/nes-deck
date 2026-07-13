@@ -85,10 +85,12 @@ For active development and iteration, use the Nix development environment:
    ./joypad-input-test
 
    g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-     src/deck_menu.cpp -o deck-menu-host
+     src/deck_menu.cpp $(pkg-config --cflags --libs libpng) \
+     -o deck-menu-host
    ./deck-menu-host --geometry-test
    g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-     tests/deck_menu_test.cpp -o deck-menu-test
+     tests/deck_menu_test.cpp $(pkg-config --cflags --libs libpng) \
+     -o deck-menu-test
    ./deck-menu-test
    tests/deck_wifi_profile_add_test.sh
    tests/retro_terminal_test.sh
@@ -174,7 +176,7 @@ the same cross compiler:
 
 ```bash
 arm-linux-gnueabihf-g++ -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-  -static src/deck_menu.cpp -o deck-menu
+  -static src/deck_menu.cpp -lpng -lz -o deck-menu
 ```
 
 The integrated terminal is built from the vendored GPL-2 source and bundles a

@@ -139,7 +139,11 @@
           version = "1.0.0";
 
           dontUnpack = true;
-          buildInputs = [ pkgsCross.glibc.static ];
+          buildInputs = [
+            pkgsCross.glibc.static
+            staticCross.libpng
+            staticCross.zlib
+          ];
 
           NIX_CFLAGS_COMPILE = "-static -Os";
           NIX_LDFLAGS = "-static";
@@ -147,7 +151,7 @@
           buildPhase = ''
             runHook preBuild
             $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-              ${./src/deck_menu.cpp} -static -o deck-menu
+              ${./src/deck_menu.cpp} -static -lpng -lz -o deck-menu
             runHook postBuild
           '';
 

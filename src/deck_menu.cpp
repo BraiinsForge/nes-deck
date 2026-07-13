@@ -8,6 +8,7 @@
  *             --chip8-emulator /absolute/path/to/chip8-deck \
  *             --deck-game /absolute/path/to/ten-seconds-deck \
  *             --manifest /absolute/path/to/games.tsv \
+ *             --cover-directory /absolute/path/to/covers \
  *             --volume-state /absolute/path/to/volume.state \
  *             --keymap-state /absolute/path/to/keymap.state \
  *             --terminal /absolute/path/to/terminal-launcher \
@@ -48,6 +49,7 @@
 #include <linux/kd.h>
 #include <linux/soundcard.h>
 #include <poll.h>
+#include <png.h>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -71,6 +73,12 @@ const int kPhysicalWidth = 600;
 const int kPhysicalHeight = 1280;
 const int kMaxGames = 18;
 const off_t kMaximumManifestBytes = 65536;
+const int kMaximumCoverWidth = 320;
+const int kMaximumCoverHeight = 268;
+const off_t kMaximumCoverBytes =
+    1024 + kMaximumCoverWidth * kMaximumCoverHeight * 3;
+const off_t kMaximumPngCoverBytes = 4 * 1024 * 1024;
+const png_uint_32 kMaximumPngDimension = 2048;
 // Touch is not a gameplay input. A hold anywhere is unambiguous and avoids an
 // invisible corner target that may be confused with the inset NES image.
 const int kExitHoldWidth = kLogicalWidth;
@@ -393,13 +401,40 @@ bool validate_rom(const std::string &system, const std::string &path,
   return ok;
 }
 
+struct CoverImage {
+  int width;
+  int height;
+  std::vector<uint16_t> pixels;
+
+  CoverImage() : width(0), height(0) {}
+  bool available() const {
+    return width > 0 && height > 0 &&
+           pixels.size() == static_cast<size_t>(width * height);
+  }
+};
+
 struct GameEntry {
   std::string id;
   std::string title;
   std::string system;
   std::string rom;
   RgbColor color;
+  CoverImage cover;
 };
+
+GameEntry built_in_terminal_entry(const std::string &launcher) {
+  GameEntry entry;
+  entry.id = "terminal";
+  entry.title = "TERMINAL";
+  entry.system = "deck";
+  entry.rom = launcher;
+  entry.color = xterm_color(67);
+  return entry;
+}
+
+bool is_built_in_terminal(const GameEntry &game) {
+  return game.id == "terminal" && game.system == "deck";
+}
 
 std::vector<std::string> split_tabs(const std::string &line) {
   std::vector<std::string> fields;
@@ -914,6 +949,304 @@ struct Rect {
 
 typedef std::vector<uint16_t> Canvas;
 
+bool next_ppm_token(const std::vector<unsigned char> &bytes, size_t *offset,
+                    std::string *token) {
+  if (!offset || !token)
+    return false;
+  while (*offset < bytes.size()) {
+    const unsigned char ch = bytes[*offset];
+    if (std::isspace(ch)) {
+      ++*offset;
+      continue;
+    }
+    if (ch == '#') {
+      while (*offset < bytes.size() && bytes[*offset] != '\n')
+        ++*offset;
+      continue;
+    }
+    break;
+  }
+  const size_t start = *offset;
+  while (*offset < bytes.size() &&
+         !std::isspace(static_cast<unsigned char>(bytes[*offset])) &&
+         bytes[*offset] != '#')
+    ++*offset;
+  if (*offset == start || *offset - start > 32)
+    return false;
+  token->assign(reinterpret_cast<const char *>(&bytes[start]),
+                *offset - start);
+  return true;
+}
+
+bool parse_positive_dimension(const std::string &text, int maximum,
+                              int *value) {
+  if (!value || text.empty())
+    return false;
+  int parsed = 0;
+  for (size_t index = 0; index < text.size(); ++index) {
+    if (text[index] < '0' || text[index] > '9')
+      return false;
+    parsed = parsed * 10 + text[index] - '0';
+    if (parsed > maximum)
+      return false;
+  }
+  if (parsed < 1 || std::to_string(parsed) != text)
+    return false;
+  *value = parsed;
+  return true;
+}
+
+bool load_ppm_cover_image(const std::string &path, CoverImage *cover,
+                          std::string *error) {
+  if (!cover)
+    return false;
+  *cover = CoverImage();
+  const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) {
+    if (errno != ENOENT && error)
+      *error = errno_message("cannot open cover " + path);
+    return false;
+  }
+
+  struct stat info;
+  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size < 12 ||
+      info.st_size > kMaximumCoverBytes) {
+    const int saved_errno = errno;
+    close(fd);
+    errno = saved_errno;
+    if (error)
+      *error = "cover must be a small regular PPM file: " + path;
+    return false;
+  }
+
+  std::vector<unsigned char> bytes(static_cast<size_t>(info.st_size));
+  size_t used = 0;
+  while (used < bytes.size()) {
+    const ssize_t amount = read(fd, &bytes[used], bytes.size() - used);
+    if (amount > 0)
+      used += static_cast<size_t>(amount);
+    else if (amount < 0 && errno == EINTR)
+      continue;
+    else
+      break;
+  }
+  const int read_errno = errno;
+  const bool close_ok = close(fd) == 0;
+  if (used != bytes.size() || !close_ok) {
+    errno = read_errno;
+    if (error)
+      *error = errno_message("cannot read cover " + path);
+    return false;
+  }
+
+  size_t offset = 0;
+  std::string magic;
+  std::string width_text;
+  std::string height_text;
+  std::string maximum_text;
+  int width = 0;
+  int height = 0;
+  if (!next_ppm_token(bytes, &offset, &magic) || magic != "P6" ||
+      !next_ppm_token(bytes, &offset, &width_text) ||
+      !parse_positive_dimension(width_text, kMaximumCoverWidth, &width) ||
+      !next_ppm_token(bytes, &offset, &height_text) ||
+      !parse_positive_dimension(height_text, kMaximumCoverHeight, &height) ||
+      !next_ppm_token(bytes, &offset, &maximum_text) ||
+      maximum_text != "255" || offset >= bytes.size() ||
+      !std::isspace(static_cast<unsigned char>(bytes[offset]))) {
+    if (error)
+      *error = "cover has an invalid P6 PPM header: " + path;
+    return false;
+  }
+  if (bytes[offset] == '\r' && offset + 1 < bytes.size() &&
+      bytes[offset + 1] == '\n')
+    offset += 2;
+  else
+    ++offset;
+
+  const size_t pixel_count = static_cast<size_t>(width * height);
+  if (bytes.size() - offset != pixel_count * 3) {
+    if (error)
+      *error = "cover PPM pixel data has the wrong size: " + path;
+    return false;
+  }
+
+  cover->pixels.reserve(pixel_count);
+  for (size_t pixel = 0; pixel < pixel_count; ++pixel) {
+    const size_t source = offset + pixel * 3;
+    const RgbColor color{bytes[source], bytes[source + 1], bytes[source + 2]};
+    if (!is_xterm_color(color)) {
+      *cover = CoverImage();
+      if (error)
+        *error = "cover contains a color outside xterm-256: " + path;
+      return false;
+    }
+    cover->pixels.push_back(color.pixel());
+  }
+  cover->width = width;
+  cover->height = height;
+  return true;
+}
+
+const std::vector<uint16_t> &xterm_quantization_table() {
+  static std::vector<uint16_t> table;
+  if (!table.empty())
+    return table;
+  table.resize(32 * 32 * 32);
+  for (int red5 = 0; red5 < 32; ++red5) {
+    const int red = (red5 << 3) | (red5 >> 2);
+    for (int green5 = 0; green5 < 32; ++green5) {
+      const int green = (green5 << 3) | (green5 >> 2);
+      for (int blue5 = 0; blue5 < 32; ++blue5) {
+        const int blue = (blue5 << 3) | (blue5 >> 2);
+        unsigned int best_distance = UINT_MAX;
+        uint16_t best_pixel = 0;
+        for (unsigned int index = 0; index < 256; ++index) {
+          const RgbColor candidate = xterm_color(index);
+          const int red_delta = red - candidate.red;
+          const int green_delta = green - candidate.green;
+          const int blue_delta = blue - candidate.blue;
+          const unsigned int distance = static_cast<unsigned int>(
+              red_delta * red_delta + green_delta * green_delta +
+              blue_delta * blue_delta);
+          if (distance < best_distance) {
+            best_distance = distance;
+            best_pixel = candidate.pixel();
+          }
+        }
+        const size_t offset = static_cast<size_t>((red5 << 10) |
+                                                  (green5 << 5) | blue5);
+        table[offset] = best_pixel;
+      }
+    }
+  }
+  return table;
+}
+
+bool load_png_cover_image(const std::string &path,
+                          const RgbColor &background, CoverImage *cover,
+                          std::string *error) {
+  if (!cover)
+    return false;
+  *cover = CoverImage();
+  struct stat info;
+  if (lstat(path.c_str(), &info) != 0) {
+    if (errno != ENOENT && error)
+      *error = errno_message("cannot stat cover " + path);
+    return false;
+  }
+  if (!S_ISREG(info.st_mode) || info.st_size < 8 ||
+      info.st_size > kMaximumPngCoverBytes) {
+    if (error)
+      *error = "cover must be a regular PNG no larger than 4 MiB: " + path;
+    return false;
+  }
+
+  png_image image;
+  std::memset(&image, 0, sizeof(image));
+  image.version = PNG_IMAGE_VERSION;
+  if (!png_image_begin_read_from_file(&image, path.c_str())) {
+    if (error)
+      *error = "cannot decode cover PNG " + path + ": " + image.message;
+    return false;
+  }
+  if (image.width < 1 || image.height < 1 ||
+      image.width > kMaximumPngDimension ||
+      image.height > kMaximumPngDimension) {
+    png_image_free(&image);
+    if (error)
+      *error = "cover PNG dimensions are outside 1..2048: " + path;
+    return false;
+  }
+  image.format = PNG_FORMAT_RGBA;
+  std::vector<png_byte> source(PNG_IMAGE_SIZE(image));
+  if (!png_image_finish_read(&image, NULL, &source[0], 0, NULL)) {
+    if (error)
+      *error = "cannot read cover PNG " + path + ": " + image.message;
+    png_image_free(&image);
+    return false;
+  }
+
+  png_uint_32 target_width = image.width;
+  png_uint_32 target_height = image.height;
+  if (target_width > static_cast<png_uint_32>(kMaximumCoverWidth) ||
+      target_height > static_cast<png_uint_32>(kMaximumCoverHeight)) {
+    if (static_cast<uint64_t>(target_width) * kMaximumCoverHeight >
+        static_cast<uint64_t>(target_height) * kMaximumCoverWidth) {
+      target_width = kMaximumCoverWidth;
+      target_height = std::max<png_uint_32>(
+          1, static_cast<png_uint_32>(static_cast<uint64_t>(image.height) *
+                                      target_width / image.width));
+    } else {
+      target_height = kMaximumCoverHeight;
+      target_width = std::max<png_uint_32>(
+          1, static_cast<png_uint_32>(static_cast<uint64_t>(image.width) *
+                                      target_height / image.height));
+    }
+  }
+
+  const std::vector<uint16_t> &quantized = xterm_quantization_table();
+  cover->pixels.resize(static_cast<size_t>(target_width * target_height));
+  for (png_uint_32 y = 0; y < target_height; ++y) {
+    const png_uint_32 source_y =
+        static_cast<png_uint_32>(static_cast<uint64_t>(y) * image.height /
+                                 target_height);
+    for (png_uint_32 x = 0; x < target_width; ++x) {
+      const png_uint_32 source_x =
+          static_cast<png_uint_32>(static_cast<uint64_t>(x) * image.width /
+                                   target_width);
+      const size_t source_offset =
+          static_cast<size_t>((source_y * image.width + source_x) * 4);
+      const unsigned int alpha = source[source_offset + 3];
+      const unsigned int inverse_alpha = 255 - alpha;
+      const unsigned int red =
+          (source[source_offset] * alpha + background.red * inverse_alpha +
+           127) /
+          255;
+      const unsigned int green =
+          (source[source_offset + 1] * alpha +
+           background.green * inverse_alpha + 127) /
+          255;
+      const unsigned int blue =
+          (source[source_offset + 2] * alpha + background.blue * inverse_alpha +
+           127) /
+          255;
+      const size_t quantized_offset =
+          static_cast<size_t>(((red >> 3) << 10) | ((green >> 3) << 5) |
+                              (blue >> 3));
+      cover->pixels[static_cast<size_t>(y * target_width + x)] =
+          quantized[quantized_offset];
+    }
+  }
+  cover->width = static_cast<int>(target_width);
+  cover->height = static_cast<int>(target_height);
+  png_image_free(&image);
+  return true;
+}
+
+size_t load_game_covers(const std::string &directory,
+                        std::vector<GameEntry> *games) {
+  if (!games || !is_absolute_path(directory))
+    return 0;
+  size_t loaded = 0;
+  for (size_t index = 0; index < games->size(); ++index) {
+    const std::string png_path =
+        directory + "/" + (*games)[index].id + ".png";
+    const std::string ppm_path =
+        directory + "/" + (*games)[index].id + ".ppm";
+    std::string error;
+    CoverImage cover;
+    if (load_png_cover_image(png_path, (*games)[index].color, &cover, &error) ||
+        (error.empty() && load_ppm_cover_image(ppm_path, &cover, &error))) {
+      (*games)[index].cover = cover;
+      ++loaded;
+    } else if (!error.empty()) {
+      std::cerr << "deck-menu: " << error << std::endl;
+    }
+  }
+  return loaded;
+}
+
 bool stage_canvas_for_scanout(const Canvas &canvas, size_t row_words,
                               std::vector<uint16_t> *frame) {
   if (!frame ||
@@ -946,6 +1279,21 @@ void fill_rect(Canvas *canvas, const Rect &rect, uint16_t color) {
   for (int y = top; y < bottom; ++y) {
     std::fill(canvas->begin() + y * kLogicalWidth + left,
               canvas->begin() + y * kLogicalWidth + right, color);
+  }
+}
+
+void draw_cover(Canvas *canvas, const Rect &bounds, const CoverImage &cover) {
+  if (!canvas || !cover.available() || cover.width > bounds.width ||
+      cover.height > bounds.height)
+    return;
+  const int left = bounds.x + (bounds.width - cover.width) / 2;
+  const int top = bounds.y + (bounds.height - cover.height) / 2;
+  for (int y = 0; y < cover.height; ++y) {
+    std::copy(cover.pixels.begin() + static_cast<size_t>(y * cover.width),
+              cover.pixels.begin() +
+                  static_cast<size_t>((y + 1) * cover.width),
+              canvas->begin() +
+                  static_cast<size_t>((top + y) * kLogicalWidth + left));
   }
 }
 
@@ -1130,13 +1478,6 @@ std::string fit_text_width(const std::string &text, int maximum_width,
   return shown;
 }
 
-uint16_t contrasting_text(const RgbColor &color) {
-  const unsigned int luminance =
-      299 * color.red + 587 * color.green + 114 * color.blue;
-  return luminance >= 145000 ? xterm_pixel(kColorTextDark)
-                             : xterm_pixel(kColorWhite);
-}
-
 std::string volume_label(unsigned int volume) {
   return volume == 0 ? "VOL OFF" : "VOL " + std::to_string(volume) + "%";
 }
@@ -1148,13 +1489,18 @@ struct MenuLayout {
   Rect keymap_button;
   Rect wifi_button;
   Rect terminal_button;
-  struct SystemTab {
-    Rect bounds;
-    std::string system;
-  };
-  std::vector<SystemTab> system_tabs;
+  Rect system_up_button;
+  Rect system_button;
+  Rect system_down_button;
+  Rect game_previous_button;
+  Rect game_next_button;
+  Rect game_art;
+  bool game_view;
+  std::vector<std::string> systems;
   std::vector<Rect> game_buttons;
+  std::vector<Rect> game_position_indicators;
   std::vector<size_t> game_indices;
+  size_t shown_game_index;
 };
 
 enum MenuTarget {
@@ -1165,28 +1511,25 @@ enum MenuTarget {
   MenuTargetVolumeUp = -5,
   MenuTargetKeymap = -6,
   MenuTargetVolumeToggle = -7,
+  MenuTargetSystemUp = -8,
+  MenuTargetSystemOpen = -9,
+  MenuTargetSystemDown = -10,
+  MenuTargetGamePrevious = -11,
+  MenuTargetGameNext = -12,
+  MenuTargetSystemBack = -13,
 };
-
-const int kSystemTargetBase = -100;
-
-bool is_system_target(int target) { return target <= kSystemTargetBase; }
-
-size_t system_target_index(int target) {
-  return static_cast<size_t>(kSystemTargetBase - target);
-}
 
 struct SystemDefinition {
   const char *system;
   const char *label;
-  int width;
 };
 
 const SystemDefinition kSystemDefinitions[] = {
-    {"nes", "NES", 120},
-    {"gb", "GAME BOY", 180},
-    {"gbc", "GAME BOY COLOR", 240},
-    {"chip8", "CHIP-8", 160},
-    {"deck", "DECK", 120},
+    {"nes", "NES"},
+    {"gb", "GAME BOY"},
+    {"gbc", "GAME BOY COLOR"},
+    {"chip8", "CHIP-8"},
+    {"deck", "DECK"},
 };
 
 bool has_system(const std::vector<GameEntry> &games,
@@ -1208,8 +1551,19 @@ std::string initial_system(const std::vector<GameEntry> &games) {
   return games.empty() ? std::string() : games[0].system;
 }
 
+std::string system_label(const std::string &system) {
+  for (size_t definition = 0;
+       definition < sizeof(kSystemDefinitions) / sizeof(kSystemDefinitions[0]);
+       ++definition) {
+    if (system == kSystemDefinitions[definition].system)
+      return kSystemDefinitions[definition].label;
+  }
+  return display_ascii(system);
+}
+
 void draw_terminal_icon(Canvas *canvas, const Rect &button, uint16_t color) {
-  const Rect screen{button.x + 18, button.y + 10, button.width - 36, 34};
+  const Rect screen{button.x + (button.width - 46) / 2, button.y + 10, 46,
+                    34};
   stroke_rect(canvas, screen, 3, color);
   fill_rect(canvas, Rect{button.x + button.width / 2 - 3, button.y + 44, 6, 7},
             color);
@@ -1218,67 +1572,119 @@ void draw_terminal_icon(Canvas *canvas, const Rect &button, uint16_t color) {
   draw_text(canvas, screen.x + 7, screen.y + 9, ">_", 2, color);
 }
 
+enum ArrowDirection { ArrowUp, ArrowDown, ArrowLeft, ArrowRight };
+
+void draw_arrow_icon(Canvas *canvas, const Rect &button,
+                     ArrowDirection direction, uint16_t color) {
+  const int center_x = button.x + button.width / 2;
+  const int center_y = button.y + button.height / 2;
+  if (direction == ArrowUp) {
+    const int tip_y = center_y - 24;
+    fill_rect(canvas, Rect{center_x - 8, tip_y, 16, 8}, color);
+    fill_rect(canvas, Rect{center_x - 16, tip_y + 8, 32, 8}, color);
+    fill_rect(canvas, Rect{center_x - 24, tip_y + 16, 48, 8}, color);
+    fill_rect(canvas, Rect{center_x - 8, tip_y + 24, 16, 24}, color);
+    return;
+  }
+  if (direction == ArrowDown) {
+    const int stem_y = center_y - 24;
+    fill_rect(canvas, Rect{center_x - 8, stem_y, 16, 24}, color);
+    fill_rect(canvas, Rect{center_x - 24, stem_y + 24, 48, 8}, color);
+    fill_rect(canvas, Rect{center_x - 16, stem_y + 32, 32, 8}, color);
+    fill_rect(canvas, Rect{center_x - 8, stem_y + 40, 16, 8}, color);
+    return;
+  }
+
+  if (direction == ArrowLeft) {
+    fill_rect(canvas, Rect{center_x - 36, center_y - 8, 8, 16}, color);
+    fill_rect(canvas, Rect{center_x - 28, center_y - 16, 8, 32}, color);
+    fill_rect(canvas, Rect{center_x - 20, center_y - 24, 8, 48}, color);
+    fill_rect(canvas, Rect{center_x - 12, center_y - 8, 48, 16}, color);
+    return;
+  }
+  fill_rect(canvas, Rect{center_x + 28, center_y - 8, 8, 16}, color);
+  fill_rect(canvas, Rect{center_x + 20, center_y - 16, 8, 32}, color);
+  fill_rect(canvas, Rect{center_x + 12, center_y - 24, 8, 48}, color);
+  fill_rect(canvas, Rect{center_x - 36, center_y - 8, 48, 16}, color);
+}
+
+void draw_wifi_icon(Canvas *canvas, const Rect &button, uint16_t color) {
+  const int center_x = button.x + button.width / 2;
+  const int top = button.y + 5;
+  fill_rect(canvas, Rect{center_x - 6, top, 12, 5}, color);
+  fill_rect(canvas, Rect{center_x - 12, top + 5, 6, 5}, color);
+  fill_rect(canvas, Rect{center_x + 6, top + 5, 6, 5}, color);
+  fill_rect(canvas, Rect{center_x - 18, top + 10, 6, 5}, color);
+  fill_rect(canvas, Rect{center_x + 12, top + 10, 6, 5}, color);
+  fill_rect(canvas, Rect{center_x - 6, top + 22, 12, 5}, color);
+  fill_rect(canvas, Rect{center_x - 12, top + 27, 6, 5}, color);
+  fill_rect(canvas, Rect{center_x + 6, top + 27, 6, 5}, color);
+  fill_rect(canvas, Rect{center_x - 3, top + 36, 6, 6}, color);
+}
+
+void render_top_controls(unsigned int volume, const std::string &keymap,
+                         Canvas *canvas, MenuLayout *layout) {
+  const int gap = 0;
+  int x = 447;
+  layout->terminal_button = Rect{x, 10, 68, 52};
+  draw_terminal_icon(canvas, layout->terminal_button,
+                     xterm_pixel(kColorText));
+  x += layout->terminal_button.width + gap;
+
+  layout->keymap_button = Rect{x, 10, 52, 52};
+  draw_centered_text(canvas, layout->keymap_button,
+                     keymap == "cz" ? "CZ" : "EN", 2,
+                     xterm_pixel(kColorText));
+  x += layout->keymap_button.width + gap;
+
+  layout->wifi_button = Rect{x, 10, 52, 52};
+  draw_wifi_icon(canvas, layout->wifi_button, xterm_pixel(kColorText));
+  x += layout->wifi_button.width + gap;
+
+  layout->volume_down_button = Rect{x, 10, 52, 52};
+  draw_centered_text(canvas, layout->volume_down_button, "-", 4,
+                     xterm_pixel(kColorText));
+  x += layout->volume_down_button.width + gap;
+
+  layout->volume_display = Rect{x, 10, 110, 52};
+  const RgbColor volume_color =
+      xterm_color(volume == 0 ? kColorVolumeOff : kColorVolumeOn);
+  draw_centered_text(canvas, layout->volume_display, volume_label(volume), 2,
+                     volume_color.pixel());
+  x += layout->volume_display.width + gap;
+
+  layout->volume_up_button = Rect{x, 10, 52, 52};
+  draw_centered_text(canvas, layout->volume_up_button, "+", 4,
+                     xterm_pixel(kColorText));
+}
+
 void render_menu(const std::vector<GameEntry> &games,
                  const std::string &active_system, unsigned int volume,
-                 const std::string &keymap,
+                 const std::string &keymap, bool game_view,
+                 size_t game_position,
                  const std::string &status, Canvas *canvas,
                  MenuLayout *layout) {
   if (!canvas || !layout)
     return;
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
                  xterm_pixel(kColorBackground));
+  layout->terminal_button = Rect{0, 0, 0, 0};
+  layout->keymap_button = Rect{0, 0, 0, 0};
+  layout->wifi_button = Rect{0, 0, 0, 0};
+  layout->volume_down_button = Rect{0, 0, 0, 0};
+  layout->volume_display = Rect{0, 0, 0, 0};
+  layout->volume_up_button = Rect{0, 0, 0, 0};
+  if (game_view)
+    render_top_controls(volume, keymap, canvas, layout);
 
-  draw_text(canvas, 20, 12, "RETRO DECK", 7, xterm_pixel(kColorTitle));
-
-  layout->terminal_button = Rect{682, 10, 82, 62};
-  fill_rect(canvas, layout->terminal_button, xterm_pixel(kColorSurface));
-  draw_terminal_icon(canvas, layout->terminal_button,
-                     xterm_pixel(kColorText));
-
-  layout->keymap_button = Rect{774, 10, 102, 62};
-  fill_rect(canvas, layout->keymap_button, xterm_pixel(kColorSurface));
-  draw_centered_text(canvas, layout->keymap_button,
-                     keymap == "cz" ? "KEYS CZ" : "KEYS US", 2,
-                     xterm_pixel(kColorText));
-
-  layout->wifi_button = Rect{886, 10, 98, 62};
-  fill_rect(canvas, layout->wifi_button, xterm_pixel(kColorSurface));
-  draw_centered_text(canvas, layout->wifi_button, "WIFI", 2,
-                     xterm_pixel(kColorText));
-
-  layout->volume_down_button = Rect{994, 10, 62, 62};
-  layout->volume_display = Rect{1062, 10, 130, 62};
-  layout->volume_up_button = Rect{1198, 10, 62, 62};
-  const RgbColor volume_color =
-      xterm_color(volume == 0 ? kColorVolumeOff : kColorVolumeOn);
-  fill_rect(canvas, layout->volume_down_button, xterm_pixel(kColorSurface));
-  draw_centered_text(canvas, layout->volume_down_button, "-", 4,
-                     xterm_pixel(kColorText));
-  fill_rect(canvas, layout->volume_display, volume_color.pixel());
-  draw_centered_text(canvas, layout->volume_display, volume_label(volume), 2,
-                     contrasting_text(volume_color));
-  fill_rect(canvas, layout->volume_up_button, xterm_pixel(kColorSurface));
-  draw_centered_text(canvas, layout->volume_up_button, "+", 4,
-                     xterm_pixel(kColorText));
-
-  layout->system_tabs.clear();
-  int tab_x = 12;
+  layout->game_view = game_view;
+  layout->systems.clear();
   for (size_t definition = 0;
        definition < sizeof(kSystemDefinitions) / sizeof(kSystemDefinitions[0]);
        ++definition) {
     if (!has_system(games, kSystemDefinitions[definition].system))
       continue;
-    const Rect tab{tab_x, 84, kSystemDefinitions[definition].width, 48};
-    const bool selected = active_system == kSystemDefinitions[definition].system;
-    const RgbColor tab_color = xterm_color(selected ? kColorSelected
-                                                    : kColorSurface);
-    fill_rect(canvas, tab, tab_color.pixel());
-    draw_centered_text(canvas, tab, kSystemDefinitions[definition].label, 2,
-                       selected ? contrasting_text(tab_color)
-                                : xterm_pixel(kColorInactiveText));
-    layout->system_tabs.push_back(MenuLayout::SystemTab{
-        tab, kSystemDefinitions[definition].system});
-    tab_x += tab.width + 8;
+    layout->systems.push_back(kSystemDefinitions[definition].system);
   }
 
   layout->game_indices.clear();
@@ -1286,54 +1692,85 @@ void render_menu(const std::vector<GameEntry> &games,
     if (games[index].system == active_system)
       layout->game_indices.push_back(index);
   }
-
-  const int game_count = static_cast<int>(layout->game_indices.size());
-  int columns = 3;
-  if (game_count > 6 && game_count <= 8)
-    columns = 4;
-  else if (game_count > 8)
-    columns = 6;
-  const int rows = (game_count + columns - 1) / columns;
-  const int layout_rows = std::max(2, rows);
-  const int margin_x = 12;
-  const int gap = 12;
-  const int grid_top = 144;
-  const int grid_bottom = 444;
-  const int cell_width =
-      (kLogicalWidth - 2 * margin_x - (columns - 1) * gap) / columns;
-  const int cell_height =
-      (grid_bottom - grid_top - (layout_rows - 1) * gap) / layout_rows;
-
   layout->game_buttons.clear();
-  for (int index = 0; index < game_count; ++index) {
-    const size_t game_index = layout->game_indices[index];
-    const int column = index % columns;
-    const int row = index / columns;
-    const Rect cell{margin_x + column * (cell_width + gap),
-                    grid_top + row * (cell_height + gap), cell_width,
-                    cell_height};
-    layout->game_buttons.push_back(cell);
+  layout->game_position_indicators.clear();
+  layout->shown_game_index = games.size();
+  layout->system_up_button = Rect{0, 0, 0, 0};
+  layout->system_down_button = Rect{0, 0, 0, 0};
+  layout->game_previous_button = Rect{0, 0, 0, 0};
+  layout->game_next_button = Rect{0, 0, 0, 0};
+  layout->game_art = Rect{0, 0, 0, 0};
 
-    fill_rect(canvas, cell, games[game_index].color.pixel());
-    const uint16_t text_color = contrasting_text(games[game_index].color);
+  const RgbColor console_color = xterm_color(202);
+  if (!game_view) {
+    layout->system_button = Rect{290, 140, 700, 200};
+    layout->system_up_button = Rect{1002, 140, 120, 90};
+    layout->system_down_button = Rect{1002, 250, 120, 90};
+    draw_arrow_icon(canvas, layout->system_up_button, ArrowUp,
+                    console_color.pixel());
+    fill_rect(canvas, layout->system_button, console_color.pixel());
+    const std::string label = system_label(active_system);
+    draw_centered_text(canvas, layout->system_button, label,
+                       fit_text_scale(label, layout->system_button.width - 40,
+                                      6, 3),
+                       xterm_pixel(kColorBackground));
+    draw_arrow_icon(canvas, layout->system_down_button, ArrowDown,
+                    console_color.pixel());
+  } else if (!layout->game_indices.empty()) {
+    layout->system_button = Rect{500, 84, 280, 48};
+    fill_rect(canvas, layout->system_button, console_color.pixel());
+    draw_centered_text(canvas, layout->system_button,
+                       system_label(active_system), 2,
+                       xterm_pixel(kColorBackground));
 
-    const std::string shown_title =
-        fit_text_width(games[game_index].title, cell.width - 28,
-                       kGameTitleScale);
+    layout->game_previous_button = Rect{24, 203, 128, 150};
+    layout->game_next_button = Rect{1128, 203, 128, 150};
+    draw_arrow_icon(canvas, layout->game_previous_button, ArrowLeft,
+                    console_color.pixel());
+    draw_arrow_icon(canvas, layout->game_next_button, ArrowRight,
+                    console_color.pixel());
+
+    const size_t shown_position = game_position % layout->game_indices.size();
+    const size_t game_index = layout->game_indices[shown_position];
+    layout->shown_game_index = game_index;
+    const Rect game_button{174, 144, 932, 302};
+    layout->game_art = Rect{174, 144, 932, 268};
+    layout->game_buttons.push_back(game_button);
+    fill_rect(canvas, layout->game_art, games[game_index].color.pixel());
+    draw_cover(canvas, layout->game_art, games[game_index].cover);
+    const std::string shown_title = fit_text_width(
+        games[game_index].title, game_button.width - 40, kGameTitleScale);
     draw_centered_text(canvas,
-                       Rect{cell.x + 14, cell.y, cell.width - 28, cell.height},
-                       shown_title, kGameTitleScale, text_color);
+                       Rect{game_button.x + 20, 418,
+                            game_button.width - 40, 22},
+                       shown_title, kGameTitleScale, xterm_pixel(kColorText));
+    const int indicator_width = 16;
+    const int indicator_height = 8;
+    const int indicator_gap = 8;
+    const int indicator_count =
+        static_cast<int>(layout->game_indices.size());
+    const int indicator_row_width =
+        indicator_count * indicator_width +
+        std::max(0, indicator_count - 1) * indicator_gap;
+    int indicator_x = (kLogicalWidth - indicator_row_width) / 2;
+    for (int indicator = 0; indicator < indicator_count; ++indicator) {
+      const Rect bounds{indicator_x, 458, indicator_width, indicator_height};
+      layout->game_position_indicators.push_back(bounds);
+      stroke_rect(canvas, bounds, 2,
+                  xterm_pixel(static_cast<size_t>(indicator) == shown_position
+                                  ? kColorFooter
+                                  : kColorControlBorder));
+      indicator_x += indicator_width + indicator_gap;
+    }
   }
 
-  const std::string footer =
-      status.empty()
-          ? "CONSOLE GAMES: HOLD ANYWHERE FOR 2 SECONDS TO RETURN"
-          : status;
-  const int footer_scale = fit_text_scale(footer, kLogicalWidth - 24, 2, 1);
-  const std::string shown_footer =
-      fit_text_width(footer, kLogicalWidth - 24, footer_scale);
-  draw_centered_text(canvas, Rect{12, 452, kLogicalWidth - 24, 28},
-                     shown_footer, footer_scale, xterm_pixel(kColorFooter));
+  if (!status.empty()) {
+    fill_rect(canvas, Rect{0, 446, kLogicalWidth, 34},
+              xterm_pixel(kColorBackground));
+    const int footer_scale = fit_text_scale(status, kLogicalWidth - 24, 2, 1);
+    draw_centered_text(canvas, Rect{12, 450, kLogicalWidth - 24, 26}, status,
+                       footer_scale, xterm_pixel(kColorFooter));
+  }
 }
 
 enum WifiField { WifiSsid, WifiPassphrase };
@@ -2154,15 +2591,37 @@ int target_at(const MenuLayout &layout, int x, int y) {
     return MenuTargetVolumeUp;
   if (layout.keymap_button.contains(x, y))
     return MenuTargetKeymap;
-  for (size_t i = 0; i < layout.system_tabs.size(); ++i) {
-    if (layout.system_tabs[i].bounds.contains(x, y))
-      return kSystemTargetBase - static_cast<int>(i);
-  }
-  for (size_t i = 0; i < layout.game_buttons.size(); ++i) {
-    if (layout.game_buttons[i].contains(x, y))
-      return static_cast<int>(layout.game_indices[i]);
-  }
+  if (layout.system_up_button.contains(x, y))
+    return MenuTargetSystemUp;
+  if (layout.system_button.contains(x, y))
+    return layout.game_view ? MenuTargetSystemBack : MenuTargetSystemOpen;
+  if (layout.system_down_button.contains(x, y))
+    return MenuTargetSystemDown;
+  if (layout.game_previous_button.contains(x, y))
+    return MenuTargetGamePrevious;
+  if (layout.game_next_button.contains(x, y))
+    return MenuTargetGameNext;
+  if (!layout.game_buttons.empty() &&
+      layout.game_buttons[0].contains(x, y) &&
+      layout.shown_game_index < static_cast<size_t>(INT_MAX))
+    return static_cast<int>(layout.shown_game_index);
   return MenuTargetNone;
+}
+
+std::string adjacent_system(const std::vector<std::string> &systems,
+                            const std::string &active_system, int direction) {
+  if (systems.empty())
+    return active_system;
+  size_t position = 0;
+  while (position < systems.size() && systems[position] != active_system)
+    ++position;
+  if (position == systems.size())
+    position = 0;
+  if (direction < 0)
+    position = position == 0 ? systems.size() - 1 : position - 1;
+  else
+    position = (position + 1) % systems.size();
+  return systems[position];
 }
 
 unsigned int volume_after_menu_target(int target, unsigned int volume,
@@ -2435,6 +2894,7 @@ struct Options {
   std::string chip8_emulator;
   std::string deck_game;
   std::string manifest;
+  std::string cover_directory;
   std::string volume_state;
   std::string keymap_state;
   std::string terminal;
@@ -2459,6 +2919,7 @@ void print_usage(const char *program) {
   std::cerr << "Usage:\n  " << program
             << " --nes-emulator PATH --gb-emulator PATH "
                "--chip8-emulator PATH --deck-game PATH --manifest PATH "
+               "--cover-directory PATH "
                "--volume-state PATH "
                "--keymap-state PATH --terminal PATH --wifi-helper PATH\n  "
             << program << " --geometry-test\n";
@@ -2479,6 +2940,7 @@ bool parse_options(int argc, char **argv, Options *options,
                argument == "--chip8-emulator" ||
                argument == "--deck-game" ||
                argument == "--manifest" ||
+               argument == "--cover-directory" ||
                argument == "--volume-state" ||
                argument == "--keymap-state" || argument == "--terminal" ||
                argument == "--wifi-helper") {
@@ -2498,6 +2960,8 @@ bool parse_options(int argc, char **argv, Options *options,
         destination = &options->deck_game;
       else if (argument == "--manifest")
         destination = &options->manifest;
+      else if (argument == "--cover-directory")
+        destination = &options->cover_directory;
       else if (argument == "--volume-state")
         destination = &options->volume_state;
       else if (argument == "--keymap-state")
@@ -2531,13 +2995,13 @@ bool parse_options(int argc, char **argv, Options *options,
   }
   if (options->nes_emulator.empty() || options->gb_emulator.empty() ||
       options->chip8_emulator.empty() || options->deck_game.empty() ||
-      options->manifest.empty() ||
+      options->manifest.empty() || options->cover_directory.empty() ||
       options->volume_state.empty() || options->keymap_state.empty() ||
       options->terminal.empty() || options->wifi_helper.empty()) {
     if (error)
       *error = "--nes-emulator, --gb-emulator, --chip8-emulator, --deck-game, "
-               "--manifest, --volume-state, --keymap-state, --terminal, and "
-               "--wifi-helper are required";
+               "--manifest, --cover-directory, --volume-state, "
+               "--keymap-state, --terminal, and --wifi-helper are required";
     return false;
   }
   return true;
@@ -2566,6 +3030,15 @@ int application_main(const Options &options) {
     std::cerr << "deck-menu: " << error << std::endl;
     return 1;
   }
+  games.push_back(built_in_terminal_entry(options.terminal));
+  if (!is_absolute_path(options.cover_directory)) {
+    std::cerr << "deck-menu: cover directory must be an absolute path"
+              << std::endl;
+    return 1;
+  }
+  std::cerr << "deck-menu: loaded "
+            << load_game_covers(options.cover_directory, &games)
+            << " local covers" << std::endl;
 
   unsigned int volume = default_volume;
   if (!load_volume_state(options.volume_state, default_volume, &volume,
@@ -2600,9 +3073,15 @@ int application_main(const Options &options) {
   WifiLayout wifi_layout;
   WifiState wifi_state;
   bool wifi_view = false;
+  bool game_view = false;
+  size_t game_position = 0;
   std::string active_system = initial_system(games);
   std::string status;
-  render_menu(games, active_system, volume, keymap, status, &canvas, &layout);
+  const auto render_current_menu = [&]() {
+    render_menu(games, active_system, volume, keymap, game_view,
+                game_position, status, &canvas, &layout);
+  };
+  render_current_menu();
   if (!framebuffer.present(canvas, &error)) {
     std::cerr << "deck-menu: " << error << std::endl;
     return 1;
@@ -2620,8 +3099,7 @@ int application_main(const Options &options) {
           render_wifi(wifi_state, &canvas, &wifi_layout);
         } else {
           status = "TOUCHSCREEN RECONNECTED";
-          render_menu(games, active_system, volume, keymap, status, &canvas,
-                      &layout);
+          render_current_menu();
         }
         framebuffer.present(canvas, NULL);
       }
@@ -2654,8 +3132,7 @@ int application_main(const Options &options) {
         render_wifi(wifi_state, &canvas, &wifi_layout);
       } else {
         status = "WAITING FOR TOUCHSCREEN";
-        render_menu(games, active_system, volume, keymap, status, &canvas,
-                    &layout);
+        render_current_menu();
       }
       framebuffer.present(canvas, NULL);
       continue;
@@ -2680,8 +3157,7 @@ int application_main(const Options &options) {
         if (released_target == WifiTargetBack) {
           wifi_view = false;
           status = "WIFI EDITOR CLOSED";
-          render_menu(games, active_system, volume, keymap, status, &canvas,
-                      &layout);
+          render_current_menu();
         } else if (released_target == WifiTargetSave) {
           std::string wifi_error;
           if (save_wifi_profile(options.wifi_helper, wifi_state.ssid,
@@ -2698,16 +3174,45 @@ int application_main(const Options &options) {
           render_wifi(wifi_state, &canvas, &wifi_layout);
         }
         framebuffer.present(canvas, NULL);
-      } else if (!wifi_view && is_system_target(pressed_target) &&
-                 pressed_target == released_target) {
-        const size_t tab_index = system_target_index(released_target);
-        if (tab_index < layout.system_tabs.size()) {
-          active_system = layout.system_tabs[tab_index].system;
-          status.clear();
-          render_menu(games, active_system, volume, keymap, status, &canvas,
-                      &layout);
-          framebuffer.present(canvas, NULL);
+      } else if (!wifi_view && pressed_target == released_target &&
+                 (pressed_target == MenuTargetSystemUp ||
+                  pressed_target == MenuTargetSystemDown)) {
+        active_system = adjacent_system(
+            layout.systems, active_system,
+            pressed_target == MenuTargetSystemUp ? -1 : 1);
+        game_position = 0;
+        status.clear();
+        render_current_menu();
+        framebuffer.present(canvas, NULL);
+      } else if (!wifi_view &&
+                 pressed_target == MenuTargetSystemOpen &&
+                 released_target == MenuTargetSystemOpen) {
+        game_view = true;
+        game_position = 0;
+        status.clear();
+        render_current_menu();
+        framebuffer.present(canvas, NULL);
+      } else if (!wifi_view &&
+                 pressed_target == MenuTargetSystemBack &&
+                 released_target == MenuTargetSystemBack) {
+        game_view = false;
+        status.clear();
+        render_current_menu();
+        framebuffer.present(canvas, NULL);
+      } else if (!wifi_view && pressed_target == released_target &&
+                 (pressed_target == MenuTargetGamePrevious ||
+                  pressed_target == MenuTargetGameNext) &&
+                 !layout.game_indices.empty()) {
+        if (pressed_target == MenuTargetGamePrevious) {
+          game_position = game_position == 0
+                              ? layout.game_indices.size() - 1
+                              : game_position - 1;
+        } else {
+          game_position = (game_position + 1) % layout.game_indices.size();
         }
+        status.clear();
+        render_current_menu();
+        framebuffer.present(canvas, NULL);
       } else if (!wifi_view &&
                  (pressed_target == MenuTargetVolumeDown ||
                   pressed_target == MenuTargetVolumeUp ||
@@ -2734,8 +3239,7 @@ int application_main(const Options &options) {
           status = "VOLUME STATE ERROR";
           std::cerr << "deck-menu: " << state_error << std::endl;
         }
-        render_menu(games, active_system, volume, keymap, status, &canvas,
-                    &layout);
+        render_current_menu();
         framebuffer.present(canvas, NULL);
       } else if (!wifi_view && pressed_target == MenuTargetWifi &&
                  released_target == MenuTargetWifi) {
@@ -2758,13 +3262,15 @@ int application_main(const Options &options) {
           status = "KEYMAP STATE ERROR";
           std::cerr << "deck-menu: " << state_error << std::endl;
         }
-        render_menu(games, active_system, volume, keymap, status, &canvas,
-                    &layout);
+        render_current_menu();
         framebuffer.present(canvas, NULL);
       } else if (!wifi_view && pressed_target >= 0 &&
                  pressed_target == released_target &&
                  pressed_target < static_cast<int>(games.size())) {
-        selected_game = pressed_target;
+        if (is_built_in_terminal(games[pressed_target]))
+          terminal_requested = true;
+        else
+          selected_game = pressed_target;
       }
       pressed_target = MenuTargetNone;
     }
@@ -2774,7 +3280,7 @@ int application_main(const Options &options) {
 
     status = terminal_requested ? "STARTING TERMINAL"
                                 : "STARTING " + games[selected_game].title;
-    render_menu(games, active_system, volume, keymap, status, &canvas, &layout);
+    render_current_menu();
     framebuffer.present(canvas, NULL);
 
     const ChildResult child =
@@ -2821,7 +3327,7 @@ int application_main(const Options &options) {
                    ? "TERMINAL STOPPED"
                    : games[selected_game].title + " STOPPED";
     }
-    render_menu(games, active_system, volume, keymap, status, &canvas, &layout);
+    render_current_menu();
     if (!framebuffer.present(canvas, &error)) {
       std::cerr << "deck-menu: " << error << std::endl;
       return 1;

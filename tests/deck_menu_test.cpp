@@ -29,6 +29,35 @@ std::string read_file(const std::string &path) {
                      std::istreambuf_iterator<char>());
 }
 
+bool rect_contains_color(const Canvas &canvas, const Rect &rect,
+                         uint16_t color) {
+  for (int y = rect.y; y < rect.y + rect.height; ++y) {
+    for (int x = rect.x; x < rect.x + rect.width; ++x) {
+      if (canvas[static_cast<size_t>(y) * kLogicalWidth + x] == color)
+        return true;
+    }
+  }
+  return false;
+}
+
+bool rects_are_horizontal_mirrors(const Canvas &canvas, const Rect &left,
+                                  const Rect &right) {
+  if (left.width != right.width || left.height != right.height)
+    return false;
+  for (int y = 0; y < left.height; ++y) {
+    for (int x = 0; x < left.width; ++x) {
+      const uint16_t left_pixel =
+          canvas[static_cast<size_t>(left.y + y) * kLogicalWidth + left.x + x];
+      const uint16_t right_pixel =
+          canvas[static_cast<size_t>(right.y + y) * kLogicalWidth + right.x +
+                 right.width - 1 - x];
+      if (left_pixel != right_pixel)
+        return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 int main() {
@@ -101,6 +130,48 @@ int main() {
                games[0].color.blue == 0xd7,
            "manifest color parses");
   }
+
+  const std::string cover_directory = directory + "/covers";
+  expect(mkdir(cover_directory.c_str(), 0700) == 0,
+         "create cover fixture directory");
+  const RgbColor cover_color = xterm_color(202);
+  std::string cover_data("P6\n2 2\n255\n");
+  for (int pixel = 0; pixel < 4; ++pixel) {
+    cover_data.push_back(static_cast<char>(cover_color.red));
+    cover_data.push_back(static_cast<char>(cover_color.green));
+    cover_data.push_back(static_cast<char>(cover_color.blue));
+  }
+  const std::string cover_path = cover_directory + "/fixture.ppm";
+  expect(write_file(cover_path, cover_data.data(), cover_data.size()),
+         "write xterm-quantized PPM cover fixture");
+  expect(load_game_covers(cover_directory, &games) == 1 &&
+             games[0].cover.available() && games[0].cover.width == 2 &&
+             games[0].cover.height == 2 &&
+             games[0].cover.pixels[0] == cover_color.pixel(),
+         "load validated local cover into the catalog once");
+  const std::string png_cover_path = cover_directory + "/fixture.png";
+  png_image png_fixture;
+  std::memset(&png_fixture, 0, sizeof(png_fixture));
+  png_fixture.version = PNG_IMAGE_VERSION;
+  png_fixture.width = 2;
+  png_fixture.height = 2;
+  png_fixture.format = PNG_FORMAT_RGBA;
+  unsigned char png_pixels[16];
+  for (size_t byte = 0; byte < sizeof(png_pixels); byte += 4) {
+    png_pixels[byte] = cover_color.red;
+    png_pixels[byte + 1] = cover_color.green;
+    png_pixels[byte + 2] = cover_color.blue;
+    png_pixels[byte + 3] = 255;
+  }
+  expect(png_image_write_to_file(&png_fixture, png_cover_path.c_str(), 0,
+                                 png_pixels, 0, NULL) != 0,
+         "write PNG cover fixture");
+  games[0].cover = CoverImage();
+  expect(load_game_covers(cover_directory, &games) == 1 &&
+             games[0].cover.available() && games[0].cover.width == 2 &&
+             games[0].cover.height == 2 &&
+             games[0].cover.pixels[0] == cover_color.pixel(),
+         "PNG cover takes priority and is quantized to xterm-256");
 
   const std::string non_palette_manifest =
       directory + "/non-palette-games.tsv";
@@ -275,6 +346,13 @@ int main() {
   Canvas canvas;
   MenuLayout menu_layout;
   std::vector<GameEntry> tab_games = games;
+  if (!games.empty()) {
+    GameEntry second_nes = games[0];
+    second_nes.id = "fixture-two";
+    second_nes.title = "FIXTURE TWO";
+    second_nes.color = xterm_color(174);
+    tab_games.push_back(second_nes);
+  }
   const char *additional_systems[] = {"gb", "gbc", "chip8", "deck"};
   for (size_t index = 0; index < 4 && !games.empty(); ++index) {
     GameEntry entry = games[0];
@@ -283,114 +361,274 @@ int main() {
     entry.system = additional_systems[index];
     tab_games.push_back(entry);
   }
-  render_menu(tab_games, "nes", 42, "us", std::string(), &canvas,
-              &menu_layout);
+  const GameEntry terminal_entry = built_in_terminal_entry(terminal);
+  expect(terminal_entry.title == "TERMINAL" &&
+             terminal_entry.system == "deck" &&
+             terminal_entry.rom == terminal &&
+             is_built_in_terminal(terminal_entry),
+         "built-in terminal is a routed Deck entry");
+  tab_games.push_back(terminal_entry);
+  render_menu(tab_games, "nes", 42, "us", false, 0, std::string(),
+              &canvas, &menu_layout);
   expect(canvas.size() == static_cast<size_t>(kLogicalWidth * kLogicalHeight),
          "menu renders a complete logical canvas");
   expect(canvas[0] == xterm_pixel(kColorBackground),
          "menu background uses the xterm palette");
-  expect(canvas[static_cast<size_t>(82) * kLogicalWidth] ==
-             xterm_pixel(kColorBackground),
-         "menu has no colored header divider");
   expect(canvas[static_cast<size_t>(12) * kLogicalWidth + 26] ==
-             xterm_pixel(kColorTitle),
-         "menu title uses its enlarged header scale");
-  expect(canvas[static_cast<size_t>(68) * kLogicalWidth + 26] ==
              xterm_pixel(kColorBackground),
-         "menu omits the instructional subtitle");
+         "menu omits the Retro Deck title");
+  expect(menu_layout.terminal_button.width == 0 &&
+             menu_layout.keymap_button.width == 0 &&
+             menu_layout.wifi_button.width == 0 &&
+             menu_layout.volume_down_button.width == 0 &&
+             menu_layout.volume_display.width == 0 &&
+             menu_layout.volume_up_button.width == 0,
+         "console selector hides operational controls");
+  expect(menu_layout.systems.size() == 5,
+         "selector exposes each populated console");
+  expect(menu_layout.game_buttons.empty(),
+         "initial selector does not expose game targets");
+  expect(canvas[static_cast<size_t>(menu_layout.system_button.y) *
+                        kLogicalWidth +
+                    menu_layout.system_button.x] == xterm_pixel(202),
+         "console selector uses xterm orange 202");
+  expect(rect_contains_color(canvas, menu_layout.system_button,
+                             xterm_pixel(kColorBackground)),
+         "console selector uses black label text");
+  expect(menu_layout.system_button.height == 200,
+         "console selector uses a tall primary button");
+  expect(canvas[static_cast<size_t>(menu_layout.system_up_button.y) *
+                        kLogicalWidth +
+                    menu_layout.system_up_button.x] ==
+                 xterm_pixel(kColorBackground) &&
+             canvas[static_cast<size_t>(menu_layout.system_down_button.y) *
+                        kLogicalWidth +
+                    menu_layout.system_down_button.x] ==
+                 xterm_pixel(kColorBackground),
+         "console arrows do not have background rectangles");
+  expect(canvas[static_cast<size_t>(menu_layout.system_up_button.y +
+                                    menu_layout.system_up_button.height / 2 -
+                                    24) *
+                        kLogicalWidth +
+                    menu_layout.system_up_button.x +
+                        menu_layout.system_up_button.width / 2] ==
+                 xterm_pixel(202) &&
+             canvas[static_cast<size_t>(menu_layout.system_down_button.y +
+                                        menu_layout.system_down_button.height /
+                                            2 -
+                                        24) *
+                            kLogicalWidth +
+                        menu_layout.system_down_button.x +
+                            menu_layout.system_down_button.width / 2] ==
+                 xterm_pixel(202),
+         "console arrow glyphs use xterm orange 202");
+  expect(menu_layout.system_up_button.x >
+                 menu_layout.system_button.x + menu_layout.system_button.width &&
+             menu_layout.system_up_button.y == menu_layout.system_button.y &&
+             menu_layout.system_down_button.y +
+                     menu_layout.system_down_button.height ==
+                 menu_layout.system_button.y + menu_layout.system_button.height,
+         "console arrows align with its right top and bottom edges");
+  expect(target_at(menu_layout, menu_layout.system_up_button.x + 1,
+                   menu_layout.system_up_button.y + 1) == MenuTargetSystemUp &&
+             target_at(menu_layout, menu_layout.system_button.x + 1,
+                       menu_layout.system_button.y + 1) ==
+                 MenuTargetSystemOpen &&
+             target_at(menu_layout, menu_layout.system_down_button.x + 1,
+                       menu_layout.system_down_button.y + 1) ==
+                 MenuTargetSystemDown,
+         "console selector surfaces have independent touch targets");
+  expect(adjacent_system(menu_layout.systems, "nes", 1) == "gb" &&
+             adjacent_system(menu_layout.systems, "nes", -1) == "deck",
+         "console arrows wrap through populated systems");
+
+  render_menu(tab_games, "nes", 42, "us", true, 0, std::string(), &canvas,
+              &menu_layout);
+  expect(menu_layout.terminal_button.x == 447 &&
+             menu_layout.volume_up_button.x +
+                     menu_layout.volume_up_button.width ==
+                 833,
+         "game view centers the compact operational controls");
+  expect(menu_layout.terminal_button.height == 52 &&
+             menu_layout.keymap_button.width == 52 &&
+             menu_layout.wifi_button.width == 52 &&
+             menu_layout.volume_display.width == 110 &&
+             menu_layout.keymap_button.x ==
+                 menu_layout.terminal_button.x +
+                     menu_layout.terminal_button.width,
+         "game view uses smaller controls without gaps");
   expect(target_at(menu_layout, menu_layout.volume_down_button.x + 1,
                    menu_layout.volume_down_button.y + 1) ==
-             MenuTargetVolumeDown,
-         "volume down action has its own target");
-  expect(target_at(menu_layout, menu_layout.volume_display.x + 1,
-                   menu_layout.volume_display.y + 1) ==
-             MenuTargetVolumeToggle,
-         "volume display has its own mute target");
-  expect(target_at(menu_layout, menu_layout.volume_up_button.x + 1,
-                   menu_layout.volume_up_button.y + 1) == MenuTargetVolumeUp,
-         "volume up action has its own target");
-  expect(target_at(menu_layout, menu_layout.keymap_button.x + 1,
-                   menu_layout.keymap_button.y + 1) == MenuTargetKeymap,
-         "keymap action has its own target");
-  expect(target_at(menu_layout, menu_layout.wifi_button.x + 1,
-                   menu_layout.wifi_button.y + 1) == MenuTargetWifi,
-         "wifi action has its own target");
-  expect(target_at(menu_layout, menu_layout.terminal_button.x + 1,
-                   menu_layout.terminal_button.y + 1) == MenuTargetTerminal,
-         "terminal action has its own target");
+                 MenuTargetVolumeDown &&
+             target_at(menu_layout, menu_layout.volume_display.x + 1,
+                       menu_layout.volume_display.y + 1) ==
+                 MenuTargetVolumeToggle &&
+             target_at(menu_layout, menu_layout.volume_up_button.x + 1,
+                       menu_layout.volume_up_button.y + 1) ==
+                 MenuTargetVolumeUp &&
+             target_at(menu_layout, menu_layout.keymap_button.x + 1,
+                       menu_layout.keymap_button.y + 1) == MenuTargetKeymap &&
+             target_at(menu_layout, menu_layout.wifi_button.x + 1,
+                       menu_layout.wifi_button.y + 1) == MenuTargetWifi &&
+             target_at(menu_layout, menu_layout.terminal_button.x + 1,
+                       menu_layout.terminal_button.y + 1) ==
+                 MenuTargetTerminal,
+         "game view operational controls retain their touch targets");
   expect(canvas[static_cast<size_t>(menu_layout.terminal_button.y) *
                         kLogicalWidth +
                     menu_layout.terminal_button.x] ==
-                 xterm_pixel(kColorSurface) &&
+                 xterm_pixel(kColorBackground) &&
              canvas[static_cast<size_t>(menu_layout.keymap_button.y) *
                         kLogicalWidth +
                     menu_layout.keymap_button.x] ==
-                 xterm_pixel(kColorSurface) &&
+                 xterm_pixel(kColorBackground) &&
              canvas[static_cast<size_t>(menu_layout.wifi_button.y) *
                         kLogicalWidth +
                     menu_layout.wifi_button.x] ==
-                 xterm_pixel(kColorSurface) &&
+                 xterm_pixel(kColorBackground) &&
              canvas[static_cast<size_t>(menu_layout.volume_down_button.y) *
                         kLogicalWidth +
                     menu_layout.volume_down_button.x] ==
-                 xterm_pixel(kColorSurface) &&
+                 xterm_pixel(kColorBackground) &&
              canvas[static_cast<size_t>(menu_layout.volume_up_button.y) *
                         kLogicalWidth +
                     menu_layout.volume_up_button.x] ==
-                 xterm_pixel(kColorSurface),
-         "top control buttons stay flat through their edges");
-  expect(canvas[static_cast<size_t>(menu_layout.volume_display.y) *
+                 xterm_pixel(kColorBackground) &&
+             canvas[static_cast<size_t>(menu_layout.volume_display.y) *
                         kLogicalWidth +
                     menu_layout.volume_display.x] ==
-             xterm_pixel(kColorVolumeOn),
-         "volume display stays flat through its edge");
-  expect(menu_layout.system_tabs.size() == 5,
-         "menu exposes one tab for each populated system");
-  if (menu_layout.system_tabs.size() == 5) {
-    const Rect &selected_tab = menu_layout.system_tabs[0].bounds;
-    const Rect &inactive_tab = menu_layout.system_tabs[1].bounds;
-    expect(canvas[static_cast<size_t>(selected_tab.y) * kLogicalWidth +
-                  selected_tab.x] == xterm_pixel(kColorSelected),
-           "selected system tab uses a cool color through its edge");
-    expect(canvas[static_cast<size_t>(selected_tab.y) * kLogicalWidth +
-                  selected_tab.x] != xterm_pixel(kColorTitle),
-           "selected system tab differs from the title color");
-    expect(canvas[static_cast<size_t>(inactive_tab.y) * kLogicalWidth +
-                  inactive_tab.x] == xterm_pixel(kColorSurface),
-           "inactive system tab stays flat through its edge");
-  }
+                 xterm_pixel(kColorBackground) &&
+             rect_contains_color(canvas, menu_layout.volume_display,
+                                 xterm_pixel(kColorVolumeOn)),
+         "utility controls merge into black while volume text shows state");
+  expect(canvas[static_cast<size_t>(menu_layout.terminal_button.y + 10) *
+                        kLogicalWidth +
+                    menu_layout.terminal_button.x + 11] ==
+             xterm_pixel(kColorText),
+         "terminal icon restores its 46-pixel-wide screen");
+  expect(canvas[static_cast<size_t>(menu_layout.game_previous_button.y) *
+                        kLogicalWidth +
+                    menu_layout.game_previous_button.x] ==
+                 xterm_pixel(kColorBackground) &&
+             canvas[static_cast<size_t>(menu_layout.game_next_button.y) *
+                        kLogicalWidth +
+                    menu_layout.game_next_button.x] ==
+                 xterm_pixel(kColorBackground),
+         "carousel arrows do not have background rectangles");
+  expect(rect_contains_color(canvas, menu_layout.game_previous_button,
+                             xterm_pixel(202)) &&
+             rect_contains_color(canvas, menu_layout.game_next_button,
+                                 xterm_pixel(202)),
+         "carousel arrow glyphs use xterm orange 202");
+  expect(rects_are_horizontal_mirrors(canvas,
+                                      menu_layout.game_previous_button,
+                                      menu_layout.game_next_button),
+         "carousel arrows are exact horizontal mirrors");
   expect(menu_layout.game_buttons.size() == 1 &&
-             menu_layout.game_indices.size() == 1 &&
-             menu_layout.game_indices[0] == 0,
-         "active console filters the visible game cards");
+             menu_layout.game_indices.size() == 2 &&
+             menu_layout.shown_game_index == 0,
+         "carousel exposes one game from the active console");
+  expect(menu_layout.game_art.height == 268 &&
+             menu_layout.game_art.y + menu_layout.game_art.height == 412 &&
+             menu_layout.game_buttons[0].y +
+                     menu_layout.game_buttons[0].height ==
+                 446,
+         "cover art uses the lower space while the title remains tappable");
+  expect(menu_layout.game_previous_button.y * 2 +
+                 menu_layout.game_previous_button.height ==
+             menu_layout.game_art.y * 2 + menu_layout.game_art.height &&
+             menu_layout.game_next_button.y ==
+                 menu_layout.game_previous_button.y,
+         "carousel arrows stay vertically centered on the taller cover");
+  expect(canvas[static_cast<size_t>(menu_layout.game_art.y +
+                                    menu_layout.game_art.height / 2) *
+                        kLogicalWidth +
+                    menu_layout.game_art.x + menu_layout.game_art.width / 2] ==
+             cover_color.pixel(),
+         "carousel centers the local cover inside the colored art tile");
+  expect(menu_layout.game_position_indicators.size() == 2 &&
+             menu_layout.game_position_indicators[0].y == 458 &&
+             canvas[static_cast<size_t>(
+                        menu_layout.game_position_indicators[0].y) *
+                            kLogicalWidth +
+                    menu_layout.game_position_indicators[0].x] ==
+                 xterm_pixel(kColorFooter) &&
+             canvas[static_cast<size_t>(
+                        menu_layout.game_position_indicators[1].y) *
+                            kLogicalWidth +
+                    menu_layout.game_position_indicators[1].x] ==
+                 xterm_pixel(kColorControlBorder) &&
+             canvas[static_cast<size_t>(
+                        menu_layout.game_position_indicators[0].y + 3) *
+                            kLogicalWidth +
+                    menu_layout.game_position_indicators[0].x + 3] ==
+                 xterm_pixel(kColorBackground),
+         "carousel position uses hollow bright and muted markers");
+  expect(rect_contains_color(canvas, menu_layout.system_button,
+                             xterm_pixel(kColorBackground)),
+         "carousel console button uses black label text");
+  expect(target_at(menu_layout, menu_layout.system_button.x + 1,
+                   menu_layout.system_button.y + 1) == MenuTargetSystemBack &&
+             target_at(menu_layout, menu_layout.game_previous_button.x + 1,
+                       menu_layout.game_previous_button.y + 1) ==
+                 MenuTargetGamePrevious &&
+             target_at(menu_layout, menu_layout.game_next_button.x + 1,
+                       menu_layout.game_next_button.y + 1) ==
+                 MenuTargetGameNext,
+         "carousel breadcrumb and arrows have touch targets");
   if (!menu_layout.game_buttons.empty()) {
     const Rect &game_button = menu_layout.game_buttons[0];
     expect(canvas[static_cast<size_t>(game_button.y) * kLogicalWidth +
                   game_button.x] == tab_games[0].color.pixel(),
-           "game tiles use their catalog color through the edge");
+           "carousel game uses its catalog color through the edge");
+    expect(target_at(menu_layout, game_button.x + 1, game_button.y + 1) == 0,
+           "carousel game launches its catalog entry");
   }
-  if (menu_layout.system_tabs.size() == 5) {
-    expect(target_at(menu_layout, menu_layout.system_tabs[4].bounds.x + 1,
-                     menu_layout.system_tabs[4].bounds.y + 1) ==
-               kSystemTargetBase - 4,
-           "system tab has its own touch target");
-  }
-  render_menu(tab_games, "chip8", 0, "cz", std::string(), &canvas,
+
+  render_menu(tab_games, "nes", 42, "us", true, 1, std::string(), &canvas,
+              &menu_layout);
+  expect(menu_layout.shown_game_index == 1 &&
+             target_at(menu_layout, menu_layout.game_buttons[0].x + 1,
+                       menu_layout.game_buttons[0].y + 1) == 1,
+         "carousel position selects the next game mapping");
+  expect(menu_layout.game_position_indicators.size() == 2 &&
+             canvas[static_cast<size_t>(
+                        menu_layout.game_position_indicators[0].y) *
+                            kLogicalWidth +
+                    menu_layout.game_position_indicators[0].x] ==
+                 xterm_pixel(kColorControlBorder) &&
+             canvas[static_cast<size_t>(
+                        menu_layout.game_position_indicators[1].y) *
+                            kLogicalWidth +
+                    menu_layout.game_position_indicators[1].x] ==
+                 xterm_pixel(kColorFooter),
+         "carousel marker follows the selected game");
+
+  render_menu(tab_games, "chip8", 0, "cz", true, 0, std::string(), &canvas,
               &menu_layout);
   expect(canvas[static_cast<size_t>(menu_layout.volume_display.y) *
                         kLogicalWidth +
                     menu_layout.volume_display.x] ==
-             xterm_pixel(kColorVolumeOff),
-         "muted volume display uses the xterm red");
+                 xterm_pixel(kColorBackground) &&
+             rect_contains_color(canvas, menu_layout.volume_display,
+                                 xterm_pixel(kColorVolumeOff)),
+         "muted volume display uses red text on black");
   expect(menu_layout.game_buttons.size() == 1 &&
              menu_layout.game_indices.size() == 1 &&
-             menu_layout.game_indices[0] == 3,
+             menu_layout.shown_game_index == 4,
          "switching consoles changes the visible game mapping");
   if (!menu_layout.game_buttons.empty()) {
     expect(target_at(menu_layout, menu_layout.game_buttons[0].x + 1,
-                     menu_layout.game_buttons[0].y + 1) == 3,
+                     menu_layout.game_buttons[0].y + 1) == 4,
            "visible card launches its catalog game after filtering");
   }
+
+  render_menu(tab_games, "deck", 42, "us", true, 1, std::string(), &canvas,
+              &menu_layout);
+  expect(menu_layout.game_indices.size() == 2 &&
+             menu_layout.shown_game_index == 6 &&
+             is_built_in_terminal(tab_games[menu_layout.shown_game_index]),
+         "Deck carousel exposes the built-in terminal entry");
 
   WifiState wifi_state;
   WifiLayout wifi_layout;
@@ -441,6 +679,7 @@ int main() {
       "--gb-emulator",  "/bin/false",       "--chip8-emulator",
       "/bin/echo",      "--deck-game",      "/bin/cat",
       "--manifest",     "/tmp/games",
+      "--cover-directory", "/tmp/covers",
       "--volume-state", "/tmp/volume",      "--keymap-state",
       "/tmp/keymap",    "--terminal",       "/bin/false",
       "--wifi-helper",  "/bin/echo"};
@@ -455,6 +694,7 @@ int main() {
          "terminal and wifi helper options parse");
   expect(options.terminal == "/bin/false" &&
              options.wifi_helper == "/bin/echo" &&
+             options.cover_directory == "/tmp/covers" &&
              options.volume_state == "/tmp/volume" &&
              options.keymap_state == "/tmp/keymap",
          "new executable options round-trip");
@@ -479,6 +719,9 @@ int main() {
   unlink(wifi_helper.c_str());
   unlink(terminal_capture.c_str());
   unlink(terminal.c_str());
+  unlink(cover_path.c_str());
+  unlink(png_cover_path.c_str());
+  rmdir(cover_directory.c_str());
   unlink(emulator.c_str());
   unlink(keymap_state.c_str());
   unlink(volume_state.c_str());
