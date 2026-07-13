@@ -1,5 +1,39 @@
 {
   "nodes": {
+    "c-octo-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1769647197,
+        "narHash": "sha256-yBeMvyDgrW3d1fuHIBoy7DEA1zAks8s+53wRHvyPrSM=",
+        "owner": "JohnEarnest",
+        "repo": "c-octo",
+        "rev": "5f62f185c9e6ae324dcbe9e7fe35ec7c3bdebfb1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "JohnEarnest",
+        "repo": "c-octo",
+        "rev": "5f62f185c9e6ae324dcbe9e7fe35ec7c3bdebfb1",
+        "type": "github"
+      }
+    },
+    "gambatte-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783079107,
+        "narHash": "sha256-a7GXw0B/ekIcNl08s1DpuRQZyxm4tYGWzNVVBTjXeOk=",
+        "owner": "libretro",
+        "repo": "gambatte-libretro",
+        "rev": "dfc165599f3f1068c40a0b7ad6fe5f161283d483",
+        "type": "github"
+      },
+      "original": {
+        "owner": "libretro",
+        "repo": "gambatte-libretro",
+        "rev": "dfc165599f3f1068c40a0b7ad6fe5f161283d483",
+        "type": "github"
+      }
+    },
     "infones-src": {
       "flake": false,
       "locked": {
@@ -34,6 +68,8 @@
     },
     "root": {
       "inputs": {
+        "c-octo-src": "c-octo-src",
+        "gambatte-src": "gambatte-src",
         "infones-src": "infones-src",
         "nixpkgs": "nixpkgs"
       }
