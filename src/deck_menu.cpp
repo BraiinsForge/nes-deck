@@ -1451,6 +1451,11 @@ public:
       close_device();
       return false;
     }
+    if (ioctl(fd_, FBIOBLANK, FB_BLANK_UNBLANK) != 0 && errno != EINVAL &&
+        errno != ENOTTY) {
+      std::cerr << "deck-menu: warning: cannot unblank framebuffer: "
+                << std::strerror(errno) << std::endl;
+    }
     return true;
   }
 

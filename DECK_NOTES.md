@@ -25,6 +25,12 @@ passphrases, WireGuard private keys, or ROM data.
 - The panel is physically portrait and must be rotated in software for the
   Deck's landscape orientation. The framebuffer/DRM rotation properties are
   identity, not a hardware 90-degree transform.
+- The kernel boots with `consoleblank=600`. A framebuffer owner can keep
+  running normally while console scanout goes black after ten minutes. The
+  menu launcher now sends the Linux console disable/unblank sequences on every
+  service start, and the native menu issues `FBIOBLANK` with
+  `FB_BLANK_UNBLANK` whenever it opens fb0. This also restores the panel after
+  games and the terminal release the framebuffer.
 - InfoNES renders the 256x240 frame at integer 2x scale. Its 512x480 output is
   centered at logical x=384..895 and fills the active y=0..479 panel. Earlier
   offsets shifted it 25 pixels left, left a 40-pixel gap above it, and clipped

@@ -79,6 +79,17 @@ write_state() {
 
 rotate_log
 
+# Linux console blanking remains active even while a framebuffer process owns
+# the visible pixels. Disable its ten-minute timer and wake scanout on every
+# supervised launcher start, including boot and crash recovery.
+if ! printf '\033[13]\033[9;0]' > /dev/tty0 2>/dev/null; then
+	log_message "warning: cannot disable Linux console blanking on /dev/tty0"
+fi
+if [ -w /sys/class/graphics/fb0/blank ] &&
+	! printf '0\n' > /sys/class/graphics/fb0/blank 2>/dev/null; then
+	log_message "warning: cannot unblank fb0 through sysfs"
+fi
+
 if [ ! -x "$MENU" ]; then
 	log_message "menu is missing or not executable: $MENU"
 	exit 1

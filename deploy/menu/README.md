@@ -39,6 +39,8 @@ control state stay under `/mnt/data/nes-deck/state`. A bounded
 persistent launcher log is kept at `/mnt/data/nes-deck/log/deck-menu.log`.
 The native menu appends child start, exit-status, and signal details there;
 launcher milestones are also sent to logd.
+The launcher disables the Linux console's ten-minute blank timer at each boot,
+and the native menu explicitly unblanks fb0 whenever it reopens the display.
 
 At runtime, select the NES, Game Boy, Game Boy Color, CHIP-8, or Deck tab, then
 tap a flat game tile to launch it. Only the active system's tiles are shown,
