@@ -39,11 +39,26 @@
    :system :gb
    :rom "/mnt/data/nes-deck/roms/adjustris.gb"
    :color "#8BAC0F")
+  (:id "pokemon-red"
+   :title "POKEMON RED"
+   :system :gb
+   :rom "/mnt/data/nes-deck/roms/pokemon-red.gb"
+   :color "#E74C3C")
   (:id "geometrix"
    :title "GEOMETRIX"
    :system :gbc
    :rom "/mnt/data/nes-deck/roms/geometrix.gbc"
    :color "#2D98DA")
+  (:id "donkey-kong-country"
+   :title "DONKEY KONG COUNTRY"
+   :system :gbc
+   :rom "/mnt/data/nes-deck/roms/donkey-kong-country.gbc"
+   :color "#F5A623")
+  (:id "super-mario-bros-deluxe"
+   :title "SUPER MARIO BROS. DELUXE"
+   :system :gbc
+   :rom "/mnt/data/nes-deck/roms/super-mario-bros-deluxe.gbc"
+   :color "#E74C3C")
   (:id "outlaw"
    :title "OUTLAW"
    :system :chip8

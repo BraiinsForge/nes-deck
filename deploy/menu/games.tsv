@@ -5,6 +5,9 @@ concentration-room	CONCENTRATION ROOM	nes	/mnt/data/nes-deck/roms/croom.nes	#00A
 robotfindskitten	ROBOTFINDSKITTEN	nes	/mnt/data/nes-deck/roms/robotfindskitten.nes	#62C370
 micro-mages	MICRO MAGES	nes	/mnt/data/nes-deck/roms/micro-mages.nes	#E05B9A
 adjustris	ADJUSTRIS	gb	/mnt/data/nes-deck/roms/adjustris.gb	#8BAC0F
+pokemon-red	POKEMON RED	gb	/mnt/data/nes-deck/roms/pokemon-red.gb	#E74C3C
 geometrix	GEOMETRIX	gbc	/mnt/data/nes-deck/roms/geometrix.gbc	#2D98DA
+donkey-kong-country	DONKEY KONG COUNTRY	gbc	/mnt/data/nes-deck/roms/donkey-kong-country.gbc	#F5A623
+super-mario-bros-deluxe	SUPER MARIO BROS. DELUXE	gbc	/mnt/data/nes-deck/roms/super-mario-bros-deluxe.gbc	#E74C3C
 outlaw	OUTLAW	chip8	/mnt/data/nes-deck/roms/outlaw.ch8	#AA6633
 space-racer	SPACE RACER	chip8	/mnt/data/nes-deck/roms/spaceracer.ch8	#FCFCFC
