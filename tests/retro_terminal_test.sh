@@ -82,4 +82,29 @@ grep -q 'cannot load selected cz keymap' "$FIXTURE/failure.log" ||
     "-C $TEST_TTY -q -u $FIXTURE/keymaps/us.map" ] ||
   fail 'US keymap is restored after a selected-keymap load failure'
 
+command -v script >/dev/null 2>&1 ||
+  fail 'script is required to verify console cleanup on a pseudo-terminal'
+: > "$LOADKEYS_LOG"
+CONSOLE_LOG=$FIXTURE/console.log
+script -q -e -c \
+  "env LOADKEYS_LOG=$LOADKEYS_LOG FBTERM_LOG=$FBTERM_LOG FBTERM_STDIN_LOG=$FBTERM_STDIN_LOG RETRO_DECK_TERMINAL_BASE=$FIXTURE RETRO_DECK_TERMINAL_TTY=/dev/tty RETRO_DECK_KEYMAP=us $LAUNCHER" \
+  "$CONSOLE_LOG" >/dev/null
+hide_cursor=$(printf '\033[?25l')
+disable_blank=$(printf '\033[9;0]')
+wake_console=$(printf '\033[13]')
+show_cursor=$(printf '\033[?25h')
+enable_blank=$(printf '\033[9;10]')
+grep -Fq "$hide_cursor" "$CONSOLE_LOG" ||
+  fail 'terminal exit hides the Linux console cursor'
+grep -Fq "$disable_blank" "$CONSOLE_LOG" ||
+  fail 'terminal exit disables Linux console blanking'
+grep -Fq "$wake_console" "$CONSOLE_LOG" ||
+  fail 'terminal exit wakes the Linux console'
+if grep -Fq "$show_cursor" "$CONSOLE_LOG"; then
+  fail 'terminal exit must not show the Linux console cursor'
+fi
+if grep -Fq "$enable_blank" "$CONSOLE_LOG"; then
+  fail 'terminal exit must not re-enable Linux console blanking'
+fi
+
 printf '%s\n' 'retro-terminal-test: OK'

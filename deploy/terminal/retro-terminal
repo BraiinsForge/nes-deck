@@ -44,14 +44,16 @@ esac
 # persistent launcher log so initialization failures remain diagnosable.
 exec 0<>"$TTY" 1>&0
 
-restore_keymap() {
+restore_console() {
   "$LOADKEYS" -C "$TTY" -q -u "$US_KEYMAP" ||
     printf 'retro-terminal: could not restore US keymap\n' >&2
+  printf '\033[?25l\033[13]\033[9;0]' > "$TTY" ||
+    printf 'retro-terminal: could not restore console display state\n' >&2
 }
 
 # fbterm and this launcher share a process group. When the menu sends TERM,
-# fbterm exits directly and the launcher's exit trap restores the console map.
-trap restore_keymap 0
+# fbterm exits directly and the launcher's exit trap restores the console.
+trap restore_console 0
 signal_status=0
 trap 'signal_status=129' HUP
 trap 'signal_status=130' INT

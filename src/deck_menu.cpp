@@ -2391,12 +2391,21 @@ public:
   }
 
   void restore() {
-    if (fd_ < 0)
-      return;
-    if (have_keyboard_mode_)
-      ioctl(fd_, KDSKBMODE, keyboard_mode_);
-    if (have_termios_)
-      tcsetattr(fd_, TCSAFLUSH, &termios_);
+    if (fd_ >= 0) {
+      if (have_keyboard_mode_)
+        ioctl(fd_, KDSKBMODE, keyboard_mode_);
+      if (have_termios_)
+        tcsetattr(fd_, TCSAFLUSH, &termios_);
+    }
+
+    const int console = open("/dev/tty0", O_WRONLY | O_CLOEXEC);
+    if (console >= 0) {
+      static const char display_state[] = "\033[?25l\033[13]\033[9;0]";
+      const bool restored =
+          write_all(console, display_state, sizeof(display_state) - 1);
+      (void)restored;
+      close(console);
+    }
   }
 
 private:

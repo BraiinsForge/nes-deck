@@ -42,6 +42,8 @@ The native menu appends child start, exit-status, and signal details there;
 launcher milestones are also sent to logd.
 The launcher disables the Linux console's ten-minute blank timer at each boot,
 and the native menu explicitly unblanks fb0 whenever it reopens the display.
+Every managed child return also hides the Linux console cursor and keeps
+console blanking disabled, including after the framebuffer terminal exits.
 
 At runtime, select the NES, Game Boy, Game Boy Color, CHIP-8, or Deck tab, then
 tap a flat game tile to launch it. Only the active system's tiles are shown,

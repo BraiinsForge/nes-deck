@@ -35,10 +35,8 @@
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define redraw(args...) (FbShellManager::instance()->redraw(args))
 
-static const s8 show_cursor[] = "\e[?25h";
 static const s8 hide_cursor[] = "\e[?25l";
 static const s8 disable_blank[] = "\e[9;0]";
-static const s8 enable_blank[] = "\e[9;10]";
 static const s8 clear_screen[] = "\e[2J\e[H";
 
 DEFINE_INSTANCE(Screen)
@@ -116,9 +114,9 @@ Screen::~Screen()
 	Font::uninstance();
 	endFillDraw();
 
-	s32 ret = write(STDIN_FILENO, show_cursor, sizeof(show_cursor) - 1);
-	ret = write(STDIN_FILENO, enable_blank, sizeof(enable_blank) - 1);
-	ret = write(STDIN_FILENO, clear_screen, sizeof(clear_screen) - 1);
+	s32 ret = write(STDIN_FILENO, clear_screen, sizeof(clear_screen) - 1);
+	ret = write(STDIN_FILENO, hide_cursor, sizeof(hide_cursor) - 1);
+	ret = write(STDIN_FILENO, disable_blank, sizeof(disable_blank) - 1);
 }
 
 void Screen::showInfo(bool verbose)
