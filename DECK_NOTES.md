@@ -129,8 +129,8 @@ passphrases, WireGuard private keys, or ROM data.
   the final active-audio probe held approximately 59.4 FPS without recurring
   XRUN noise, and the user confirmed Adjustris no longer produced distorted
   audio.
-- The deployed S16/two-gamepad build has SHA-256
-  `5316aa458de8430c3edb08a15e3c126b52697ac02ff66e8df789c3f76e4fe390`.
+- The deployed staged-video/S16/two-gamepad build has SHA-256
+  `9d2bed939d8a8e44219f7d61c2be9f8a493e23169aa8abe61ec004d3f83907f3`.
   Its live ALSA stream was verified as RUNNING at exact 44100 Hz with 512-frame
   hardware periods and a 4096-frame hardware buffer. The OSS ring is filled
   while its trigger is paused and playback begins on the first callback. During
@@ -187,23 +187,22 @@ passphrases, WireGuard private keys, or ROM data.
   `f80d7c10da0e0a09bde089c8e9ad650701befa14a76f1fc740ddae036dacd536`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `505c91a34f425d063be6e8f21e0e447702470e2c91156214066af0240f22f8bd`.
-  It validates the manifest and system-specific NES/GB/GBC/CHIP-8 ROM format
+  `9b1efe36afee7be4d17b269ffb6a0dd8c142eb3b73f2b47b07d69e266ce1822a`.
+  It validates the manifest and system-specific NES/GB/GBC/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
   This build includes the full-screen two-second return hold, persistent
   volume controls, a persistent US/Czech terminal keymap toggle, the Wi-Fi
   editor, and a supervised framebuffer-terminal action. The installed launcher
   SHA-256 is
-  `824b484837a1a3a024311affebe2991e38ee9d070229de54a3a205f060d7a9eb`.
+  `93f65a76e6dfd7b50b07d399ec294dfaa6261961de00238be527c473d47afea8`.
 - A post-deployment capture of the live 1280x480 framebuffer verified that all
-  game cards render only their centered names on a solid black background.
-  Four compact tabs labeled `NES`, `GAME BOY`, `GAME BOY COLOR`, and `CHIP-8`
-  filter the catalog; the selected tab uses the pale-yellow title color. NES
-  uses a consistent 3x2 card grid, and the smaller libraries retain the same
-  slots rather than stretching a single game across the display. The title is
-  `RETRO DECK`, the old blue divider is gone, and no description or license
-  text remains in the launcher. A later capture verified the computer,
+  game tiles render only their centered names on flat catalog colors. Five
+  flat tabs labeled `NES`, `GAME BOY`, `GAME BOY COLOR`, `CHIP-8`, and `DECK`
+  filter the catalog; the selected tab uses the pale-yellow title color. The
+  title is `RETRO DECK`, the old blue divider and tile/tab outlines are gone,
+  and no description or license text remains in the launcher. A later capture
+  verified the computer,
   `KEYS US`, Wi-Fi, minus, `VOL 42%`, and plus controls fit above those tabs
   without overlap.
 - `games.sexp` is the editable schema-checked source. Schema version 3 keeps
@@ -213,10 +212,10 @@ passphrases, WireGuard private keys, or ROM data.
   the ECL compiler atomically generates
   `/mnt/data/nes-deck/state/games.tsv`; the checked-in TSV is a known-good
   fallback. The actual Deck ECL output was verified byte-for-byte against that
-  fallback for all thirteen entries. The deployed `games.sexp` SHA-256 is
-  `7fccd662d99107a6fd677f5718f8e020fe853cdb33ca5503bff65ee31f1951d5`;
+  fallback for all fourteen entries. The deployed `games.sexp` SHA-256 is
+  `6e61a9d51ebeba2410fd72145c51b911566357c8bc42ed8a71278186452c4162`;
   the generated and fallback TSV SHA-256 is
-  `440fdaa26af5d538d5eb557f15750c24e9490fb3809ffaf5e240a178ea7fadc3`.
+  `c2b91cf313f159df85eca2d7d1fc61c71067dcd8108c0976f49ec87b7cfbe6f6`.
 - Four pinned, freely licensed mapper-0 homebrew releases are installed:
   Falling, Thwaite, Concentration Room, and robotfindskitten. Provenance,
   license texts, and ROM hashes are recorded in [FOSS_GAMES.md](FOSS_GAMES.md).
@@ -387,7 +386,7 @@ passphrases, WireGuard private keys, or ROM data.
 ## Useful checks
 
 As of 2026-07-13 the supervised tabbed menu is running with one `deck-menu`
-process and no unmanaged emulator process. The live generated ten-game catalog matches
+process and no unmanaged emulator process. The live generated fourteen-game catalog matches
 the fallback, `net1` remains associated with its IPv4 default route, all 32
 saved PSK profiles remain present, and WireGuard is reachable. No wireless
 reload or UCI edit was used during deployment. The rollback copy for this
@@ -398,6 +397,8 @@ preceding menu and emulator binaries are additionally retained in
 `20260713-120736-pre-rom-read-fix/`. The volume/keymap deployment backup is
 `/mnt/data/nes-deck/backup-controls-20260713-1535/`; the restarted service
 initialized volume 42 and US terminal keys without changing Wi-Fi.
+The current timer/menu/NES deployment rollback is
+`/mnt/data/nes-deck/backups/20260713-163052-pre-ten-seconds/`.
 
 ```sh
 # Stock UI must stay disabled
