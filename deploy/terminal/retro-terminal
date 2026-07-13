@@ -1,0 +1,71 @@
+#!/bin/sh
+
+set -u
+
+BASE=${RETRO_DECK_TERMINAL_BASE:-/mnt/data/nes-deck/terminal}
+TTY=${RETRO_DECK_TERMINAL_TTY:-/dev/tty1}
+FBTERM=$BASE/fbterm
+LOADKEYS=$BASE/loadkeys
+KEYMAP_DIR=$BASE/keymaps
+US_KEYMAP=$KEYMAP_DIR/us.map
+CZ_KEYMAP=$KEYMAP_DIR/cz.map
+FONTCONFIG_FILE=fonts.conf
+FONTCONFIG_PATH=$BASE
+HOME=/root
+TERM=fbterm
+SHELL=/bin/ash
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+export FONTCONFIG_FILE FONTCONFIG_PATH HOME TERM SHELL PATH
+unset FONTCONFIG_SYSROOT
+
+fail() {
+  printf 'retro-terminal: %s\n' "$1" >&2
+  exit 1
+}
+
+[ -x "$FBTERM" ] || fail "fbterm is missing or not executable: $FBTERM"
+[ -x "$LOADKEYS" ] || fail "loadkeys is missing or not executable: $LOADKEYS"
+[ -c "$TTY" ] || fail "active console is unavailable: $TTY"
+[ -r "$FONTCONFIG_PATH/$FONTCONFIG_FILE" ] ||
+  fail "fontconfig file is unreadable: $FONTCONFIG_PATH/$FONTCONFIG_FILE"
+[ -r "$US_KEYMAP" ] || fail "US keymap is unreadable: $US_KEYMAP"
+[ -r "$CZ_KEYMAP" ] || fail "Czech keymap is unreadable: $CZ_KEYMAP"
+
+keymap=${RETRO_DECK_KEYMAP:-us}
+case $keymap in
+  us) selected_keymap=$US_KEYMAP ;;
+  cz) selected_keymap=$CZ_KEYMAP ;;
+  *) fail "RETRO_DECK_KEYMAP must be 'us' or 'cz'" ;;
+esac
+
+# The menu daemon has no interactive stdio. fbterm needs the active virtual
+# console for keyboard input and VT ioctls.
+exec <"$TTY" >"$TTY" 2>&1
+
+restore_keymap() {
+  "$LOADKEYS" -C "$TTY" -q -u "$US_KEYMAP" ||
+    printf 'retro-terminal: could not restore US keymap\n' >&2
+}
+
+# fbterm and this launcher share a process group. When the menu sends TERM,
+# fbterm exits directly and the launcher's exit trap restores the console map.
+trap restore_keymap 0
+signal_status=0
+trap 'signal_status=129' HUP
+trap 'signal_status=130' INT
+trap 'signal_status=143' TERM
+
+"$LOADKEYS" -C "$TTY" -q -u "$selected_keymap" ||
+  fail "cannot load selected $keymap keymap"
+
+"$FBTERM" -n 'DejaVu Sans Mono' -s 16 -f 7 -b 0 -- /bin/ash -l &
+terminal_pid=$!
+terminal_status=0
+while kill -0 "$terminal_pid" 2>/dev/null; do
+  wait "$terminal_pid" || terminal_status=$?
+done
+if [ "$signal_status" -ne 0 ]; then
+  exit "$signal_status"
+fi
+exit "$terminal_status"
