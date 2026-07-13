@@ -1225,7 +1225,6 @@ void render_menu(const std::vector<GameEntry> &games,
     layout->game_buttons.push_back(cell);
 
     fill_rect(canvas, cell, games[game_index].color.pixel());
-    stroke_rect(canvas, cell, 4, darker(games[game_index].color));
     const uint16_t text_color = contrasting_text(games[game_index].color);
 
     const int title_scale =

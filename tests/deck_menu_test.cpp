@@ -276,6 +276,12 @@ int main() {
              menu_layout.game_indices.size() == 1 &&
              menu_layout.game_indices[0] == 0,
          "active console filters the visible game cards");
+  if (!menu_layout.game_buttons.empty()) {
+    const Rect &game_button = menu_layout.game_buttons[0];
+    expect(canvas[static_cast<size_t>(game_button.y) * kLogicalWidth +
+                  game_button.x] == tab_games[0].color.pixel(),
+           "game tiles use their catalog color through the edge");
+  }
   if (menu_layout.system_tabs.size() == 4) {
     expect(target_at(menu_layout, menu_layout.system_tabs[3].bounds.x + 1,
                      menu_layout.system_tabs[3].bounds.y + 1) ==
