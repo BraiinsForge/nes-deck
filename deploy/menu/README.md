@@ -48,8 +48,10 @@ and each tile retains its original catalog index for launch routing. Tiles
 display only the game title;
 descriptions and license labels stay out of the launcher. Redistribution and
 license details remain in `FOSS_GAMES.md` and the installed license files. The
-top-right minus and plus buttons atomically persist volume in 5-point steps;
-zero mutes and every nonzero adjustment plays a short confirmation chime. The
+top-right minus and plus buttons atomically persist volume in 5-point steps.
+The green volume display is also a button: tapping it mutes, turns it red, and
+labels it `VOL OFF`. Tapping the display or plus while muted restores the last
+audible level. Every nonzero adjustment plays a short confirmation chime. The
 selected volume is passed to every emulator. A continuous two-second hold
 anywhere on the touchscreen
 terminates the emulator child and redraws the menu. Touch does not supply
@@ -79,13 +81,14 @@ five required keys:
 2. `:title` - menu title
 3. `:system` - one of `:nes`, `:gb`, `:gbc`, `:chip8`, or `:deck`
 4. `:rom` - normalized absolute path with the system's required extension
-5. `:color` - `#RRGGBB` accent color
+5. `:color` - exact canonical xterm-256 `#RRGGBB` accent color
 
-`compile-catalog.lisp` permits no missing, duplicate, or unknown keys.  It
+`compile-catalog.lisp` permits no missing, duplicate, or unknown keys. It
 rejects duplicate IDs and ROM paths, dotted/circular/oversized forms, reader
 evaluation, control characters, non-ASCII text, malformed colors, and paths
-outside the persistent installation.  The output is headerless TSV in the
-field order above.  It is written beside a process-specific temporary file and
+outside the persistent installation. It also rejects colors outside the fixed
+xterm-256 palette. The output is headerless TSV in the field order above. It is
+written beside a process-specific temporary file and
 atomically renamed only after the complete catalog validates.
 
 The checked-in `games.tsv` is a known-good fallback.  If ECL, the source

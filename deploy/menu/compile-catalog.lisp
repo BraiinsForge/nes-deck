@@ -147,12 +147,35 @@
   (or (digit-char-p character)
       (find character "ABCDEFabcdef" :test #'char=)))
 
+(defun xterm-cube-component-p (component)
+  (member component '(0 95 135 175 215 255) :test #'eql))
+
+(defun xterm-color-p (value)
+  (let* ((red (parse-integer value :start 1 :end 3 :radix 16))
+         (green (parse-integer value :start 3 :end 5 :radix 16))
+         (blue (parse-integer value :start 5 :end 7 :radix 16))
+         (rgb (+ (ash red 16) (ash green 8) blue)))
+    (or (member rgb
+                '(#x000000 #x800000 #x008000 #x808000
+                  #x000080 #x800080 #x008080 #xC0C0C0
+                  #x808080 #xFF0000 #x00FF00 #xFFFF00
+                  #x0000FF #xFF00FF #x00FFFF #xFFFFFF)
+                :test #'eql)
+        (and (xterm-cube-component-p red)
+             (xterm-cube-component-p green)
+             (xterm-cube-component-p blue))
+        (and (= red green blue)
+             (<= 8 red 238)
+             (zerop (mod (- red 8) 10))))))
+
 (defun validate-color (value)
   (unless (and (stringp value)
                (= (length value) 7)
                (char= (char value 0) #\#)
                (every #'hexadecimal-character-p (subseq value 1)))
     (catalog-error "game :color must have the form #RRGGBB"))
+  (unless (xterm-color-p value)
+    (catalog-error "game :color must be from the xterm-256 palette"))
   (string-upcase value))
 
 (defun validate-game (form position)

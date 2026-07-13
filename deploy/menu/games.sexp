@@ -8,69 +8,69 @@
    :title "SUPER MARIO BROS."
    :system :nes
    :rom "/mnt/data/nes-deck/mario.nes"
-   :color "#E48A75")
+   :color "#D78787")
   (:id "falling"
    :title "FALLING"
    :system :nes
    :rom "/mnt/data/nes-deck/roms/falling.nes"
-   :color "#9691D6")
+   :color "#8787D7")
   (:id "thwaite"
    :title "THWAITE"
    :system :nes
    :rom "/mnt/data/nes-deck/roms/thwaite.nes"
-   :color "#E7B676")
+   :color "#D7AF87")
   (:id "concentration-room"
    :title "CONCENTRATION ROOM"
    :system :nes
    :rom "/mnt/data/nes-deck/roms/croom.nes"
-   :color "#82B7AF")
+   :color "#87AFAF")
   (:id "robotfindskitten"
    :title "ROBOTFINDSKITTEN"
    :system :nes
    :rom "/mnt/data/nes-deck/roms/robotfindskitten.nes"
-   :color "#9CC690")
+   :color "#AFD787")
   (:id "micro-mages"
    :title "MICRO MAGES"
    :system :nes
    :rom "/mnt/data/nes-deck/roms/micro-mages.nes"
-   :color "#DF8FA7")
+   :color "#D787AF")
   (:id "adjustris"
    :title "ADJUSTRIS"
    :system :gb
    :rom "/mnt/data/nes-deck/roms/adjustris.gb"
-   :color "#ABB96E")
+   :color "#AFAF5F")
   (:id "pokemon-red"
    :title "POKEMON RED"
    :system :gb
    :rom "/mnt/data/nes-deck/roms/pokemon-red.gb"
-   :color "#E48A75")
+   :color "#D78787")
   (:id "geometrix"
    :title "GEOMETRIX"
    :system :gbc
    :rom "/mnt/data/nes-deck/roms/geometrix.gbc"
-   :color "#84AFCC")
+   :color "#87AFD7")
   (:id "donkey-kong-country"
    :title "DONKEY KONG COUNTRY"
    :system :gbc
    :rom "/mnt/data/nes-deck/roms/donkey-kong-country.gbc"
-   :color "#E7B676")
+   :color "#D7AF87")
   (:id "super-mario-bros-deluxe"
    :title "SUPER MARIO BROS. DELUXE"
    :system :gbc
    :rom "/mnt/data/nes-deck/roms/super-mario-bros-deluxe.gbc"
-   :color "#E48A75")
+   :color "#D78787")
   (:id "outlaw"
    :title "OUTLAW"
    :system :chip8
    :rom "/mnt/data/nes-deck/roms/outlaw.ch8"
-   :color "#BE926F")
+   :color "#AF875F")
   (:id "space-racer"
    :title "SPACE RACER"
    :system :chip8
    :rom "/mnt/data/nes-deck/roms/spaceracer.ch8"
-   :color "#EAE4DC")
+   :color "#E4E4E4")
   (:id "ten-seconds"
    :title "10 SECONDS"
    :system :deck
    :rom "/mnt/data/nes-deck/games/ten-seconds"
-   :color "#F09C77")))
+   :color "#FFAF87")))

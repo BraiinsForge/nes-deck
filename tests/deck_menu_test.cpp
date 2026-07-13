@@ -86,7 +86,7 @@ int main() {
          "write Deck game config fixture");
 
   const std::string row =
-      "fixture\tFIXTURE GAME\tnes\t" + rom + "\t#12ABEF\n";
+      "fixture\tFIXTURE GAME\tnes\t" + rom + "\t#87AFD7\n";
   expect(write_file(manifest, row.data(), row.size()), "write manifest fixture");
 
   std::vector<GameEntry> games;
@@ -97,10 +97,24 @@ int main() {
     expect(games[0].id == "fixture", "manifest id round-trips");
     expect(games[0].system == "nes", "manifest system round-trips");
     expect(games[0].rom == rom, "manifest ROM path round-trips");
-    expect(games[0].color.red == 0x12 && games[0].color.green == 0xab &&
-               games[0].color.blue == 0xef,
+    expect(games[0].color.red == 0x87 && games[0].color.green == 0xaf &&
+               games[0].color.blue == 0xd7,
            "manifest color parses");
   }
+
+  const std::string non_palette_manifest =
+      directory + "/non-palette-games.tsv";
+  const std::string non_palette_row =
+      "fixture\tFIXTURE GAME\tnes\t" + rom + "\t#12ABEF\n";
+  expect(write_file(non_palette_manifest, non_palette_row.data(),
+                    non_palette_row.size()),
+         "write non-palette manifest fixture");
+  std::vector<GameEntry> non_palette_games;
+  error.clear();
+  expect(!load_manifest(non_palette_manifest, &non_palette_games, &error) &&
+             error.find("xterm-256") != std::string::npos,
+         "manifest rejects colors outside xterm-256");
+  unlink(non_palette_manifest.c_str());
 
   const std::string legacy_manifest = directory + "/legacy-games.tsv";
   const std::string legacy_row =
@@ -168,6 +182,16 @@ int main() {
          "non-canonical volume state is rejected");
   expect(!save_volume_state(volume_state, 101, &error),
          "out-of-range volume cannot be saved");
+  expect(volume_label(0) == "VOL OFF" && volume_label(42) == "VOL 42%",
+         "volume display distinguishes mute from an audible percentage");
+  expect(volume_after_menu_target(MenuTargetVolumeToggle, 42, 42) == 0,
+         "volume display mutes an audible level");
+  expect(volume_after_menu_target(MenuTargetVolumeToggle, 0, 42) == 42,
+         "volume display restores the last audible level");
+  expect(volume_after_menu_target(MenuTargetVolumeUp, 0, 42) == 42,
+         "volume plus restores the last audible level");
+  expect(volume_after_menu_target(MenuTargetVolumeDown, 0, 42) == 0,
+         "volume minus leaves mute enabled");
 
   std::string keymap;
   expect(load_keymap_state(keymap_state, &keymap, &error),
@@ -261,50 +285,62 @@ int main() {
               &menu_layout);
   expect(canvas.size() == static_cast<size_t>(kLogicalWidth * kLogicalHeight),
          "menu renders a complete logical canvas");
-  expect(canvas[0] == rgb565(0, 0, 0), "menu background is solid black");
-  expect(canvas[static_cast<size_t>(82) * kLogicalWidth] == rgb565(0, 0, 0),
+  expect(canvas[0] == xterm_pixel(kColorBackground),
+         "menu background uses the xterm palette");
+  expect(canvas[static_cast<size_t>(82) * kLogicalWidth] ==
+             xterm_pixel(kColorBackground),
          "menu has no colored header divider");
   expect(canvas[static_cast<size_t>(12) * kLogicalWidth + 26] ==
-             rgb565(255, 245, 171),
+             xterm_pixel(kColorTitle),
          "menu title uses its enlarged header scale");
   expect(canvas[static_cast<size_t>(68) * kLogicalWidth + 26] ==
-             rgb565(0, 0, 0),
+             xterm_pixel(kColorBackground),
          "menu omits the instructional subtitle");
   expect(target_at(menu_layout, menu_layout.volume_down_button.x + 1,
-                   menu_layout.volume_down_button.y + 1) == -2,
+                   menu_layout.volume_down_button.y + 1) ==
+             MenuTargetVolumeDown,
          "volume down action has its own target");
+  expect(target_at(menu_layout, menu_layout.volume_display.x + 1,
+                   menu_layout.volume_display.y + 1) ==
+             MenuTargetVolumeToggle,
+         "volume display has its own mute target");
   expect(target_at(menu_layout, menu_layout.volume_up_button.x + 1,
-                   menu_layout.volume_up_button.y + 1) == -5,
+                   menu_layout.volume_up_button.y + 1) == MenuTargetVolumeUp,
          "volume up action has its own target");
   expect(target_at(menu_layout, menu_layout.keymap_button.x + 1,
-                   menu_layout.keymap_button.y + 1) == -6,
+                   menu_layout.keymap_button.y + 1) == MenuTargetKeymap,
          "keymap action has its own target");
   expect(target_at(menu_layout, menu_layout.wifi_button.x + 1,
-                   menu_layout.wifi_button.y + 1) == -3,
+                   menu_layout.wifi_button.y + 1) == MenuTargetWifi,
          "wifi action has its own target");
   expect(target_at(menu_layout, menu_layout.terminal_button.x + 1,
-                   menu_layout.terminal_button.y + 1) == -4,
+                   menu_layout.terminal_button.y + 1) == MenuTargetTerminal,
          "terminal action has its own target");
   expect(canvas[static_cast<size_t>(menu_layout.terminal_button.y) *
                         kLogicalWidth +
-                    menu_layout.terminal_button.x] == rgb565(25, 25, 25) &&
+                    menu_layout.terminal_button.x] ==
+                 xterm_pixel(kColorSurface) &&
              canvas[static_cast<size_t>(menu_layout.keymap_button.y) *
                         kLogicalWidth +
-                    menu_layout.keymap_button.x] == rgb565(25, 25, 25) &&
+                    menu_layout.keymap_button.x] ==
+                 xterm_pixel(kColorSurface) &&
              canvas[static_cast<size_t>(menu_layout.wifi_button.y) *
                         kLogicalWidth +
-                    menu_layout.wifi_button.x] == rgb565(25, 25, 25) &&
+                    menu_layout.wifi_button.x] ==
+                 xterm_pixel(kColorSurface) &&
              canvas[static_cast<size_t>(menu_layout.volume_down_button.y) *
                         kLogicalWidth +
-                    menu_layout.volume_down_button.x] == rgb565(25, 25, 25) &&
+                    menu_layout.volume_down_button.x] ==
+                 xterm_pixel(kColorSurface) &&
              canvas[static_cast<size_t>(menu_layout.volume_up_button.y) *
                         kLogicalWidth +
-                    menu_layout.volume_up_button.x] == rgb565(25, 25, 25),
+                    menu_layout.volume_up_button.x] ==
+                 xterm_pixel(kColorSurface),
          "top control buttons stay flat through their edges");
   expect(canvas[static_cast<size_t>(menu_layout.volume_display.y) *
                         kLogicalWidth +
                     menu_layout.volume_display.x] ==
-             RgbColor{116, 169, 137}.pixel(),
+             xterm_pixel(kColorVolumeOn),
          "volume display stays flat through its edge");
   expect(menu_layout.system_tabs.size() == 5,
          "menu exposes one tab for each populated system");
@@ -312,13 +348,13 @@ int main() {
     const Rect &selected_tab = menu_layout.system_tabs[0].bounds;
     const Rect &inactive_tab = menu_layout.system_tabs[1].bounds;
     expect(canvas[static_cast<size_t>(selected_tab.y) * kLogicalWidth +
-                  selected_tab.x] == rgb565(126, 159, 174),
+                  selected_tab.x] == xterm_pixel(kColorSelected),
            "selected system tab uses a cool color through its edge");
     expect(canvas[static_cast<size_t>(selected_tab.y) * kLogicalWidth +
-                  selected_tab.x] != rgb565(255, 245, 171),
+                  selected_tab.x] != xterm_pixel(kColorTitle),
            "selected system tab differs from the title color");
     expect(canvas[static_cast<size_t>(inactive_tab.y) * kLogicalWidth +
-                  inactive_tab.x] == rgb565(25, 25, 25),
+                  inactive_tab.x] == xterm_pixel(kColorSurface),
            "inactive system tab stays flat through its edge");
   }
   expect(menu_layout.game_buttons.size() == 1 &&
@@ -339,6 +375,11 @@ int main() {
   }
   render_menu(tab_games, "chip8", 0, "cz", std::string(), &canvas,
               &menu_layout);
+  expect(canvas[static_cast<size_t>(menu_layout.volume_display.y) *
+                        kLogicalWidth +
+                    menu_layout.volume_display.x] ==
+             xterm_pixel(kColorVolumeOff),
+         "muted volume display uses the xterm red");
   expect(menu_layout.game_buttons.size() == 1 &&
              menu_layout.game_indices.size() == 1 &&
              menu_layout.game_indices[0] == 3,

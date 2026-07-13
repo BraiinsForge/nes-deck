@@ -212,6 +212,62 @@ struct RgbColor {
   uint16_t pixel() const { return rgb565(red, green, blue); }
 };
 
+RgbColor xterm_color(unsigned int index) {
+  static const RgbColor ansi_colors[] = {
+      {0, 0, 0},       {128, 0, 0},     {0, 128, 0},     {128, 128, 0},
+      {0, 0, 128},     {128, 0, 128},   {0, 128, 128},   {192, 192, 192},
+      {128, 128, 128}, {255, 0, 0},     {0, 255, 0},     {255, 255, 0},
+      {0, 0, 255},     {255, 0, 255},   {0, 255, 255},   {255, 255, 255},
+  };
+  static const unsigned int cube_levels[] = {0, 95, 135, 175, 215, 255};
+
+  if (index < 16)
+    return ansi_colors[index];
+  if (index < 232) {
+    const unsigned int cube = index - 16;
+    return RgbColor{cube_levels[cube / 36],
+                    cube_levels[(cube / 6) % 6], cube_levels[cube % 6]};
+  }
+  if (index < 256) {
+    const unsigned int level = 8 + (index - 232) * 10;
+    return RgbColor{level, level, level};
+  }
+  return RgbColor{0, 0, 0};
+}
+
+bool is_xterm_color(const RgbColor &color) {
+  for (unsigned int index = 0; index < 256; ++index) {
+    const RgbColor candidate = xterm_color(index);
+    if (candidate.red == color.red && candidate.green == color.green &&
+        candidate.blue == color.blue)
+      return true;
+  }
+  return false;
+}
+
+uint16_t xterm_pixel(unsigned int index) { return xterm_color(index).pixel(); }
+
+// Semantic colors are canonical xterm-256 indices. Catalog colors are
+// validated against the same palette before the framebuffer is opened.
+const unsigned int kColorBackground = 16;
+const unsigned int kColorTextDark = 233;
+const unsigned int kColorField = 233;
+const unsigned int kColorSurface = 234;
+const unsigned int kColorInactiveBorder = 59;
+const unsigned int kColorControlBorder = 242;
+const unsigned int kColorFooter = 250;
+const unsigned int kColorInactiveText = 253;
+const unsigned int kColorText = 255;
+const unsigned int kColorWhite = 231;
+const unsigned int kColorTitle = 229;
+const unsigned int kColorVolumeOff = 138;
+const unsigned int kColorVolumeOn = 108;
+const unsigned int kColorSelected = 109;
+const unsigned int kColorWifiActive = 67;
+const unsigned int kColorWifiFocus = 111;
+const unsigned int kColorWifiActiveBorder = 147;
+const unsigned int kColorFieldLabel = 145;
+
 bool parse_color(const std::string &text, RgbColor *color) {
   if (!color || text.size() != 7 || text[0] != '#')
     return false;
@@ -478,6 +534,12 @@ bool load_manifest(const std::string &path, std::vector<GameEntry> *games,
     if (!parse_color(fields[4], &game.color)) {
       if (error)
         *error = "invalid #RRGGBB color on manifest line " +
+                 std::to_string(line_number);
+      return false;
+    }
+    if (!is_xterm_color(game.color)) {
+      if (error)
+        *error = "color is not in the xterm-256 palette on manifest line " +
                  std::to_string(line_number);
       return false;
     }
@@ -1049,7 +1111,12 @@ std::string fit_text_width(const std::string &text, int maximum_width,
 uint16_t contrasting_text(const RgbColor &color) {
   const unsigned int luminance =
       299 * color.red + 587 * color.green + 114 * color.blue;
-  return luminance >= 145000 ? rgb565(10, 16, 26) : rgb565(255, 255, 255);
+  return luminance >= 145000 ? xterm_pixel(kColorTextDark)
+                             : xterm_pixel(kColorWhite);
+}
+
+std::string volume_label(unsigned int volume) {
+  return volume == 0 ? "VOL OFF" : "VOL " + std::to_string(volume) + "%";
 }
 
 struct MenuLayout {
@@ -1066,6 +1133,16 @@ struct MenuLayout {
   std::vector<SystemTab> system_tabs;
   std::vector<Rect> game_buttons;
   std::vector<size_t> game_indices;
+};
+
+enum MenuTarget {
+  MenuTargetNone = -1,
+  MenuTargetVolumeDown = -2,
+  MenuTargetWifi = -3,
+  MenuTargetTerminal = -4,
+  MenuTargetVolumeUp = -5,
+  MenuTargetKeymap = -6,
+  MenuTargetVolumeToggle = -7,
 };
 
 const int kSystemTargetBase = -100;
@@ -1127,40 +1204,40 @@ void render_menu(const std::vector<GameEntry> &games,
   if (!canvas || !layout)
     return;
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
-                 rgb565(0, 0, 0));
+                 xterm_pixel(kColorBackground));
 
-  draw_text(canvas, 20, 12, "RETRO DECK", 7, rgb565(255, 245, 171));
+  draw_text(canvas, 20, 12, "RETRO DECK", 7, xterm_pixel(kColorTitle));
 
   layout->terminal_button = Rect{682, 10, 82, 62};
-  fill_rect(canvas, layout->terminal_button, rgb565(25, 25, 25));
-  draw_terminal_icon(canvas, layout->terminal_button, rgb565(245, 245, 245));
+  fill_rect(canvas, layout->terminal_button, xterm_pixel(kColorSurface));
+  draw_terminal_icon(canvas, layout->terminal_button,
+                     xterm_pixel(kColorText));
 
   layout->keymap_button = Rect{774, 10, 102, 62};
-  fill_rect(canvas, layout->keymap_button, rgb565(25, 25, 25));
+  fill_rect(canvas, layout->keymap_button, xterm_pixel(kColorSurface));
   draw_centered_text(canvas, layout->keymap_button,
                      keymap == "cz" ? "KEYS CZ" : "KEYS US", 2,
-                     rgb565(245, 245, 245));
+                     xterm_pixel(kColorText));
 
   layout->wifi_button = Rect{886, 10, 98, 62};
-  fill_rect(canvas, layout->wifi_button, rgb565(25, 25, 25));
+  fill_rect(canvas, layout->wifi_button, xterm_pixel(kColorSurface));
   draw_centered_text(canvas, layout->wifi_button, "WIFI", 2,
-                     rgb565(245, 245, 245));
+                     xterm_pixel(kColorText));
 
   layout->volume_down_button = Rect{994, 10, 62, 62};
   layout->volume_display = Rect{1062, 10, 130, 62};
   layout->volume_up_button = Rect{1198, 10, 62, 62};
   const RgbColor volume_color =
-      volume == 0 ? RgbColor{189, 121, 124} : RgbColor{116, 169, 137};
-  fill_rect(canvas, layout->volume_down_button, rgb565(25, 25, 25));
+      xterm_color(volume == 0 ? kColorVolumeOff : kColorVolumeOn);
+  fill_rect(canvas, layout->volume_down_button, xterm_pixel(kColorSurface));
   draw_centered_text(canvas, layout->volume_down_button, "-", 4,
-                     rgb565(245, 245, 245));
+                     xterm_pixel(kColorText));
   fill_rect(canvas, layout->volume_display, volume_color.pixel());
-  draw_centered_text(canvas, layout->volume_display,
-                     "VOL " + std::to_string(volume) + "%", 2,
+  draw_centered_text(canvas, layout->volume_display, volume_label(volume), 2,
                      contrasting_text(volume_color));
-  fill_rect(canvas, layout->volume_up_button, rgb565(25, 25, 25));
+  fill_rect(canvas, layout->volume_up_button, xterm_pixel(kColorSurface));
   draw_centered_text(canvas, layout->volume_up_button, "+", 4,
-                     rgb565(245, 245, 245));
+                     xterm_pixel(kColorText));
 
   layout->system_tabs.clear();
   int tab_x = 12;
@@ -1171,12 +1248,12 @@ void render_menu(const std::vector<GameEntry> &games,
       continue;
     const Rect tab{tab_x, 84, kSystemDefinitions[definition].width, 48};
     const bool selected = active_system == kSystemDefinitions[definition].system;
-    const RgbColor tab_color =
-        selected ? RgbColor{126, 159, 174} : RgbColor{25, 25, 25};
+    const RgbColor tab_color = xterm_color(selected ? kColorSelected
+                                                    : kColorSurface);
     fill_rect(canvas, tab, tab_color.pixel());
     draw_centered_text(canvas, tab, kSystemDefinitions[definition].label, 2,
                        selected ? contrasting_text(tab_color)
-                                : rgb565(220, 220, 220));
+                                : xterm_pixel(kColorInactiveText));
     layout->system_tabs.push_back(MenuLayout::SystemTab{
         tab, kSystemDefinitions[definition].system});
     tab_x += tab.width + 8;
@@ -1235,7 +1312,7 @@ void render_menu(const std::vector<GameEntry> &games,
   const std::string shown_footer =
       fit_text_width(footer, kLogicalWidth - 24, footer_scale);
   draw_centered_text(canvas, Rect{12, 452, kLogicalWidth - 24, 28},
-                     shown_footer, footer_scale, rgb565(190, 190, 190));
+                     shown_footer, footer_scale, xterm_pixel(kColorFooter));
 }
 
 enum WifiField { WifiSsid, WifiPassphrase };
@@ -1278,13 +1355,14 @@ std::string tail_for_field(const std::string &value, size_t maximum) {
 
 void draw_wifi_button(Canvas *canvas, const Rect &bounds,
                       const std::string &label, bool active) {
-  const uint16_t background =
-      active ? rgb565(102, 121, 165) : rgb565(29, 29, 29);
+  const uint16_t background = xterm_pixel(active ? kColorWifiActive
+                                                 : kColorSurface);
   fill_rect(canvas, bounds, background);
   stroke_rect(canvas, bounds, 3,
-              active ? rgb565(160, 190, 255) : rgb565(105, 105, 105));
+              xterm_pixel(active ? kColorWifiActiveBorder
+                                 : kColorControlBorder));
   const int scale = fit_text_scale(label, bounds.width - 12, 3, 1);
-  draw_centered_text(canvas, bounds, label, scale, rgb565(250, 250, 250));
+  draw_centered_text(canvas, bounds, label, scale, xterm_pixel(kColorWhite));
 }
 
 void add_wifi_key_row(Canvas *canvas, const std::string &values, int y,
@@ -1310,36 +1388,37 @@ void render_wifi(const WifiState &state, Canvas *canvas, WifiLayout *layout) {
   if (!canvas || !layout)
     return;
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
-                 rgb565(0, 0, 0));
+                 xterm_pixel(kColorBackground));
   layout->keys.clear();
   layout->back_button = Rect{16, 10, 120, 62};
   layout->ssid_field = Rect{330, 10, 310, 62};
   layout->passphrase_field = Rect{650, 10, 330, 62};
   layout->save_button = Rect{990, 10, 274, 62};
   draw_wifi_button(canvas, layout->back_button, "BACK", false);
-  draw_text(canvas, 158, 25, "ADD WIFI", 3, rgb565(255, 245, 171));
+  draw_text(canvas, 158, 25, "ADD WIFI", 3, xterm_pixel(kColorTitle));
 
-  const uint16_t field_bg = rgb565(20, 20, 20);
+  const uint16_t field_bg = xterm_pixel(kColorField);
   fill_rect(canvas, layout->ssid_field, field_bg);
   stroke_rect(canvas, layout->ssid_field, 3,
-              state.field == WifiSsid ? rgb565(120, 165, 255)
-                                      : rgb565(95, 95, 95));
+              xterm_pixel(state.field == WifiSsid ? kColorWifiFocus
+                                                  : kColorInactiveBorder));
   draw_text(canvas, layout->ssid_field.x + 10, layout->ssid_field.y + 7,
-            "SSID", 1, rgb565(175, 175, 175));
+            "SSID", 1, xterm_pixel(kColorFieldLabel));
   draw_text(canvas, layout->ssid_field.x + 10, layout->ssid_field.y + 28,
-            tail_for_field(state.ssid, 19), 2, rgb565(250, 250, 250));
+            tail_for_field(state.ssid, 19), 2, xterm_pixel(kColorWhite));
 
   fill_rect(canvas, layout->passphrase_field, field_bg);
   stroke_rect(canvas, layout->passphrase_field, 3,
-              state.field == WifiPassphrase ? rgb565(120, 165, 255)
-                                            : rgb565(95, 95, 95));
+              xterm_pixel(state.field == WifiPassphrase
+                              ? kColorWifiFocus
+                              : kColorInactiveBorder));
   draw_text(canvas, layout->passphrase_field.x + 10,
             layout->passphrase_field.y + 7, "PASSWORD", 1,
-            rgb565(175, 175, 175));
+            xterm_pixel(kColorFieldLabel));
   draw_text(canvas, layout->passphrase_field.x + 10,
             layout->passphrase_field.y + 28,
             tail_for_field(std::string(state.passphrase.size(), '*'), 20), 2,
-            rgb565(250, 250, 250));
+            xterm_pixel(kColorWhite));
   draw_wifi_button(canvas, layout->save_button, "SAVE NETWORK", false);
 
   if (state.symbols) {
@@ -1370,7 +1449,7 @@ void render_wifi(const WifiState &state, Canvas *canvas, WifiLayout *layout) {
                                  : state.status;
   const int scale = fit_text_scale(footer, kLogicalWidth - 24, 2, 1);
   draw_centered_text(canvas, Rect{12, 442, kLogicalWidth - 24, 30}, footer,
-                     scale, rgb565(190, 190, 190));
+                     scale, xterm_pixel(kColorFooter));
 }
 
 class Framebuffer {
@@ -2032,15 +2111,17 @@ ChildResult run_terminal(const std::string &launcher,
 
 int target_at(const MenuLayout &layout, int x, int y) {
   if (layout.volume_down_button.contains(x, y))
-    return -2;
+    return MenuTargetVolumeDown;
+  if (layout.volume_display.contains(x, y))
+    return MenuTargetVolumeToggle;
   if (layout.wifi_button.contains(x, y))
-    return -3;
+    return MenuTargetWifi;
   if (layout.terminal_button.contains(x, y))
-    return -4;
+    return MenuTargetTerminal;
   if (layout.volume_up_button.contains(x, y))
-    return -5;
+    return MenuTargetVolumeUp;
   if (layout.keymap_button.contains(x, y))
-    return -6;
+    return MenuTargetKeymap;
   for (size_t i = 0; i < layout.system_tabs.size(); ++i) {
     if (layout.system_tabs[i].bounds.contains(x, y))
       return kSystemTargetBase - static_cast<int>(i);
@@ -2049,7 +2130,23 @@ int target_at(const MenuLayout &layout, int x, int y) {
     if (layout.game_buttons[i].contains(x, y))
       return static_cast<int>(layout.game_indices[i]);
   }
-  return -1;
+  return MenuTargetNone;
+}
+
+unsigned int volume_after_menu_target(int target, unsigned int volume,
+                                      unsigned int last_audible_volume) {
+  const unsigned int restore_volume =
+      last_audible_volume == 0
+          ? kVolumeStep
+          : std::min(100U, last_audible_volume);
+  if (target == MenuTargetVolumeToggle)
+    return volume == 0 ? restore_volume : 0;
+  if (target == MenuTargetVolumeUp)
+    return volume == 0 ? restore_volume
+                       : std::min(100U, volume + kVolumeStep);
+  if (target == MenuTargetVolumeDown)
+    return volume > kVolumeStep ? volume - kVolumeStep : 0;
+  return volume;
 }
 
 enum WifiTarget {
@@ -2430,6 +2527,9 @@ int application_main(const Options &options) {
     std::cerr << "deck-menu: " << error << std::endl;
     return 1;
   }
+  unsigned int last_audible_volume =
+      volume != 0 ? volume
+                  : (default_volume != 0 ? default_volume : kVolumeStep);
 
   std::string keymap;
   if (!load_keymap_state(options.keymap_state, &keymap, &error)) {
@@ -2462,7 +2562,7 @@ int application_main(const Options &options) {
     return 1;
   }
 
-  int pressed_target = -1;
+  int pressed_target = MenuTargetNone;
   int64_t reconnect_attempt = 0;
   std::string last_touch_error;
 
@@ -2502,7 +2602,7 @@ int application_main(const Options &options) {
     if (!touch.read_reports(&reports, &error)) {
       std::cerr << "deck-menu: " << error << std::endl;
       touch.close_device();
-      pressed_target = -1;
+      pressed_target = MenuTargetNone;
       if (wifi_view) {
         wifi_state.status = "WAITING FOR TOUCHSCREEN";
         render_wifi(wifi_state, &canvas, &wifi_layout);
@@ -2563,15 +2663,17 @@ int application_main(const Options &options) {
           framebuffer.present(canvas, NULL);
         }
       } else if (!wifi_view &&
-                 (pressed_target == -2 || pressed_target == -5) &&
+                 (pressed_target == MenuTargetVolumeDown ||
+                  pressed_target == MenuTargetVolumeUp ||
+                  pressed_target == MenuTargetVolumeToggle) &&
                  pressed_target == released_target) {
-        const unsigned int requested =
-            pressed_target == -5
-                ? std::min(100U, volume + kVolumeStep)
-                : (volume > kVolumeStep ? volume - kVolumeStep : 0U);
+        const unsigned int requested = volume_after_menu_target(
+            pressed_target, volume, last_audible_volume);
         std::string state_error;
         if (save_volume_state(options.volume_state, requested, &state_error)) {
           volume = requested;
+          if (volume != 0)
+            last_audible_volume = volume;
           status = volume == 0
                        ? "GAME VOLUME MUTED"
                        : "GAME VOLUME " + std::to_string(volume) + "%";
@@ -2589,17 +2691,17 @@ int application_main(const Options &options) {
         render_menu(games, active_system, volume, keymap, status, &canvas,
                     &layout);
         framebuffer.present(canvas, NULL);
-      } else if (!wifi_view && pressed_target == -3 &&
-                 released_target == -3) {
+      } else if (!wifi_view && pressed_target == MenuTargetWifi &&
+                 released_target == MenuTargetWifi) {
         wifi_view = true;
         wifi_state.status.clear();
         render_wifi(wifi_state, &canvas, &wifi_layout);
         framebuffer.present(canvas, NULL);
-      } else if (!wifi_view && pressed_target == -4 &&
-                 released_target == -4) {
+      } else if (!wifi_view && pressed_target == MenuTargetTerminal &&
+                 released_target == MenuTargetTerminal) {
         terminal_requested = true;
-      } else if (!wifi_view && pressed_target == -6 &&
-                 released_target == -6) {
+      } else if (!wifi_view && pressed_target == MenuTargetKeymap &&
+                 released_target == MenuTargetKeymap) {
         const std::string requested = keymap == "cz" ? "us" : "cz";
         std::string state_error;
         if (save_keymap_state(options.keymap_state, requested, &state_error)) {
@@ -2618,7 +2720,7 @@ int application_main(const Options &options) {
                  pressed_target < static_cast<int>(games.size())) {
         selected_game = pressed_target;
       }
-      pressed_target = -1;
+      pressed_target = MenuTargetNone;
     }
 
     if (selected_game < 0 && !terminal_requested)
@@ -2634,7 +2736,7 @@ int application_main(const Options &options) {
             ? run_terminal(options.terminal, keymap, &touch, &framebuffer)
             : run_game(emulator_for_game(options, games[selected_game]),
                        games[selected_game], volume, &touch, &framebuffer);
-    pressed_target = -1;
+    pressed_target = MenuTargetNone;
     if (g_shutdown_requested)
       break;
 

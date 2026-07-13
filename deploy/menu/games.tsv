@@ -1,14 +1,14 @@
-mario	SUPER MARIO BROS.	nes	/mnt/data/nes-deck/mario.nes	#E48A75
-falling	FALLING	nes	/mnt/data/nes-deck/roms/falling.nes	#9691D6
-thwaite	THWAITE	nes	/mnt/data/nes-deck/roms/thwaite.nes	#E7B676
-concentration-room	CONCENTRATION ROOM	nes	/mnt/data/nes-deck/roms/croom.nes	#82B7AF
-robotfindskitten	ROBOTFINDSKITTEN	nes	/mnt/data/nes-deck/roms/robotfindskitten.nes	#9CC690
-micro-mages	MICRO MAGES	nes	/mnt/data/nes-deck/roms/micro-mages.nes	#DF8FA7
-adjustris	ADJUSTRIS	gb	/mnt/data/nes-deck/roms/adjustris.gb	#ABB96E
-pokemon-red	POKEMON RED	gb	/mnt/data/nes-deck/roms/pokemon-red.gb	#E48A75
-geometrix	GEOMETRIX	gbc	/mnt/data/nes-deck/roms/geometrix.gbc	#84AFCC
-donkey-kong-country	DONKEY KONG COUNTRY	gbc	/mnt/data/nes-deck/roms/donkey-kong-country.gbc	#E7B676
-super-mario-bros-deluxe	SUPER MARIO BROS. DELUXE	gbc	/mnt/data/nes-deck/roms/super-mario-bros-deluxe.gbc	#E48A75
-outlaw	OUTLAW	chip8	/mnt/data/nes-deck/roms/outlaw.ch8	#BE926F
-space-racer	SPACE RACER	chip8	/mnt/data/nes-deck/roms/spaceracer.ch8	#EAE4DC
-ten-seconds	10 SECONDS	deck	/mnt/data/nes-deck/games/ten-seconds	#F09C77
+mario	SUPER MARIO BROS.	nes	/mnt/data/nes-deck/mario.nes	#D78787
+falling	FALLING	nes	/mnt/data/nes-deck/roms/falling.nes	#8787D7
+thwaite	THWAITE	nes	/mnt/data/nes-deck/roms/thwaite.nes	#D7AF87
+concentration-room	CONCENTRATION ROOM	nes	/mnt/data/nes-deck/roms/croom.nes	#87AFAF
+robotfindskitten	ROBOTFINDSKITTEN	nes	/mnt/data/nes-deck/roms/robotfindskitten.nes	#AFD787
+micro-mages	MICRO MAGES	nes	/mnt/data/nes-deck/roms/micro-mages.nes	#D787AF
+adjustris	ADJUSTRIS	gb	/mnt/data/nes-deck/roms/adjustris.gb	#AFAF5F
+pokemon-red	POKEMON RED	gb	/mnt/data/nes-deck/roms/pokemon-red.gb	#D78787
+geometrix	GEOMETRIX	gbc	/mnt/data/nes-deck/roms/geometrix.gbc	#87AFD7
+donkey-kong-country	DONKEY KONG COUNTRY	gbc	/mnt/data/nes-deck/roms/donkey-kong-country.gbc	#D7AF87
+super-mario-bros-deluxe	SUPER MARIO BROS. DELUXE	gbc	/mnt/data/nes-deck/roms/super-mario-bros-deluxe.gbc	#D78787
+outlaw	OUTLAW	chip8	/mnt/data/nes-deck/roms/outlaw.ch8	#AF875F
+space-racer	SPACE RACER	chip8	/mnt/data/nes-deck/roms/spaceracer.ch8	#E4E4E4
+ten-seconds	10 SECONDS	deck	/mnt/data/nes-deck/games/ten-seconds	#FFAF87
