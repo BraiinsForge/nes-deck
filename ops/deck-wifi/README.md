@@ -25,3 +25,11 @@ configuration to recover before returning control to the watcher.
 configuration are forced to mode `0600`. The procd service starts after the
 OpenWrt network service and keeps the generated file private when netifd
 recreates it.
+
+`deck-wifi-profile-add` is the write-only companion used by the Retro Deck
+menu. It reads exactly two lines from stdin (SSID and PSK passphrase), validates
+printable-ASCII PSK limits, and atomically writes a mode-0600 canonical IWD
+profile. If the SSID already exists, all other filename spellings are removed
+only after the replacement is committed. It intentionally performs no Wi-Fi
+operation, so saving cannot interrupt the current association. Its host test
+can be run with `tests/deck_wifi_profile_add_test.sh`.

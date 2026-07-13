@@ -1,0 +1,91 @@
+#!/bin/sh
+
+# Atomically save one PSK profile without reloading, roaming, or otherwise
+# touching the live wireless connection. SSID and passphrase arrive on stdin
+# so neither secret is exposed in argv or logs.
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+LC_ALL=C
+PROFILE_DIR=${DECK_WIFI_PROFILE_DIR:-/etc/deck-wifi/profiles}
+LOCK_DIR=$PROFILE_DIR/.profile-add.lock
+
+export PATH LC_ALL
+umask 077
+
+fail() {
+	printf '%s\n' 'wifi profile was not saved' >&2
+	exit 1
+}
+
+cleanup() {
+	rm -f "${TEMP_PROFILE:-}" 2>/dev/null || :
+	rm -rf "$LOCK_DIR" 2>/dev/null || :
+}
+
+valid_length() {
+	value=$1
+	minimum=$2
+	maximum=$3
+	length=$(printf '%s' "$value" | wc -c) || return 1
+	case $length in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "$length" -ge "$minimum" ] && [ "$length" -le "$maximum" ]
+}
+
+printable_ascii() {
+	[ -n "$1" ] && ! printf '%s' "$1" | grep -q '[^ -~]'
+}
+
+profile_hex() {
+	name=${1##*/}
+	name=${name%.psk}
+	case $name in
+		=*) printf '%s\n' "${name#=}" | tr 'A-F' 'a-f' ;;
+		*) printf '%s' "$name" | xxd -p | tr -d '\n' | tr 'A-F' 'a-f'; printf '\n' ;;
+	esac
+}
+
+IFS= read -r ssid || fail
+IFS= read -r passphrase || fail
+IFS= read -r extra && fail
+
+valid_length "$ssid" 1 32 || fail
+valid_length "$passphrase" 8 63 || fail
+printable_ascii "$ssid" || fail
+printable_ascii "$passphrase" || fail
+
+mkdir -p "$PROFILE_DIR" || fail
+chmod 0700 "$PROFILE_DIR" || fail
+mkdir "$LOCK_DIR" 2>/dev/null || fail
+trap cleanup EXIT INT TERM HUP
+
+ssid_hex=$(printf '%s' "$ssid" | xxd -p | tr -d '\n' | tr 'A-F' 'a-f') || fail
+[ -n "$ssid_hex" ] || fail
+destination=$PROFILE_DIR/=$ssid_hex.psk
+TEMP_PROFILE=$PROFILE_DIR/.profile-add.$$
+
+if ! {
+	printf '%s\n' '[Security]'
+	printf 'Passphrase=%s\n' "$passphrase"
+	printf '%s\n' '' '[Settings]' 'AutoConnect=true'
+} >"$TEMP_PROFILE"; then
+	fail
+fi
+chmod 0600 "$TEMP_PROFILE" || fail
+mv -f "$TEMP_PROFILE" "$destination" || fail
+TEMP_PROFILE=
+
+# The canonical file is committed first. Remove every other spelling of the
+# same SSID only after that atomic rename, so replacement never creates a
+# moment with no usable profile.
+for profile in "$PROFILE_DIR"/*.psk; do
+	[ -f "$profile" ] || continue
+	[ "$profile" = "$destination" ] && continue
+	[ "$(profile_hex "$profile")" = "$ssid_hex" ] || continue
+	rm -f "$profile" || fail
+done
+
+chmod 0600 "$destination" || fail
+printf '%s\n' 'wifi profile saved'
+exit 0
