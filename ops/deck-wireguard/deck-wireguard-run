@@ -1,0 +1,111 @@
+#!/bin/sh
+
+# Supervise wireguard-go and configure the dedicated Deck tunnel without
+# depending on wg-quick, bash, or OpenWrt's kernel WireGuard integration.
+
+set -eu
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+# Suppress wireguard-go's generic "use the kernel implementation" banner.
+# This Deck kernel has WireGuard omitted; the variable also keeps the daemon
+# in the foreground for procd supervision.
+WG_PROCESS_FOREGROUND=1
+export WG_PROCESS_FOREGROUND
+
+IFACE=wg0
+ADDRESS=10.0.0.10/32
+ROUTE=10.0.0.0/24
+MTU=1420
+STATE_DIR=/var/run/wireguard
+INSTALL_DIR=/mnt/data/nes-deck/wireguard
+WIREGUARD_GO="$INSTALL_DIR/bin/wireguard-go"
+WG="$INSTALL_DIR/bin/wg"
+CONFIG=/etc/wireguard/wg0.conf
+PRIVATE_KEY=/etc/wireguard/wg0.key
+
+daemon_pid=
+
+die()
+{
+	printf 'deck-wireguard: %s\n' "$*" >&2
+	exit 1
+}
+
+cleanup()
+{
+	status=$?
+	trap - EXIT HUP INT TERM
+	set +e
+	ip route del "$ROUTE" dev "$IFACE" >/dev/null 2>&1
+	if [ -n "$daemon_pid" ]; then
+		kill "$daemon_pid" >/dev/null 2>&1
+		wait "$daemon_pid" >/dev/null 2>&1
+	fi
+	ip link delete dev "$IFACE" >/dev/null 2>&1
+	rm -f "$STATE_DIR/$IFACE.sock"
+	exit "$status"
+}
+
+ensure_tun()
+{
+	# kmod-tun should normally be autoloaded. The explicit attempt also works
+	# with an ABI-matched module installed outside the package feeds.
+	if [ ! -r /sys/class/misc/tun/dev ] && command -v modprobe >/dev/null 2>&1; then
+		modprobe tun >/dev/null 2>&1 || true
+	fi
+	[ -r /sys/class/misc/tun/dev ] ||
+		die 'TUN is unavailable; install/load an ABI-matched kmod-tun first'
+
+	mkdir -p /dev/net
+	if [ -e /dev/net/tun ] && [ ! -c /dev/net/tun ]; then
+		die '/dev/net/tun exists but is not a character device'
+	fi
+	if [ ! -c /dev/net/tun ]; then
+		device_number="$(cat /sys/class/misc/tun/dev)"
+		major="${device_number%:*}"
+		minor="${device_number#*:}"
+		mknod /dev/net/tun c "$major" "$minor"
+	fi
+	chmod 0600 /dev/net/tun
+}
+
+[ -x "$WIREGUARD_GO" ] || die "missing $WIREGUARD_GO"
+[ -x "$WG" ] || die "missing $WG"
+[ -r "$CONFIG" ] || die "missing $CONFIG"
+[ -r "$PRIVATE_KEY" ] || die "missing $PRIVATE_KEY"
+
+umask 077
+chmod 0600 "$CONFIG" "$PRIVATE_KEY"
+ensure_tun
+mkdir -p "$STATE_DIR"
+
+# Clear only this service's stale interface/socket from an unclean exit.
+ip link delete dev "$IFACE" >/dev/null 2>&1 || true
+rm -f "$STATE_DIR/$IFACE.sock"
+
+trap cleanup EXIT HUP INT TERM
+"$WIREGUARD_GO" --foreground "$IFACE" &
+daemon_pid=$!
+
+attempt=0
+until ip link show dev "$IFACE" >/dev/null 2>&1; do
+	attempt=$((attempt + 1))
+	kill -0 "$daemon_pid" >/dev/null 2>&1 || die 'wireguard-go exited during startup'
+	[ "$attempt" -lt 15 ] || die 'timed out waiting for wg0'
+	sleep 1
+done
+
+"$WG" setconf "$IFACE" "$CONFIG"
+"$WG" set "$IFACE" private-key "$PRIVATE_KEY"
+ip address add "$ADDRESS" dev "$IFACE"
+ip link set dev "$IFACE" mtu "$MTU" up
+ip route replace "$ROUTE" dev "$IFACE" src 10.0.0.10
+
+printf 'deck-wireguard: %s is up as %s; routing %s\n' "$IFACE" "$ADDRESS" "$ROUTE"
+
+set +e
+wait "$daemon_pid"
+status=$?
+daemon_pid=
+exit "$status"

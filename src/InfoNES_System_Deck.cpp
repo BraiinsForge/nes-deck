@@ -13,9 +13,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <errno.h>
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <linux/soundcard.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -26,6 +28,7 @@
 #include "../InfoNES.h"
 #include "../InfoNES_System.h"
 #include "../InfoNES_pAPU.h"
+#include "nes_audio_mixer.h"
 
 #define TRUE 1
 #define FALSE 0
@@ -37,12 +40,8 @@
 // Display configuration (same as fbDOOM)
 #define FB_ROTATION_90 1   // Portrait LCD used in landscape mode
 #define FB_LINE_OFFSET 120 // First 120 lines are invisible
-#define FB_OFFSET_X -320   // Horizontal offset
-#define FB_OFFSET_Y 40     // Vertical offset
-
-// Physical framebuffer dimensions
-#define FB_PHYS_WIDTH 640
-#define FB_PHYS_HEIGHT 1280
+#define FB_OFFSET_X -295   // Center 512 pixels on the 1280-pixel rotated axis
+#define FB_OFFSET_Y 0      // Fill the Deck's 480-pixel active panel height
 
 // Effective display dimensions (landscape)
 #define DISPLAY_WIDTH 1280
@@ -54,8 +53,9 @@
 
 static int fb_fd = -1;
 static unsigned char *fb_mem = NULL;
-static unsigned char *frame_buffer = NULL;
 static struct fb_var_screeninfo fb_var;
+static struct fb_fix_screeninfo fb_fix;
+static size_t fb_map_size;
 static int fb_bpp;
 static int fb_stride;
 static int fb_scaling = 1;
@@ -77,10 +77,17 @@ int nSRAM_SaveFlag;
 
 pthread_t emulation_tid;
 int bThread;
+static int emulation_thread_started = 0;
 
 DWORD dwKeyPad1;
 DWORD dwKeyPad2;
 DWORD dwKeySystem;
+static volatile sig_atomic_t shutdown_requested = 0;
+
+static void request_shutdown(int signal_number) {
+  (void)signal_number;
+  shutdown_requested = 1;
+}
 
 /*-------------------------------------------------------------------*/
 /*  NES Palette - RGB565 format                                      */
@@ -130,40 +137,61 @@ static int lcd_fb_init(void) {
   if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &fb_var) < 0) {
     printf("InfoNES: Cannot get framebuffer info\n");
     close(fb_fd);
+    fb_fd = -1;
+    return -1;
+  }
+
+  if (ioctl(fb_fd, FBIOGET_FSCREENINFO, &fb_fix) < 0) {
+    printf("InfoNES: Cannot get fixed framebuffer info\n");
+    close(fb_fd);
+    fb_fd = -1;
     return -1;
   }
 
   fb_bpp = fb_var.bits_per_pixel / 8;
-  fb_stride = FB_PHYS_WIDTH * fb_bpp;
+  fb_stride = fb_fix.line_length;
+  fb_map_size = fb_fix.smem_len;
 
-  printf("InfoNES: Framebuffer %dx%d, %d bpp\n", fb_var.xres, fb_var.yres,
-         fb_var.bits_per_pixel);
+  if ((fb_bpp != 2 && fb_bpp != 4) || fb_stride <= 0 ||
+      (size_t)fb_stride < (size_t)fb_var.xres * fb_bpp) {
+    printf("InfoNES: Unsupported framebuffer layout\n");
+    close(fb_fd);
+    fb_fd = -1;
+    return -1;
+  }
+
+  const unsigned int mapped_rows =
+      fb_var.yres_virtual ? fb_var.yres_virtual : fb_var.yres;
+  const size_t required_size = (size_t)fb_stride * mapped_rows;
+  if (fb_map_size == 0)
+    fb_map_size = required_size;
+  else if (fb_map_size < required_size) {
+    printf("InfoNES: Framebuffer memory is smaller than its advertised layout\n");
+    close(fb_fd);
+    fb_fd = -1;
+    return -1;
+  }
+
+  printf("InfoNES: Framebuffer %dx%d, %d bpp, stride %d, map %zu bytes\n",
+         fb_var.xres, fb_var.yres, fb_var.bits_per_pixel, fb_stride,
+         fb_map_size);
   printf("InfoNES: Color format - R:%d@%d G:%d@%d B:%d@%d\n", fb_var.red.length,
          fb_var.red.offset, fb_var.green.length, fb_var.green.offset,
          fb_var.blue.length, fb_var.blue.offset);
 
   // Map framebuffer memory
-  size_t fb_size = FB_PHYS_WIDTH * FB_PHYS_HEIGHT * fb_bpp;
-  fb_mem = (unsigned char *)mmap(NULL, fb_size, PROT_READ | PROT_WRITE,
+  fb_mem = (unsigned char *)mmap(NULL, fb_map_size, PROT_READ | PROT_WRITE,
                                  MAP_SHARED, fb_fd, 0);
   if (fb_mem == MAP_FAILED) {
     printf("InfoNES: Cannot mmap framebuffer\n");
+    fb_mem = NULL;
     close(fb_fd);
+    fb_fd = -1;
     return -1;
   }
 
-  // Allocate working frame buffer
-  frame_buffer = (unsigned char *)malloc(fb_size);
-  if (!frame_buffer) {
-    printf("InfoNES: Cannot allocate frame buffer\n");
-    munmap(fb_mem, fb_size);
-    close(fb_fd);
-    return -1;
-  }
-
-  // Clear screen
-  memset(fb_mem, 0, fb_size);
-  memset(frame_buffer, 0, fb_size);
+  // Render directly into the mapping: avoid a second 1.6 MiB frame buffer.
+  memset(fb_mem, 0, fb_map_size);
 
   // Calculate scaling factor
 #if FB_ROTATION_90
@@ -196,12 +224,22 @@ int SaveSRAM(void);
 /*===================================================================*/
 
 int main(int argc, char **argv) {
+  setvbuf(stdout, NULL, _IOLBF, 0);
+
+  struct sigaction shutdown_action;
+  memset(&shutdown_action, 0, sizeof(shutdown_action));
+  shutdown_action.sa_handler = request_shutdown;
+  sigemptyset(&shutdown_action.sa_mask);
+  sigaction(SIGINT, &shutdown_action, NULL);
+  sigaction(SIGTERM, &shutdown_action, NULL);
+
   dwKeyPad1 = 0;
   dwKeyPad2 = 0;
   dwKeySystem = 0;
   bThread = FALSE;
 
-  InitJoypadInput();
+  if (InitJoypadInput() < 0)
+    printf("InfoNES: Continuing without keyboard input\n");
 
   if (lcd_fb_init() < 0) {
     printf("InfoNES: Framebuffer initialization failed\n");
@@ -210,15 +248,26 @@ int main(int argc, char **argv) {
 
   if (argc == 2) {
     start_application(argv[1]);
+    if (!emulation_thread_started)
+      return -1;
   } else {
     printf("Usage: %s <rom.nes>\n", argv[0]);
     return -1;
   }
 
   // Main loop - handle input
-  while (1) {
+  while (!shutdown_requested) {
     dwKeyPad1 = GetJoypadInput();
     usleep(1000);
+  }
+
+  printf("InfoNES: Shutdown requested\n");
+  dwKeySystem = PAD_SYS_QUIT;
+  bThread = FALSE;
+  if (emulation_thread_started) {
+    pthread_join(emulation_tid, NULL);
+    emulation_thread_started = 0;
+    SaveSRAM();
   }
 
   return 0;
@@ -243,7 +292,12 @@ void start_application(char *filename) {
   if (InfoNES_Load(szRomName) == 0) {
     LoadSRAM();
     bThread = TRUE;
-    pthread_create(&emulation_tid, NULL, emulation_thread, NULL);
+    if (pthread_create(&emulation_tid, NULL, emulation_thread, NULL) == 0) {
+      emulation_thread_started = 1;
+    } else {
+      bThread = FALSE;
+      printf("InfoNES: Failed to start emulation thread\n");
+    }
   } else {
     printf("InfoNES: Failed to load ROM: %s\n", filename);
   }
@@ -450,15 +504,12 @@ void *InfoNES_MemorySet(void *dest, int c, int count) {
 /*===================================================================*/
 
 void InfoNES_LoadFrame(void) {
-  if (fb_fd < 0 || !fb_mem || !frame_buffer)
+  if (fb_fd < 0 || !fb_mem)
     return;
 
   int x, y, sx, sy;
   uint16_t color;
   int bpp = fb_bpp;
-
-  // Clear frame buffer
-  memset(frame_buffer, 0, FB_PHYS_WIDTH * FB_PHYS_HEIGHT * bpp);
 
 #if FB_ROTATION_90
   // Rotated rendering for landscape-oriented portrait display
@@ -474,7 +525,7 @@ void InfoNES_LoadFrame(void) {
       // Apply transformation: offset, mirror X, map to rotated display
       // Same coordinate transformation as fbDOOM
       int offset_x = x * fb_scaling + FB_OFFSET_X;
-      int phys_col = (FB_PHYS_WIDTH - 1) - offset_x;
+      int phys_col = ((int)fb_var.xres - 1) - offset_x;
       int phys_row = y * fb_scaling + FB_OFFSET_Y;
 
       // Draw scaled pixel
@@ -484,11 +535,13 @@ void InfoNES_LoadFrame(void) {
           int py = phys_col + sx;
 
           // Bounds check against display dimensions
-          if (px >= 0 && px < DISPLAY_HEIGHT && py >= 0 && py < DISPLAY_WIDTH) {
+          if (px >= 0 && px < DISPLAY_HEIGHT && px < (int)fb_var.xres &&
+              py >= 0 && py < DISPLAY_WIDTH && py < (int)fb_var.yres) {
 
             // Write pixel to frame buffer
             // py (col) indexes rows, px (row) indexes columns (rotation swap)
-            unsigned char *pixel = frame_buffer + (py * fb_stride) + (px * bpp);
+            unsigned char *pixel = fb_mem + ((size_t)py * fb_stride) +
+                                   ((size_t)px * bpp);
 
             if (bpp == 2) {
               *(uint16_t *)pixel = color;
@@ -515,8 +568,8 @@ void InfoNES_LoadFrame(void) {
           int py = y * fb_scaling + sy;
 
           if (px < (int)fb_var.xres && py < (int)fb_var.yres) {
-            unsigned char *pixel =
-                frame_buffer + (py * fb_var.xres * bpp) + (px * bpp);
+            unsigned char *pixel = fb_mem + ((size_t)py * fb_stride) +
+                                   ((size_t)px * bpp);
 
             if (bpp == 2) {
               *(uint16_t *)pixel = color;
@@ -530,9 +583,6 @@ void InfoNES_LoadFrame(void) {
   }
 #endif
 
-  // Write to framebuffer
-  lseek(fb_fd, 0, SEEK_SET);
-  write(fb_fd, frame_buffer, FB_PHYS_WIDTH * FB_PHYS_HEIGHT * bpp);
 }
 
 /*===================================================================*/
@@ -550,16 +600,46 @@ void InfoNES_PadState(DWORD *pdwPad1, DWORD *pdwPad2, DWORD *pdwSystem) {
 /*===================================================================*/
 
 static int sound_fd = -1;
-static unsigned char *sound_buf = NULL;
-static int sound_buf_size = 0;
+static int16_t *sound_mix_buf = NULL;
+static int16_t *sound_resample_buf = NULL;
+static size_t sound_mix_capacity = 0;
+static size_t sound_resample_capacity = 0;
+static unsigned int sound_source_rate = 0;
+static unsigned int sound_device_rate = 0;
+static uint64_t sound_rate_remainder = 0;
+static int sound_trigger_pending = 0;
+static NesAudioMixer sound_mixer;
+
+static int sound_write_all(const void *buffer, size_t bytes) {
+  const unsigned char *data =
+      reinterpret_cast<const unsigned char *>(buffer);
+  size_t written = 0;
+  while (written < bytes) {
+    const ssize_t result = write(sound_fd, data + written, bytes - written);
+    if (result > 0)
+      written += (size_t)result;
+    else if (result < 0 && errno == EINTR)
+      continue;
+    else {
+      if (result == 0)
+        errno = EIO;
+      return 0;
+    }
+  }
+  return 1;
+}
 
 void InfoNES_SoundInit(void) {}
 
 int InfoNES_SoundOpen(int samples_per_sync, int sample_rate) {
-  int format = AFMT_U8;
+  int format = AFMT_S16_LE;
   int channels = 1;
   int rate = sample_rate;
-  int frag;
+  // Eight 1024-byte periods: about 93 ms at 44.1 kHz, mono S16.
+  int frag = (8 << 16) | 10;
+
+  if (samples_per_sync <= 0 || sample_rate <= 0)
+    return 0;
 
   sound_fd = open("/dev/dsp", O_WRONLY);
   if (sound_fd < 0) {
@@ -567,20 +647,22 @@ int InfoNES_SoundOpen(int samples_per_sync, int sample_rate) {
     return 0;
   }
 
-  // Set fragment size for low latency (blocking writes will throttle emulation)
-  frag = (4 << 16) | 7;  // 4 fragments of 128 bytes
-  ioctl(sound_fd, SNDCTL_DSP_SETFRAGMENT, &frag);
+  // Blocking writes pace emulation.  Two-plus frame callbacks of buffering
+  // absorb framebuffer scheduling jitter without adding excessive latency.
+  if (ioctl(sound_fd, SNDCTL_DSP_SETFRAGMENT, &frag) < 0)
+    printf("InfoNES: OSS fragment request failed: %s\n", strerror(errno));
 
-  // Set format (8-bit unsigned)
-  if (ioctl(sound_fd, SNDCTL_DSP_SETFMT, &format) < 0) {
-    printf("InfoNES: Cannot set audio format\n");
+  // Preserve the mixer's native 16-bit precision all the way into ALSA.
+  if (ioctl(sound_fd, SNDCTL_DSP_SETFMT, &format) < 0 ||
+      format != AFMT_S16_LE) {
+    printf("InfoNES: Cannot set signed 16-bit audio format\n");
     close(sound_fd);
     sound_fd = -1;
     return 0;
   }
 
   // Set mono
-  if (ioctl(sound_fd, SNDCTL_DSP_CHANNELS, &channels) < 0) {
+  if (ioctl(sound_fd, SNDCTL_DSP_CHANNELS, &channels) < 0 || channels != 1) {
     printf("InfoNES: Cannot set mono\n");
     close(sound_fd);
     sound_fd = -1;
@@ -595,11 +677,86 @@ int InfoNES_SoundOpen(int samples_per_sync, int sample_rate) {
     return 0;
   }
 
-  sound_buf_size = samples_per_sync;
-  sound_buf = (unsigned char *)malloc(sound_buf_size);
+  if (rate <= 0) {
+    printf("InfoNES: OSS returned an invalid sample rate\n");
+    close(sound_fd);
+    sound_fd = -1;
+    return 0;
+  }
 
-  printf("InfoNES: OSS sound opened - %d Hz (requested %d), %d samples\n",
-         rate, sample_rate, samples_per_sync);
+  /* Hold playback while the ring is primed; enable it on first callback. */
+  int trigger = 0;
+  if (ioctl(sound_fd, SNDCTL_DSP_SETTRIGGER, &trigger) == 0)
+    sound_trigger_pending = 1;
+  else
+    printf("InfoNES: OSS deferred trigger unavailable: %s\n", strerror(errno));
+
+  sound_mix_capacity = (size_t)samples_per_sync;
+  sound_source_rate = (unsigned int)sample_rate;
+  sound_device_rate = (unsigned int)rate;
+  sound_rate_remainder = 0;
+  NesAudioMixer_Reset(&sound_mixer);
+
+  unsigned int volume_percent = 42;
+  const char *volume_text = getenv("INFONES_VOLUME_PERCENT");
+  if (volume_text && *volume_text) {
+    char *end = NULL;
+    errno = 0;
+    const long parsed = strtol(volume_text, &end, 10);
+    if (!errno && end && *end == '\0' && parsed >= 0 && parsed <= 100)
+      volume_percent = (unsigned int)parsed;
+    else
+      printf("InfoNES: Ignoring invalid INFONES_VOLUME_PERCENT=%s\n",
+             volume_text);
+  }
+  NesAudioMixer_SetVolumePercent(&sound_mixer, volume_percent);
+
+  sound_mix_buf = (int16_t *)malloc(sound_mix_capacity * sizeof(*sound_mix_buf));
+  if (!sound_mix_buf) {
+    printf("InfoNES: Cannot allocate audio mix buffer\n");
+    close(sound_fd);
+    sound_fd = -1;
+    return 0;
+  }
+
+  if (sound_device_rate != sound_source_rate) {
+    sound_resample_capacity = NesAudio_ResampledCapacity(
+        sound_mix_capacity, sound_source_rate, sound_device_rate);
+    sound_resample_buf =
+        (int16_t *)malloc(sound_resample_capacity * sizeof(*sound_resample_buf));
+    if (!sound_resample_buf) {
+      printf("InfoNES: Cannot allocate audio resampling buffer\n");
+      InfoNES_SoundClose();
+      return 0;
+    }
+  }
+
+  int block_size = 0;
+  audio_buf_info space;
+  memset(&space, 0, sizeof(space));
+  ioctl(sound_fd, SNDCTL_DSP_GETBLKSIZE, &block_size);
+  ioctl(sound_fd, SNDCTL_DSP_GETOSPACE, &space);
+
+  /*
+   * Preload the complete ring with digital silence while the OSS trigger is
+   * paused so framebuffer initialization jitter cannot cause a one-off XRUN
+   * before the first emulated frame is ready.
+   */
+  if (space.bytes > 0 && space.bytes <= 1024 * 1024) {
+    void *silence = calloc(1, (size_t)space.bytes);
+    if (!silence || !sound_write_all(silence, (size_t)space.bytes)) {
+      free(silence);
+      printf("InfoNES: Cannot prefill the OSS audio ring\n");
+      InfoNES_SoundClose();
+      return 0;
+    }
+    free(silence);
+  }
+
+  printf("InfoNES: OSS S16 mono sound opened - %d Hz (requested %d), "
+         "%d samples, block %d, buffer %d bytes, volume %u%%\n",
+         rate, sample_rate, samples_per_sync, block_size, space.bytes,
+         volume_percent);
   return 1;
 }
 
@@ -608,46 +765,68 @@ void InfoNES_SoundClose(void) {
     close(sound_fd);
     sound_fd = -1;
   }
-  if (sound_buf) {
-    free(sound_buf);
-    sound_buf = NULL;
+  if (sound_mix_buf) {
+    free(sound_mix_buf);
+    sound_mix_buf = NULL;
   }
+  if (sound_resample_buf) {
+    free(sound_resample_buf);
+    sound_resample_buf = NULL;
+  }
+  sound_mix_capacity = 0;
+  sound_resample_capacity = 0;
+  sound_source_rate = 0;
+  sound_device_rate = 0;
+  sound_rate_remainder = 0;
+  sound_trigger_pending = 0;
 }
 
 void InfoNES_SoundOutput(int samples, BYTE *wave1, BYTE *wave2, BYTE *wave3,
                          BYTE *wave4, BYTE *wave5) {
-  if (sound_fd < 0 || !sound_buf)
+  if (sound_fd < 0 || !sound_mix_buf || samples <= 0)
     return;
 
-  // Safety check: don't exceed buffer
-  if (samples > sound_buf_size) samples = sound_buf_size;
-
-  // Mix NES channels with scaling to prevent clipping
-  for (int i = 0; i < samples; i++) {
-    // Clamp inputs to expected ranges
-    int p1 = wave1[i] & 0xFF;
-    int p2 = wave2[i] & 0xFF;
-    int tr = wave3[i] & 0xFF;
-    int ns = wave4[i] & 0x0F;
-    int dp = wave5[i] & 0x7F;
-
-    int pulse1 = p1 * 9 / 10;  // 0-255 -> 0-229
-    int pulse2 = p2 * 9 / 10;  // 0-255 -> 0-229
-    int tri    = tr * 9 / 10;  // 0-255 -> 0-229
-    int noise  = ns;           // 0-15 (no scaling)
-    int dpcm   = dp;           // 0-127 (no scaling)
-
-    // Mix all channels
-    int mixed = (pulse1 + pulse2 + tri + noise + dpcm) / 5;
-
-    // Center at 128, scale down for volume
-    int out = 128 + ((mixed - 128) / 4);
-    if (out < 0) out = 0;
-    if (out > 255) out = 255;
-    sound_buf[i] = (unsigned char)out;
+  if ((size_t)samples > sound_mix_capacity) {
+    printf("InfoNES: Dropping oversized audio callback (%d samples)\n", samples);
+    return;
   }
 
-  write(sound_fd, sound_buf, samples);
+  for (int i = 0; i < samples; i++) {
+    sound_mix_buf[i] = NesAudioMixer_MixSampleS16(
+        &sound_mixer, wave1[i], wave2[i], wave3[i], wave4[i] & 0x0f,
+        wave5[i] & 0x7f);
+  }
+
+  const int16_t *output = sound_mix_buf;
+  size_t output_samples = (size_t)samples;
+  if (sound_device_rate != sound_source_rate) {
+    const uint64_t scaled =
+        (uint64_t)samples * sound_device_rate + sound_rate_remainder;
+    output_samples = (size_t)(scaled / sound_source_rate);
+    sound_rate_remainder = scaled % sound_source_rate;
+    if (output_samples > sound_resample_capacity) {
+      printf("InfoNES: Dropping oversized resampled audio callback\n");
+      return;
+    }
+    NesAudio_ResampleS16(sound_mix_buf, (size_t)samples, sound_resample_buf,
+                         output_samples);
+    output = sound_resample_buf;
+  }
+
+  const size_t output_size = output_samples * sizeof(*output);
+  if (sound_trigger_pending) {
+    int trigger = PCM_ENABLE_OUTPUT;
+    if (ioctl(sound_fd, SNDCTL_DSP_SETTRIGGER, &trigger) < 0)
+      printf("InfoNES: Cannot start deferred OSS playback: %s\n",
+             strerror(errno));
+    sound_trigger_pending = 0;
+  }
+  if (!sound_write_all(output, output_size)) {
+    printf("InfoNES: Audio write failed: %s; sound disabled\n",
+           strerror(errno));
+    close(sound_fd);
+    sound_fd = -1;
+  }
 }
 
 /*===================================================================*/

@@ -1,0 +1,282 @@
+#!/bin/sh
+
+# Select a known IWD profile only while the Deck station is disconnected.
+# Profile names and credentials are deliberately never written to stdout/syslog.
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+PROFILE_DIR=/etc/deck-wifi/profiles
+BACKUP_DIR=/etc/deck-wifi/backups
+WIRELESS_CONFIG=/etc/config/wireless
+RUNTIME_CONFIG=/var/run/wpa_supplicant-wlan0.conf
+IFACE=wlan0
+LOCK_DIR=/tmp/deck-wifi-select.lock
+TAB="$(printf '\t')"
+SCAN_CONFIRMATIONS=3
+SCAN_INTERVAL=10
+SWITCH_TIMEOUT=180
+HEALTH_INTERVAL=5
+
+secure_files() {
+	chmod 0700 /etc/deck-wifi "$PROFILE_DIR" "$BACKUP_DIR" 2>/dev/null || true
+	chmod 0600 "$WIRELESS_CONFIG" "$RUNTIME_CONFIG" 2>/dev/null || true
+	for profile in "$PROFILE_DIR"/*.psk; do
+		[ -f "$profile" ] || continue
+		chmod 0600 "$profile" 2>/dev/null || true
+	done
+}
+
+is_connected() {
+	iw dev "$IFACE" link 2>/dev/null | grep -q '^Connected to '
+}
+
+has_ipv4() {
+	ip -4 address show dev "$IFACE" 2>/dev/null |
+		awk '$1 == "inet" { found=1 } END { exit !found }'
+}
+
+has_default_route() {
+	ip -4 route show default 2>/dev/null |
+		awk -v iface="$IFACE" '
+			{ for (i=1; i<=NF; i++) if ($i == "dev" && $(i+1) == iface) found=1 }
+			END { exit !found }
+		'
+}
+
+network_ready() {
+	is_connected && has_ipv4 && has_default_route
+}
+
+wait_for_network() {
+	timeout=$1
+	elapsed=0
+	while [ "$elapsed" -lt "$timeout" ]; do
+		network_ready && return 0
+		sleep "$HEALTH_INTERVAL"
+		elapsed=$((elapsed + HEALTH_INTERVAL))
+	done
+	network_ready
+}
+
+find_sta_section() {
+	STA_SECTION=
+	index=0
+	while uci -q get "wireless.@wifi-iface[$index]" >/dev/null 2>&1; do
+		mode="$(uci -q get "wireless.@wifi-iface[$index].mode" 2>/dev/null)"
+		disabled="$(uci -q get "wireless.@wifi-iface[$index].disabled" 2>/dev/null)"
+		if [ "$mode" = sta ] && [ "${disabled:-0}" != 1 ]; then
+			STA_SECTION="@wifi-iface[$index]"
+			return 0
+		fi
+		index=$((index + 1))
+	done
+	return 1
+}
+
+profile_hex() {
+	profile_name=${1##*/}
+	profile_name=${profile_name%.psk}
+	case "$profile_name" in
+		=*) printf '%s\n' "${profile_name#=}" | tr 'A-F' 'a-f' ;;
+		*) printf '%s' "$profile_name" | xxd -p | tr -d '\n'; printf '\n' ;;
+	esac
+}
+
+profile_enabled() {
+	[ "$(awk -F= '$1 == "AutoConnect" { value=$2 } END { print value }' "$1")" != false ]
+}
+
+find_enabled_profile() {
+	wanted_hex=$1
+	SELECTED_PROFILE=
+	for profile in "$PROFILE_DIR"/*.psk; do
+		[ -f "$profile" ] || continue
+		profile_enabled "$profile" || continue
+		[ "$(profile_hex "$profile")" = "$wanted_hex" ] || continue
+		SELECTED_PROFILE=$profile
+		return 0
+	done
+	return 1
+}
+
+cleanup() {
+	rm -f "${SCAN_IW:-}" "${SCAN_RAW:-}" "${SCAN_HEX:-}" "${SCAN_SORTED:-}" 2>/dev/null || true
+	[ -n "${UCI_WORK:-}" ] && rm -rf "$UCI_WORK" 2>/dev/null || true
+	[ -n "${RESTORE_WORK:-}" ] && rm -f "$RESTORE_WORK" 2>/dev/null || true
+	rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+scan_once() {
+	: >"$SCAN_IW"
+	: >"$SCAN_RAW"
+	: >"$SCAN_HEX"
+	: >"$SCAN_SORTED"
+
+	# A failed/busy scan is not evidence that the configured network is absent.
+	iw dev "$IFACE" scan >"$SCAN_IW" 2>/dev/null || return 1
+
+	# Authentication suites occur after SSID in iw output, so emit only when the
+	# complete BSS block has been consumed.  SAE-only BSSes remain visible for
+	# current-network checks but are not eligible switch targets.
+	awk '
+		function emit() {
+			if (length(ssid) > 0) printf "%s\t%d\t%s\n", signal, psk, ssid
+		}
+		/^BSS / {
+			emit()
+			signal=-1000
+			ssid=""
+			psk=0
+			next
+		}
+		/^[[:space:]]*signal:/ { signal=$2; next }
+		/Authentication suites:/ {
+			if (index($0, "PSK")) psk=1
+			next
+		}
+		/^[[:space:]]*SSID:/ {
+			ssid=$0
+			sub(/^[[:space:]]*SSID: /, "", ssid)
+			next
+		}
+		END { emit() }
+	' "$SCAN_IW" >"$SCAN_RAW"
+
+	[ -s "$SCAN_RAW" ] || return 1
+
+	while IFS="$TAB" read -r signal advertises_psk ssid; do
+		ssid_hex="$(printf '%s' "$ssid" | xxd -p | tr -d '\n' | tr 'A-F' 'a-f')"
+		[ -n "$ssid_hex" ] || continue
+		printf '%s\t%s\t%s\n' "$signal" "$advertises_psk" "$ssid_hex"
+	done <"$SCAN_RAW" >"$SCAN_HEX"
+
+	sort -rn -k1,1 "$SCAN_HEX" >"$SCAN_SORTED"
+	[ -s "$SCAN_SORTED" ]
+}
+
+restore_wireless_config() {
+	RESTORE_WORK=/etc/deck-wifi/.wireless-restore.$$
+	cp "$backup" "$RESTORE_WORK" || return 1
+	chmod 0600 "$RESTORE_WORK" || return 1
+	mv "$RESTORE_WORK" "$WIRELESS_CONFIG" || return 1
+	RESTORE_WORK=
+	chmod 0600 "$WIRELESS_CONFIG"
+	wifi reload >/dev/null 2>&1 || true
+	sleep 2
+	secure_files
+}
+
+umask 077
+mkdir "$LOCK_DIR" 2>/dev/null || exit 0
+trap cleanup EXIT INT TERM
+
+secure_files
+[ "${1:-}" = --secure-only ] && exit 0
+
+[ -d "$PROFILE_DIR" ] || exit 1
+find_sta_section || exit 1
+
+# A live association always wins. Never roam or reload Wi-Fi while connected.
+is_connected && exit 0
+
+SCAN_IW=/tmp/deck-wifi-scan-iw.$$
+SCAN_RAW=/tmp/deck-wifi-scan-raw.$$
+SCAN_HEX=/tmp/deck-wifi-scan-hex.$$
+SCAN_SORTED=/tmp/deck-wifi-scan-sorted.$$
+
+current_ssid="$(uci -q get "wireless.${STA_SECTION}.ssid" 2>/dev/null)"
+if [ -n "$current_ssid" ]; then
+	current_hex="$(printf '%s' "$current_ssid" | xxd -p | tr -d '\n' | tr 'A-F' 'a-f')"
+else
+	current_hex=
+fi
+
+# A configured SSID must be absent from three distinct, successful scans.
+# Any failed scan, or any sighting of the configured SSID, cancels this attempt.
+confirmed_absent=0
+while [ "$confirmed_absent" -lt "$SCAN_CONFIRMATIONS" ]; do
+	scan_once || exit 0
+	if [ -n "$current_hex" ] &&
+		awk -F "$TAB" -v wanted="$current_hex" '$3 == wanted { found=1 } END { exit !found }' "$SCAN_SORTED"; then
+		exit 0
+	fi
+	confirmed_absent=$((confirmed_absent + 1))
+	[ "$confirmed_absent" -ge "$SCAN_CONFIRMATIONS" ] || sleep "$SCAN_INTERVAL"
+done
+
+# Pick the strongest visible auto-connect profile whose BSS advertises PSK.
+# SAE-only networks are intentionally skipped because this selector writes psk2.
+SELECTED_PROFILE=
+while IFS="$TAB" read -r signal advertises_psk candidate_hex; do
+	[ "$advertises_psk" = 1 ] || continue
+	find_enabled_profile "$candidate_hex" && break
+done <"$SCAN_SORTED"
+
+[ -n "$SELECTED_PROFILE" ] || exit 0
+
+profile_name=${SELECTED_PROFILE##*/}
+profile_name=${profile_name%.psk}
+case "$profile_name" in
+	=*) selected_ssid="$(printf '%s' "${profile_name#=}" | xxd -r -p)" ;;
+	*) selected_ssid=$profile_name ;;
+esac
+selected_key="$(awk -F= '$1 == "Passphrase" { sub(/^[^=]*=/, ""); print; exit }' "$SELECTED_PROFILE")"
+
+[ -n "$selected_ssid" ] || exit 1
+[ -n "$selected_key" ] || exit 1
+
+# Scanning can take several seconds.  Abort if association recovered meanwhile.
+is_connected && exit 0
+
+mkdir -p "$BACKUP_DIR"
+chmod 0700 "$BACKUP_DIR"
+stamp="$(date +%Y%m%d-%H%M%S)"
+backup="$BACKUP_DIR/wireless.${stamp}.$$.before-switch"
+cp -p "$WIRELESS_CONFIG" "$backup" || exit 1
+chmod 0600 "$backup"
+
+# Edit and commit a private copy, then replace the UCI file in one rename on the
+# same overlay filesystem.  No secret is interpolated into a shell command.
+UCI_WORK=/etc/deck-wifi/.uci.$$
+mkdir "$UCI_WORK" || exit 1
+chmod 0700 "$UCI_WORK"
+cp "$WIRELESS_CONFIG" "$UCI_WORK/wireless" || exit 1
+chmod 0600 "$UCI_WORK/wireless"
+
+uci -c "$UCI_WORK" -q set "wireless.${STA_SECTION}.ssid=$selected_ssid" || exit 1
+uci -c "$UCI_WORK" -q set "wireless.${STA_SECTION}.key=$selected_key" || exit 1
+uci -c "$UCI_WORK" -q set "wireless.${STA_SECTION}.encryption=psk2" || exit 1
+uci -c "$UCI_WORK" -q set "wireless.${STA_SECTION}.disabled=0" || exit 1
+uci -c "$UCI_WORK" -q commit wireless || exit 1
+
+chmod 0600 "$UCI_WORK/wireless"
+mv "$UCI_WORK/wireless" "$WIRELESS_CONFIG" || exit 1
+rmdir "$UCI_WORK"
+UCI_WORK=
+chmod 0600 "$WIRELESS_CONFIG"
+
+logger -t deck-wifi 'station disconnected; attempting a confirmed PSK profile switch'
+wifi reload >/dev/null 2>&1 || true
+sleep 2
+secure_files
+
+if wait_for_network "$SWITCH_TIMEOUT"; then
+	logger -t deck-wifi 'profile switch reached associated IPv4 default-route state'
+	exit 0
+fi
+
+logger -t deck-wifi 'profile switch failed health check; restoring previous wireless config'
+if ! restore_wireless_config; then
+	logger -t deck-wifi 'failed to restore previous wireless config'
+	exit 1
+fi
+
+# Do not let the watcher attempt another candidate while rollback is still
+# recovering.  procd can terminate this loop normally during shutdown/restart.
+until network_ready; do
+	sleep "$HEALTH_INTERVAL"
+	secure_files
+done
+logger -t deck-wifi 'previous wireless config recovered network-ready state'
+
+exit 1

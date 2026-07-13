@@ -1,0 +1,124 @@
+#!/bin/sh
+
+# Root launcher for the persistent Deck menu installation.  All paths are
+# fixed, all expansions are quoted, and catalog data is never evaluated by a
+# shell.  ECL reads it with Common Lisp reader evaluation disabled.
+
+set -u
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+LC_ALL=C
+BASE=/mnt/data/nes-deck
+MENU_DIR=$BASE/menu
+STATE_DIR=$BASE/state
+LOG_DIR=$BASE/log
+TMP_DIR=$STATE_DIR/tmp
+TMPDIR=$TMP_DIR
+MENU=$MENU_DIR/deck-menu
+EMULATOR=$BASE/infones
+CATALOG=$MENU_DIR/games.sexp
+FALLBACK_MANIFEST=$MENU_DIR/games.tsv
+GENERATED_MANIFEST=$STATE_DIR/games.tsv
+SOUND_STATE=$STATE_DIR/menu-sound.state
+COMPILER=$MENU_DIR/compile-catalog.lisp
+ECL=$BASE/ecl/bin/ecl.bin
+ECLDIR=$BASE/ecl/lib/ecl/
+LOG_FILE=$LOG_DIR/deck-menu.log
+VOLUME_ON=42
+
+export PATH LC_ALL ECLDIR TMPDIR
+export INFONES_VOLUME_PERCENT=$VOLUME_ON
+
+umask 077
+
+if ! mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMP_DIR"; then
+	logger -t nes-deck-menu "cannot create persistent state directories under $BASE"
+	exit 1
+fi
+chmod 0700 "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" 2>/dev/null || :
+
+rotate_log() {
+	log_size=0
+	if [ -f "$LOG_FILE" ]; then
+		log_size=$(wc -c < "$LOG_FILE" 2>/dev/null) || log_size=0
+		case $log_size in
+			''|*[!0-9]*) log_size=0 ;;
+		esac
+	fi
+	if [ "$log_size" -gt 262144 ]; then
+		mv -f "$LOG_FILE" "$LOG_FILE.1" 2>/dev/null || :
+	fi
+}
+
+log_message() {
+	message=$1
+	timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) || timestamp=unknown-time
+	printf '%s %s\n' "$timestamp" "$message" >> "$LOG_FILE" 2>/dev/null || :
+	logger -t nes-deck-menu "$message" 2>/dev/null || :
+}
+
+write_default_sound_state() {
+	temporary_state=$SOUND_STATE.tmp.$$
+	if printf '%s\n' on > "$temporary_state" &&
+		mv -f "$temporary_state" "$SOUND_STATE"; then
+		return 0
+	fi
+	rm -f "$temporary_state"
+	return 1
+}
+
+rotate_log
+
+if [ ! -x "$MENU" ]; then
+	log_message "menu is missing or not executable: $MENU"
+	exit 1
+fi
+if [ ! -x "$EMULATOR" ]; then
+	log_message "emulator is missing or not executable: $EMULATOR"
+	exit 1
+fi
+if [ ! -r "$FALLBACK_MANIFEST" ] || [ ! -s "$FALLBACK_MANIFEST" ]; then
+	log_message "checked-in fallback manifest is missing or empty: $FALLBACK_MANIFEST"
+	exit 1
+fi
+
+sound_value=
+sound_size=0
+if [ -r "$SOUND_STATE" ]; then
+	IFS= read -r sound_value < "$SOUND_STATE" || sound_value=
+	sound_size=$(wc -c < "$SOUND_STATE" 2>/dev/null) || sound_size=0
+	case $sound_size in
+		''|*[!0-9]*) sound_size=0 ;;
+	esac
+fi
+case $sound_value:$sound_size in
+	on:3|off:4) ;;
+	*)
+		if ! write_default_sound_state; then
+			log_message "cannot initialize sound state: $SOUND_STATE"
+			exit 1
+		fi
+		log_message "initialized sound state to on (emulator volume ${VOLUME_ON}%)"
+		;;
+esac
+
+manifest=$FALLBACK_MANIFEST
+if [ -x "$ECL" ] && [ -r "$COMPILER" ] && [ -r "$CATALOG" ]; then
+	log_message "validating menu catalog with ECL"
+	if "$ECL" --norc --shell "$COMPILER" "$CATALOG" "$GENERATED_MANIFEST" \
+		>> "$LOG_FILE" 2>&1 &&
+		[ -r "$GENERATED_MANIFEST" ] && [ -s "$GENERATED_MANIFEST" ]; then
+		manifest=$GENERATED_MANIFEST
+		log_message "using generated manifest: $manifest"
+	else
+		log_message "catalog generation failed; using checked-in manifest: $FALLBACK_MANIFEST"
+	fi
+else
+	log_message "ECL catalog compiler unavailable; using checked-in manifest: $FALLBACK_MANIFEST"
+fi
+
+log_message "starting deck-menu with sound state $SOUND_STATE"
+exec "$MENU" \
+	--emulator "$EMULATOR" \
+	--sound-state "$SOUND_STATE" \
+	--manifest "$manifest"

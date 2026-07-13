@@ -1,0 +1,32 @@
+#!/bin/sh
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+IFACE=wlan0
+BOOT_GRACE=240
+INTERVAL=15
+DISCONNECT_THRESHOLD=3
+misses=0
+
+/usr/sbin/deck-wifi-select --secure-only
+
+# OpenWrt starts wireless asynchronously.  Give the original UCI station four
+# minutes to associate and obtain DHCP before treating link misses as failures.
+sleep "$BOOT_GRACE"
+
+while :; do
+	# netifd recreates the generated supplicant file with its default umask.
+	chmod 0600 /etc/config/wireless /var/run/wpa_supplicant-wlan0.conf 2>/dev/null || true
+
+	if iw dev "$IFACE" link 2>/dev/null | grep -q '^Connected to '; then
+		misses=0
+	else
+		misses=$((misses + 1))
+		if [ "$misses" -ge "$DISCONNECT_THRESHOLD" ]; then
+			/usr/sbin/deck-wifi-select
+			misses=0
+		fi
+	fi
+
+	sleep "$INTERVAL"
+done

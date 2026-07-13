@@ -1,0 +1,80 @@
+diff --git a/InfoNES_pAPU.cpp b/InfoNES_pAPU.cpp
+--- a/InfoNES_pAPU.cpp
++++ b/InfoNES_pAPU.cpp
+@@ -13,6 +13,7 @@
+ #include "K6502_rw.h"
+ #include "InfoNES_System.h"
+ #include "InfoNES_pAPU.h"
++#include "linux/nes_apu_noise.h"
+ 
+ /*-------------------------------------------------------------------*/
+ /*   APU Event resources                                             */
+@@ -308,7 +309,7 @@ int ApuWriteWave1( int cycles, int event )
+ 	  ApuC1Freq = ( ( ( (WORD)ApuC1d & 0x07 ) << 8 ) + ApuC1c );
+ 	  ApuC1Atl = ApuAtl[ ( ApuC1d & 0xf8 ) >> 3 ];
+ 	  
+-	  if ( ApuC1Freq ) 
++	  if ( ApuC1Freq >= 2 ) 
+           {
+ 	    ApuC1Skip = ApuPulseMagic / (ApuC1Freq / 2);
+ 	  } else {
+@@ -325,7 +326,7 @@ int ApuWriteWave1( int cycles, int event )
+ 	  ApuC1EnvVol = 0x0f;
+ 	  ApuC1EnvPhase = ApuC1EnvDelay;
+ 	  
+-	  if ( ApuC1Freq ) 
++	  if ( ApuC1Freq >= 2 ) 
+           {
+ 	    ApuC1Skip = ApuPulseMagic / (ApuC1Freq / 2);
+ 	  } else {
+@@ -459,7 +460,7 @@ int ApuWriteWave2( int cycles, int event )
+ 	  ApuC2Freq = ( ( ( (WORD)ApuC2d & 0x07 ) << 8 ) + ApuC2c );
+ 	  ApuC2Atl = ApuAtl[ ( ApuC2d & 0xf8 ) >> 3 ];
+ 	  
+-	  if ( ApuC2Freq ) 
++	  if ( ApuC2Freq >= 2 ) 
+           {
+ 	    ApuC2Skip = ApuPulseMagic / (ApuC2Freq / 2);
+ 	  } else {
+@@ -476,7 +477,7 @@ int ApuWriteWave2( int cycles, int event )
+ 	  ApuC2EnvVol = 0x0f;
+ 	  ApuC2EnvPhase = ApuC2EnvDelay;
+ 	  
+-	  if ( ApuC2Freq ) 
++	  if ( ApuC2Freq >= 2 ) 
+           {
+ 	    ApuC2Skip = ApuPulseMagic / (ApuC2Freq / 2);
+ 	  } else {
+@@ -716,13 +717,14 @@ void ApuRenderingWave4(void)
+     if ( ApuCtrlNew & 0x08 ) 
+     {
+-      ApuC4Index += ApuC4Skip;
+-      if ( ApuC4Index > 0x00ffffff ) 
++      uint32_t noise_phase = 0;
++      unsigned int noise_clocks = NesApu_NoiseClockCount(
++          (uint32_t)ApuC4Index, (uint32_t)ApuC4Skip, &noise_phase);
++      ApuC4Index = noise_phase;
++      while ( noise_clocks-- )
+       {
+-        const int shift = ApuC4Small ? 6 : 1;
+-        const int feedback = ( ApuC4Sr ^ ( ApuC4Sr >> shift ) ) & 1;
+-        ApuC4Sr = ( ApuC4Sr >> 1 ) | ( feedback << 14 );
++        ApuC4Sr = NesApu_ClockNoise( (uint32_t)ApuC4Sr,
++                                     ApuC4Small != 0 );
+       }
+-      ApuC4Index &= 0x00ffffff;
+ 
+       if ( ApuC4Atl && !( ApuC4Sr & 1 ) ) 
+       {
+diff --git a/InfoNES_pAPU.h b/InfoNES_pAPU.h
+--- a/InfoNES_pAPU.h
++++ b/InfoNES_pAPU.h
+@@ -83,7 +83,7 @@ extern "C" {
+ #define ApuC4Freq           ( ApuNoiseFreq [ ( ApuC4c & 0x0f ) ] )
+ #define ApuC4Small          ( ApuC4c & 0x80 )
+ //#define ApuC4LengthCounter  ( ApuAtl[ ( ( ApuC4d & 0xf8 ) >> 3 ) ] )
+-#define ApuC4LengthCounter  ( ApuAtl[ ( ApuC4d >> 3 ) ] << 1 )
++#define ApuC4LengthCounter  ( ApuAtl[ ( ApuC4d >> 3 ) ] )
+ 
+ /*-------------------------------------------------------------------*/ 
+ /* DPCM Channel                                                      */

@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# Relocatable ECL 26.5.5 launcher for the Deck's /mnt/data payload.
+ECL_ROOT=/mnt/data/nes-deck/ecl
+export ECLDIR="$ECL_ROOT/lib/ecl/"
+exec "$ECL_ROOT/bin/ecl.bin" "$@"

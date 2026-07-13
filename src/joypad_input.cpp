@@ -39,6 +39,7 @@ static int old_kbd_mode = -1;
 static struct termios old_term;
 static pthread_t input_thread;
 static volatile int input_running = 0;
+static int input_thread_started = 0;
 static volatile unsigned int pad_state = 0;
 static pthread_mutex_t pad_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -125,6 +126,12 @@ static void *input_thread_func(void *arg) {
 /*-------------------------------------------------------------------*/
 
 static void kbd_cleanup(void) {
+  input_running = 0;
+  if (input_thread_started) {
+    pthread_join(input_thread, NULL);
+    input_thread_started = 0;
+  }
+
   if (old_kbd_mode != -1 && kb_fd >= 0) {
     ioctl(kb_fd, KDSKBMODE, old_kbd_mode);
     tcsetattr(kb_fd, TCSAFLUSH, &old_term);
@@ -210,7 +217,12 @@ extern "C" int InitJoypadInput(void) {
 
   // Start input thread
   input_running = 1;
-  pthread_create(&input_thread, NULL, input_thread_func, NULL);
+  if (pthread_create(&input_thread, NULL, input_thread_func, NULL) != 0) {
+    input_running = 0;
+    printf("InfoNES: Cannot start keyboard input thread\n");
+    return -1;
+  }
+  input_thread_started = 1;
 
   return 0;
 }

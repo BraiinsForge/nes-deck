@@ -18,6 +18,8 @@
       # Read our deck-specific source files
       deckSystemSrc = builtins.readFile ./src/InfoNES_System_Deck.cpp;
       joypadSrc = builtins.readFile ./src/joypad_input.cpp;
+      audioMixerSrc = builtins.readFile ./src/nes_audio_mixer.h;
+      apuNoiseSrc = builtins.readFile ./src/nes_apu_noise.h;
 
     in
     {
@@ -27,12 +29,26 @@
           version = "0.91j-deck";
 
           src = infones-src;
+          patches = [
+            ./patches/infones-apu-register.patch
+            ./patches/infones-apu.patch
+            ./patches/infones-apu-quality.patch
+            ./patches/infones-apu-noise.patch
+          ];
 
           nativeBuildInputs = [ pkgs.gnumake ];
           buildInputs = [ pkgsCross.glibc.static ];
 
           NIX_CFLAGS_COMPILE = "-static -O3 -fsigned-char";
           NIX_LDFLAGS = "-static";
+
+          # The pinned upstream file uses CRLF; normalize it so our focused
+          # source patch applies reproducibly with Nix's patch phase.
+          prePatch = ''
+            sed -i 's/\r$//' InfoNES.cpp K6502_rw.h InfoNES_pAPU.cpp \
+              InfoNES_pAPU.h \
+              mapper/InfoNES_Mapper_000.cpp
+          '';
 
           # Patch for Deck framebuffer support
           postPatch = ''
@@ -45,6 +61,16 @@
             cat > linux/joypad_input.cpp << 'JOYPAD_EOF'
             ${joypadSrc}
             JOYPAD_EOF
+
+            # Install the small, host-testable mixer/resampler helper
+            cat > linux/nes_audio_mixer.h << 'AUDIO_MIXER_EOF'
+            ${audioMixerSrc}
+            AUDIO_MIXER_EOF
+
+            # Install host-tested helpers used by the patched noise channel
+            cat > linux/nes_apu_noise.h << 'APU_NOISE_EOF'
+            ${apuNoiseSrc}
+            APU_NOISE_EOF
 
             # Create Makefile for static build
             cat > linux/Makefile << 'MAKEFILE_EOF'
@@ -93,6 +119,36 @@
           meta = {
             description = "InfoNES - NES emulator for Braiins Forge Deck framebuffer";
             homepage = "https://github.com/nejidev/arm-NES-linux";
+            platforms = [ "armv7l-linux" ];
+          };
+        };
+
+        deck-menu = pkgsCross.stdenv.mkDerivation {
+          pname = "deck-menu";
+          version = "1.0.0";
+
+          dontUnpack = true;
+          buildInputs = [ pkgsCross.glibc.static ];
+
+          NIX_CFLAGS_COMPILE = "-static -Os";
+          NIX_LDFLAGS = "-static";
+
+          buildPhase = ''
+            runHook preBuild
+            $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
+              ${./src/deck_menu.cpp} -static -o deck-menu
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/bin
+            install -m755 deck-menu $out/bin/deck-menu
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Touch-first game launcher for the Braiins Forge Deck";
             platforms = [ "armv7l-linux" ];
           };
         };
