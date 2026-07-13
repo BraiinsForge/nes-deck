@@ -1,4 +1,7 @@
 #include "deck_runtime.h"
+#if defined(RETRO_DECK_NES)
+#include "nes_sram.h"
+#endif
 
 #include <libretro.h>
 
@@ -17,6 +20,28 @@
 #include <vector>
 
 namespace {
+
+#if defined(RETRO_DECK_NES)
+const char *const kFrontendName = "nes-deck";
+const char *const kDefaultCoreName = "FCEUmm";
+const char *const kRomDescription = "NES";
+const char *const kRomUsage = "ROM.nes";
+const char *const kSaveExtension = ".srm";
+const size_t kMinimumRomBytes = 16;
+const unsigned int kPlayerCount = 2;
+const bool kHasRtc = false;
+#elif defined(RETRO_DECK_GB)
+const char *const kFrontendName = "gb-deck";
+const char *const kDefaultCoreName = "Gambatte";
+const char *const kRomDescription = "Game Boy";
+const char *const kRomUsage = "ROM.gb|ROM.gbc";
+const char *const kSaveExtension = ".sav";
+const size_t kMinimumRomBytes = 0x150;
+const unsigned int kPlayerCount = 1;
+const bool kHasRtc = true;
+#else
+#error "Select exactly one libretro Deck frontend"
+#endif
 
 const unsigned int PAD_A = 1u << 0;
 const unsigned int PAD_B = 1u << 1;
@@ -52,7 +77,7 @@ void core_log(enum retro_log_level level, const char *format, ...) {
                        : level == RETRO_LOG_WARN  ? "warning"
                        : level == RETRO_LOG_DEBUG ? "debug"
                                                   : "info";
-  std::fprintf(stderr, "gb-deck: core %s: ", prefix);
+  std::fprintf(stderr, "%s: core %s: ", kFrontendName, prefix);
   va_list arguments;
   va_start(arguments, format);
   std::vfprintf(stderr, format, arguments);
@@ -70,6 +95,8 @@ bool environment_callback(unsigned int command, void *data) {
       *static_cast<unsigned int *>(data) = RETRO_LANGUAGE_ENGLISH;
     return data != NULL;
   case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+  case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
+  case RETRO_ENVIRONMENT_GET_CONTENT_DIRECTORY:
     if (data)
       *static_cast<const char **>(data) = system_directory.c_str();
     return data != NULL;
@@ -88,6 +115,25 @@ bool environment_callback(unsigned int command, void *data) {
       *static_cast<bool *>(data) = false;
     return data != NULL;
   case RETRO_ENVIRONMENT_GET_VARIABLE:
+#if defined(RETRO_DECK_NES)
+    if (data) {
+      struct retro_variable *variable = static_cast<struct retro_variable *>(data);
+      if (!variable->key)
+        return false;
+      if (std::strcmp(variable->key, "fceumm_region") == 0)
+        variable->value = "Auto";
+      else if (std::strcmp(variable->key, "fceumm_overscan_h_left") == 0 ||
+               std::strcmp(variable->key, "fceumm_overscan_h_right") == 0)
+        variable->value = "0";
+      else if (std::strcmp(variable->key, "fceumm_overscan_v_top") == 0 ||
+               std::strcmp(variable->key, "fceumm_overscan_v_bottom") == 0)
+        variable->value = "8";
+      else
+        variable->value = NULL;
+      return variable->value != NULL;
+    }
+#endif
+    return false;
   case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
     return false;
   case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT:
@@ -108,6 +154,7 @@ bool environment_callback(unsigned int command, void *data) {
   case RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO:
   case RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS:
   case RETRO_ENVIRONMENT_SET_GEOMETRY:
+  case RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL:
     return true;
   default:
     return false;
@@ -128,7 +175,8 @@ void video_callback(const void *data, unsigned int width, unsigned int height,
                              : framebuffer->present_xrgb8888(
                                    data, width, height, pitch, &error);
   if (!presented) {
-    std::fprintf(stderr, "gb-deck: video error: %s\n", error.c_str());
+    std::fprintf(stderr, "%s: video error: %s\n", kFrontendName,
+                 error.c_str());
     video_failed = true;
   }
 }
@@ -145,9 +193,9 @@ void input_poll_callback() {}
 
 int16_t input_state_callback(unsigned int port, unsigned int device,
                              unsigned int index, unsigned int id) {
-  if (port != 0 || device != RETRO_DEVICE_JOYPAD || index != 0)
+  if (port >= kPlayerCount || device != RETRO_DEVICE_JOYPAD || index != 0)
     return 0;
-  const unsigned int state = GetJoypadInput(0);
+  const unsigned int state = GetJoypadInput(port);
   uint16_t result = 0;
   if (state & PAD_A)
     result |= 1u << RETRO_DEVICE_ID_JOYPAD_A;
@@ -200,10 +248,11 @@ bool read_rom(const std::string &path, std::vector<uint8_t> *rom,
       *error = "cannot stat ROM " + path + ": " + std::strerror(errno);
     return false;
   }
-  if (!S_ISREG(info.st_mode) || info.st_size < 0x150 ||
+  if (!S_ISREG(info.st_mode) ||
+      info.st_size < static_cast<off_t>(kMinimumRomBytes) ||
       info.st_size > static_cast<off_t>(kMaximumRomBytes)) {
     if (error)
-      *error = "Game Boy ROM must contain 336 bytes through 8 MiB";
+      *error = std::string(kRomDescription) + " ROM has an invalid size";
     return false;
   }
   std::ifstream input(path.c_str(), std::ios::in | std::ios::binary);
@@ -214,9 +263,19 @@ bool read_rom(const std::string &path, std::vector<uint8_t> *rom,
       input.bad()) {
     rom->clear();
     if (error)
-      *error = "cannot read complete Game Boy ROM " + path;
+      *error = "cannot read complete " + std::string(kRomDescription) +
+               " ROM " + path;
     return false;
   }
+#if defined(RETRO_DECK_NES)
+  if (rom->size() < 4 || (*rom)[0] != 'N' || (*rom)[1] != 'E' ||
+      (*rom)[2] != 'S' || (*rom)[3] != 0x1a) {
+    rom->clear();
+    if (error)
+      *error = "NES ROM is missing its iNES header";
+    return false;
+  }
+#endif
   return true;
 }
 
@@ -261,14 +320,36 @@ void load_memory_file(const std::string &path, void *data, size_t size) {
   struct stat info;
   if (stat(path.c_str(), &info) != 0) {
     if (errno != ENOENT)
-      std::fprintf(stderr, "gb-deck: cannot stat save %s: %s\n", path.c_str(),
-                   std::strerror(errno));
+      std::fprintf(stderr, "%s: cannot stat save %s: %s\n", kFrontendName,
+                   path.c_str(), std::strerror(errno));
     return;
   }
-  if (!S_ISREG(info.st_mode) || info.st_size != static_cast<off_t>(size)) {
+  if (!S_ISREG(info.st_mode)) {
+    std::fprintf(stderr, "%s: save is not a regular file: %s\n",
+                 kFrontendName, path.c_str());
+    return;
+  }
+  if (info.st_size != static_cast<off_t>(size)) {
+#if defined(RETRO_DECK_NES)
+    if (info.st_size > 0 &&
+        static_cast<size_t>(info.st_size) <= NesSramMaximumEncodedSize(size)) {
+      std::ifstream input(path.c_str(), std::ios::in | std::ios::binary);
+      std::vector<uint8_t> encoded(static_cast<size_t>(info.st_size));
+      input.read(reinterpret_cast<char *>(encoded.data()),
+                 static_cast<std::streamsize>(encoded.size()));
+      if (input.gcount() == static_cast<std::streamsize>(encoded.size()) &&
+          !input.bad() &&
+          NesSramDecode(encoded.data(), encoded.size(),
+                        static_cast<uint8_t *>(data), size)) {
+        std::fprintf(stderr, "%s: migrated encoded InfoNES save: %s\n",
+                     kFrontendName, path.c_str());
+        return;
+      }
+    }
+#endif
     std::fprintf(stderr,
-                 "gb-deck: ignoring save with unexpected size: %s\n",
-                 path.c_str());
+                 "%s: ignoring save with unexpected size: %s\n",
+                 kFrontendName, path.c_str());
     return;
   }
   const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
@@ -289,24 +370,28 @@ void load_memory_file(const std::string &path, void *data, size_t size) {
   }
   close(fd);
   if (remaining != 0)
-    std::fprintf(stderr, "gb-deck: incomplete save read: %s\n", path.c_str());
+    std::fprintf(stderr, "%s: incomplete save read: %s\n", kFrontendName,
+                 path.c_str());
 }
 
 void load_persistent_memory(const std::string &base) {
-  load_memory_file(base + ".sav", retro_get_memory_data(RETRO_MEMORY_SAVE_RAM),
+  load_memory_file(base + kSaveExtension,
+                   retro_get_memory_data(RETRO_MEMORY_SAVE_RAM),
                    retro_get_memory_size(RETRO_MEMORY_SAVE_RAM));
-  load_memory_file(base + ".rtc", retro_get_memory_data(RETRO_MEMORY_RTC),
-                   retro_get_memory_size(RETRO_MEMORY_RTC));
+  if (kHasRtc)
+    load_memory_file(base + ".rtc", retro_get_memory_data(RETRO_MEMORY_RTC),
+                     retro_get_memory_size(RETRO_MEMORY_RTC));
 }
 
 bool save_persistent_memory(const std::string &base) {
   const bool ram =
-      save_memory_file(base + ".sav",
+      save_memory_file(base + kSaveExtension,
                        retro_get_memory_data(RETRO_MEMORY_SAVE_RAM),
                        retro_get_memory_size(RETRO_MEMORY_SAVE_RAM));
-  const bool rtc = save_memory_file(base + ".rtc",
-                                    retro_get_memory_data(RETRO_MEMORY_RTC),
-                                    retro_get_memory_size(RETRO_MEMORY_RTC));
+  const bool rtc =
+      !kHasRtc || save_memory_file(base + ".rtc",
+                                  retro_get_memory_data(RETRO_MEMORY_RTC),
+                                  retro_get_memory_size(RETRO_MEMORY_RTC));
   return ram && rtc;
 }
 
@@ -324,7 +409,7 @@ void install_signal_handlers() {
 int main(int argc, char **argv) {
   std::setvbuf(stdout, NULL, _IOLBF, 0);
   if (argc != 2) {
-    std::fprintf(stderr, "Usage: %s ROM.gb|ROM.gbc\n", argv[0]);
+    std::fprintf(stderr, "Usage: %s %s\n", argv[0], kRomUsage);
     return 2;
   }
   install_signal_handlers();
@@ -332,7 +417,7 @@ int main(int argc, char **argv) {
   std::string error;
   std::vector<uint8_t> rom;
   if (!read_rom(argv[1], &rom, &error)) {
-    std::fprintf(stderr, "gb-deck: %s\n", error.c_str());
+    std::fprintf(stderr, "%s: %s\n", kFrontendName, error.c_str());
     return 1;
   }
 
@@ -349,7 +434,7 @@ int main(int argc, char **argv) {
   std::memset(&system_info, 0, sizeof(system_info));
   retro_get_system_info(&system_info);
   if (retro_api_version() != RETRO_API_VERSION) {
-    std::fprintf(stderr, "gb-deck: incompatible libretro API\n");
+    std::fprintf(stderr, "%s: incompatible libretro API\n", kFrontendName);
     retro_deinit();
     return 1;
   }
@@ -360,16 +445,18 @@ int main(int argc, char **argv) {
   game.data = &rom[0];
   game.size = rom.size();
   if (!retro_load_game(&game)) {
-    std::fprintf(stderr, "gb-deck: Game Boy core rejected the ROM\n");
+    std::fprintf(stderr, "%s: %s core rejected the ROM\n", kFrontendName,
+                 kRomDescription);
     retro_deinit();
     return 1;
   }
 
   if (InitJoypadInput() < 0)
-    std::fprintf(stderr, "gb-deck: continuing without controller input\n");
+    std::fprintf(stderr, "%s: continuing without controller input\n",
+                 kFrontendName);
   DeckFramebuffer deck_framebuffer;
   if (!deck_framebuffer.open_device(&error)) {
-    std::fprintf(stderr, "gb-deck: %s\n", error.c_str());
+    std::fprintf(stderr, "%s: %s\n", kFrontendName, error.c_str());
     retro_unload_game();
     retro_deinit();
     return 1;
@@ -383,20 +470,22 @@ int main(int argc, char **argv) {
       static_cast<unsigned int>(av_info.timing.sample_rate + 0.5);
   unsigned int volume = 42;
   if (!DeckReadVolumePercent(&volume, &error)) {
-    std::fprintf(stderr, "gb-deck: %s\n", error.c_str());
+    std::fprintf(stderr, "%s: %s\n", kFrontendName, error.c_str());
     retro_unload_game();
     retro_deinit();
     return 1;
   }
   DeckAudio deck_audio;
   if (!deck_audio.open_device(sample_rate, volume, &error))
-    std::fprintf(stderr, "gb-deck: sound disabled: %s\n", error.c_str());
+    std::fprintf(stderr, "%s: sound disabled: %s\n", kFrontendName,
+                 error.c_str());
   audio = &deck_audio;
 
   const std::string persistent_base = save_base(argv[1]);
   load_persistent_memory(persistent_base);
-  std::printf("gb-deck: %s %s, %.3f fps, %u Hz, volume %u%%\n",
-              system_info.library_name ? system_info.library_name : "Gambatte",
+  std::printf("%s: %s %s, %.3f fps, %u Hz, volume %u%%\n", kFrontendName,
+              system_info.library_name ? system_info.library_name
+                                       : kDefaultCoreName,
               system_info.library_version ? system_info.library_version : "",
               av_info.timing.fps, sample_rate, volume);
 
@@ -430,9 +519,9 @@ int main(int argc, char **argv) {
           static_cast<double>(now.tv_sec - diagnostics_started.tv_sec) +
           static_cast<double>(now.tv_nsec - diagnostics_started.tv_nsec) /
               1000000000.0;
-      std::printf("gb-deck: diagnostics video=60 wall=%.3f audio=%llu "
+      std::printf("%s: diagnostics video=60 wall=%.3f audio=%llu "
                   "callbacks=%llu\n",
-                  elapsed,
+                  kFrontendName, elapsed,
                   static_cast<unsigned long long>(audio_frames_received -
                                                   previous_audio_frames),
                   static_cast<unsigned long long>(audio_callbacks_received -
@@ -442,13 +531,13 @@ int main(int argc, char **argv) {
       previous_audio_callbacks = audio_callbacks_received;
     }
     if (frames % 600 == 0 && !save_persistent_memory(persistent_base))
-      std::fprintf(stderr, "gb-deck: periodic save failed: %s\n",
+      std::fprintf(stderr, "%s: periodic save failed: %s\n", kFrontendName,
                    std::strerror(errno));
     clock.wait_for_next_frame();
   }
 
   if (!save_persistent_memory(persistent_base))
-    std::fprintf(stderr, "gb-deck: final save failed: %s\n",
+    std::fprintf(stderr, "%s: final save failed: %s\n", kFrontendName,
                  std::strerror(errno));
   audio = NULL;
   framebuffer = NULL;

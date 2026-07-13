@@ -7,6 +7,10 @@
       url = "github:nejidev/arm-NES-linux";
       flake = false;
     };
+    fceumm-src = {
+      url = "github:libretro/libretro-fceumm/3a84a6fd0ba20dd4877c06b1d58741172148395f";
+      flake = false;
+    };
     gambatte-src = {
       url = "github:libretro/gambatte-libretro/dfc165599f3f1068c40a0b7ad6fe5f161283d483";
       flake = false;
@@ -17,7 +21,8 @@
     };
   };
 
-  outputs = { self, nixpkgs, infones-src, gambatte-src, c-octo-src }:
+  outputs =
+    { self, nixpkgs, infones-src, fceumm-src, gambatte-src, c-octo-src }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -34,6 +39,68 @@
     in
     {
       packages.${system} = {
+        nes-deck = pkgsCross.stdenv.mkDerivation {
+          pname = "nes-deck";
+          version = "0.1.0-20260714-deck";
+
+          src = fceumm-src;
+          nativeBuildInputs = [ pkgs.gnumake ];
+          buildInputs = [
+            pkgsCross.glibc.static
+            staticCross.zlib
+          ];
+
+          NIX_CFLAGS_COMPILE = "-static -O3";
+          NIX_LDFLAGS = "-static";
+
+          postPatch = ''
+            # A standalone static frontend needs the core's vendored libretro
+            # utility implementations instead of symbols from RetroArch.
+            substituteInPlace Makefile.common \
+              --replace-fail \
+                'ifneq ($(STATIC_LINKING), 1)' \
+                'ifeq ($(STATIC_LINKING), 1)'
+          '';
+
+          buildPhase = ''
+            runHook preBuild
+            make -j$NIX_BUILD_CORES \
+              platform=rpi2 \
+              STATIC_LINKING=1 \
+              TARGET=fceumm_libretro.a \
+              EXTERNAL_ZLIB=1 \
+              CC=$CC \
+              AR=${pkgsCross.stdenv.cc.targetPrefix}ar
+            $CXX -std=c++11 -O3 -fomit-frame-pointer \
+              -marm -march=armv7-a -mtune=cortex-a7 \
+              -mfpu=neon-vfpv4 -mfloat-abi=hard \
+              -Wall -Wextra -Wpedantic -Werror \
+              -DRETRO_DECK_NES=1 \
+              -Isrc/drivers/libretro/libretro-common/include -I${./src} \
+              ${./src/libretro_deck.cpp} \
+              ${./src/deck_runtime.cpp} \
+              ${./src/joypad_input.cpp} \
+              fceumm_libretro.a \
+              -static -Wl,-s -pthread -lm -lz -o nes-deck
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/bin $out/share/licenses/nes-deck
+            install -m755 nes-deck $out/bin/nes-deck
+            install -m644 Copying $out/share/licenses/nes-deck/FCEUmm-COPYING
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "FCEUmm NES core with Deck-native framebuffer frontend";
+            homepage = "https://github.com/libretro/libretro-fceumm";
+            license = pkgs.lib.licenses.gpl2Only;
+            platforms = [ "armv7l-linux" ];
+          };
+        };
+
         infones-deck = pkgsCross.stdenv.mkDerivation {
           pname = "infones-deck";
           version = "0.91j-deck";
@@ -254,7 +321,8 @@
               -mfpu=neon-vfpv4 -mfloat-abi=hard \
               -Wall -Wextra -Wpedantic -Werror \
               -Ilibgambatte/libretro-common/include -I${./src} \
-              ${./src/gb_deck.cpp} \
+              -DRETRO_DECK_GB=1 \
+              ${./src/libretro_deck.cpp} \
               ${./src/deck_runtime.cpp} \
               ${./src/joypad_input.cpp} \
               gambatte_libretro.a \
@@ -370,7 +438,7 @@
           };
         });
 
-        default = self.packages.${system}.infones-deck;
+        default = self.packages.${system}.nes-deck;
       };
 
       devShells.${system}.default = pkgs.mkShell {
@@ -390,7 +458,7 @@
           export CFLAGS="-static -O3 -fsigned-char"
           export LDFLAGS="-static -lpthread -lm"
 
-          echo "InfoNES cross-compile environment for Braiins Forge Deck"
+          echo "Retro Deck cross-compile environment for Braiins Forge Deck"
           echo ""
           echo "Environment configured:"
           echo "  CROSS_COMPILE=$CROSS_COMPILE"

@@ -1,7 +1,8 @@
 # Retro Deck for Braiins Forge Deck
 
 Play NES, Game Boy, Game Boy Color, CHIP-8, and Deck-native games on a Braiins Forge Deck
-with a full-screen touch launcher. This project combines Deck-native InfoNES,
+with a full-screen touch launcher. This project combines Deck-native
+[FCEUmm](https://github.com/libretro/libretro-fceumm),
 [Gambatte](https://github.com/libretro/gambatte-libretro), and
 [c-octo](https://github.com/JohnEarnest/c-octo) frontends with a persistent
 game catalog, a Wi-Fi profile editor, and an integrated framebuffer terminal.
@@ -39,7 +40,7 @@ service bmc stop
 
 ```bash
 unzip deck-infones.zip
-scp infones root@<deck-ip>:/tmp/
+scp nes-deck root@<deck-ip>:/tmp/
 scp your-game.nes root@<deck-ip>:/tmp/
 ```
 
@@ -47,8 +48,8 @@ scp your-game.nes root@<deck-ip>:/tmp/
 
 ```bash
 ssh root@<deck-ip>
-chmod +x /tmp/infones
-/tmp/infones /tmp/your-game.nes
+chmod +x /tmp/nes-deck
+/tmp/nes-deck /tmp/your-game.nes
 ```
 
 The Deck port opens the active console keyboard itself. It also continues
@@ -61,7 +62,7 @@ there instead of filling the small OpenWrt overlay. Build the six ARM
 payloads and fetch the checksum-pinned homebrew set first:
 
 ```bash
-nix build .#infones-deck -o result-infones
+nix build .#nes-deck -o result-nes-deck
 nix build .#gb-deck -o result-gb-deck
 nix build .#chip8-deck -o result-chip8-deck
 nix build .#ten-seconds-deck -o result-ten-seconds
@@ -81,7 +82,7 @@ ssh root@<deck-ip> 'mkdir -p /mnt/data/nes-deck/menu \
   /mnt/data/nes-deck/licenses /mnt/data/nes-deck/terminal/fonts \
   /mnt/data/nes-deck/terminal/keymaps /mnt/data/roms/nes \
   /mnt/data/roms/gb /mnt/data/roms/gbc /mnt/data/roms/chip8'
-scp result-infones/bin/infones root@<deck-ip>:/mnt/data/nes-deck/infones
+scp result-nes-deck/bin/nes-deck root@<deck-ip>:/mnt/data/nes-deck/nes-deck
 scp result-gb-deck/bin/gb-deck root@<deck-ip>:/mnt/data/nes-deck/gb-deck
 scp result-chip8-deck/bin/chip8-deck root@<deck-ip>:/mnt/data/nes-deck/chip8-deck
 scp result-ten-seconds/bin/ten-seconds-deck \
@@ -94,6 +95,8 @@ scp result-fbterm/share/retro-deck/fonts/DejaVuSansMono.ttf \
 scp result-fbterm/share/retro-deck/keymaps/* \
   root@<deck-ip>:/mnt/data/nes-deck/terminal/keymaps/
 scp -r result-fbterm/share/licenses/fbterm-deck \
+  root@<deck-ip>:/mnt/data/nes-deck/licenses/
+scp -r result-nes-deck/share/licenses/nes-deck \
   root@<deck-ip>:/mnt/data/nes-deck/licenses/
 scp -r result-gb-deck/share/licenses/gb-deck \
   root@<deck-ip>:/mnt/data/nes-deck/licenses/
@@ -113,7 +116,7 @@ scp ops/deck-wifi/deck-wifi-profile-add \
 scp deploy/menu/nes-deck.init root@<deck-ip>:/etc/init.d/nes-deck.new
 
 ssh root@<deck-ip> '
-  chmod 755 /mnt/data/nes-deck/infones /mnt/data/nes-deck/gb-deck \
+  chmod 755 /mnt/data/nes-deck/nes-deck /mnt/data/nes-deck/gb-deck \
     /mnt/data/nes-deck/chip8-deck /mnt/data/nes-deck/ten-seconds-deck \
     /mnt/data/nes-deck/menu/deck-menu \
     /mnt/data/nes-deck/menu/deck-menu-launcher \
@@ -149,10 +152,12 @@ the keyboard remains a Player 1 fallback. Space Racer uses both controllers
 simultaneously.
 
 Battery-backed cartridge saves are automatic and live beside their ROMs.
-InfoNES writes changed NES SRAM atomically to `.srm` every ten seconds and on
-exit. The GB/GBC frontend does the same with `.sav` and, when the cartridge has
-a real-time clock, `.rtc`. Games without battery-backed storage do not create
-save sidecars; this is cartridge saving, not arbitrary emulator save states.
+The FCEUmm frontend writes changed NES SRAM atomically to `.srm` every ten
+seconds and on exit. It migrates the compressed `.srm` format written by the
+earlier InfoNES frontend on first load. The GB/GBC frontend does the same with
+`.sav` and, when the cartridge has a real-time clock, `.rtc`. Games without
+battery-backed storage do not create save sidecars; this is cartridge saving,
+not arbitrary emulator save states.
 
 The computer icon opens a real framebuffer shell with a 16-pixel safe area for
 the display's rounded corners. **KEYS US** and **KEYS CZ** select the terminal
@@ -230,8 +235,7 @@ Build instructions for every emulator are in [BUILD.md](BUILD.md).
 
 ## License
 
-InfoNES is freeware for non-commercial use. See the original InfoNES
-documentation for details. The vendored fbterm source is GPL-2; its license and
-exact upstream provenance are retained under [`terminal/`](terminal/).
-Gambatte is GPL-2.0-only and c-octo is MIT licensed; their exact revisions are
-pinned in `flake.lock` and their license texts are installed with the binaries.
+FCEUmm and Gambatte are GPL-2.0-only. The vendored fbterm source is GPL-2; its
+license and exact upstream provenance are retained under
+[`terminal/`](terminal/). c-octo is MIT licensed. Exact upstream revisions are
+pinned in `flake.lock`, and license texts are installed with the binaries.

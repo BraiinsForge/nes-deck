@@ -19,7 +19,7 @@ Copy these files to the Deck without changing their basenames:
 The launcher also expects:
 
 - `/mnt/data/nes-deck/menu/deck-menu`
-- `/mnt/data/nes-deck/infones`
+- `/mnt/data/nes-deck/nes-deck`
 - `/mnt/data/nes-deck/gb-deck`
 - `/mnt/data/nes-deck/chip8-deck`
 - `/mnt/data/nes-deck/ten-seconds-deck`
