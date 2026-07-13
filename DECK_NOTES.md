@@ -193,7 +193,7 @@ passphrases, WireGuard private keys, or ROM data.
   `f80d7c10da0e0a09bde089c8e9ad650701befa14a76f1fc740ddae036dacd536`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `8e70d4e76df7b6e105f1ef2dcd63296668ccaf80440c49e95de026fa31b0da72`.
+  `8519764039c707ecd32806beb3fd29918a359629947775d8af3985300b7eccf0`.
   It validates the manifest and system-specific NES/GB/GBC/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
@@ -207,10 +207,11 @@ passphrases, WireGuard private keys, or ROM data.
   The palette is perceptually mixed toward warm parchment, with measured text
   contrast ranging from 6.6:1 to 15.1:1 across all fourteen tiles. Five
   flat tabs labeled `NES`, `GAME BOY`, `GAME BOY COLOR`, `CHIP-8`, and `DECK`
-  filter the catalog; the selected tab uses the pale-yellow title color. The
-  title is `RETRO DECK`, the old blue divider and tile/tab outlines are gone,
-  and no description or license text remains in the launcher. A later capture
-  verified the computer,
+  filter the catalog; the selected tab uses a cool washed blue distinct from
+  the warm title color. The oversized title is `RETRO DECK`; the redundant
+  play instruction, old blue divider, and tile, tab, and top-control outer
+  outlines are gone. No description or license text remains in the launcher.
+  A later capture verified the computer,
   `KEYS US`, Wi-Fi, minus, `VOL 42%`, and plus controls fit above those tabs
   without overlap.
 - `games.sexp` is the editable schema-checked source. Schema version 3 keeps
@@ -406,7 +407,9 @@ preceding menu and emulator binaries are additionally retained in
 `/mnt/data/nes-deck/backup-controls-20260713-1535/`; the restarted service
 initialized volume 42 and US terminal keys without changing Wi-Fi.
 The current timer/menu/NES deployment rollback is
-`/mnt/data/nes-deck/backups/20260713-163052-pre-ten-seconds/`.
+`/mnt/data/nes-deck/backups/20260713-163052-pre-ten-seconds/`; the menu binary
+immediately preceding the simplified header is retained there as
+`deck-menu.pre-header`.
 
 ```sh
 # Stock UI must stay disabled
