@@ -7,13 +7,13 @@
 
 (in-package #:nes-deck-catalog)
 
-(defconstant +schema-version+ 1)
+(defconstant +schema-version+ 3)
 (defconstant +maximum-games+ 18)
 (defconstant +maximum-catalog-bytes+ 65536)
 (defconstant +rom-root+ "/mnt/data/nes-deck/")
 (defparameter +catalog-keys+ '(:version :games))
 (defparameter +game-keys+
-  '(:id :title :rom :description :color :license))
+  '(:id :title :system :rom :color))
 
 (defun catalog-error (control &rest arguments)
   (error "Catalog error: ~?" control arguments))
@@ -116,16 +116,29 @@
   (or (alphanumericp character)
       (find character "/._-" :test #'char=)))
 
-(defun validate-rom-path (value)
+(defun validate-system (value)
+  (unless (and (symbolp value)
+               (member value '(:nes :gb :gbc :chip8) :test #'eq))
+    (catalog-error "game :system must be one of :nes, :gb, :gbc, or :chip8"))
+  (string-downcase (symbol-name value)))
+
+(defun validate-rom-path (value system)
   (validate-text-field value "game :rom" 512)
-  (unless (and (string-prefix-p +rom-root+ value)
-               (string-suffix-p ".nes" value)
+  (let ((expected-suffix
+          (cond ((eq system :nes) ".nes")
+                ((eq system :gb) ".gb")
+                ((eq system :gbc) ".gbc")
+                ((eq system :chip8) ".ch8")
+                (t (catalog-error "unsupported game system ~S" system)))))
+    (unless (and (string-prefix-p +rom-root+ value)
+               (string-suffix-p expected-suffix value)
                (every #'rom-path-character-p value)
                (not (search "//" value))
                (not (search "/./" value))
                (not (search "/../" value)))
-    (catalog-error
-     "game :rom must be a normalized .nes path below ~A" +rom-root+))
+      (catalog-error
+       "game :rom must be a normalized ~A path below ~A"
+       expected-suffix +rom-root+)))
   value)
 
 (defun hexadecimal-character-p (character)
@@ -142,17 +155,15 @@
 
 (defun validate-game (form position)
   (let* ((context (format nil "game ~D" position))
-         (pairs (decode-plist form +game-keys+ context)))
+         (pairs (decode-plist form +game-keys+ context))
+         (system (required-value :system pairs)))
     (list
      (validate-id (required-value :id pairs))
      (validate-trimmed-text-field
       (required-value :title pairs) "game :title" 48)
-     (validate-rom-path (required-value :rom pairs))
-     (validate-text-field
-      (required-value :description pairs) "game :description" 120)
-     (validate-color (required-value :color pairs))
-     (validate-trimmed-text-field
-      (required-value :license pairs) "game :license" 48))))
+     (validate-system system)
+     (validate-rom-path (required-value :rom pairs) system)
+     (validate-color (required-value :color pairs)))))
 
 (defun duplicate-field (games index)
   (loop for tail on games
@@ -175,7 +186,7 @@
     (unless (eql version +schema-version+)
       (catalog-error "unsupported :version ~S; expected ~D"
                      version +schema-version+))
-    (dolist (field '((0 . ":id") (2 . ":rom")))
+    (dolist (field '((0 . ":id") (3 . ":rom")))
       (let ((duplicate (duplicate-field games (car field))))
         (when duplicate
           (catalog-error "duplicate game ~A ~S" (cdr field) duplicate))))

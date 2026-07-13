@@ -1,36 +1,56 @@
-;; Deck menu catalog, schema version 1.
+;; Deck menu catalog, schema version 3.
 ;;
-;; Each game has exactly six fields.  The compiler writes them to games.tsv
-;; in this order: id, title, rom, description, color, license.
-(:version 1
+;; Each game has exactly five fields.  The compiler writes them to games.tsv
+;; in this order: id, title, system, rom, color.
+(:version 3
  :games
- ((:id "mario"
+  ((:id "mario"
    :title "SUPER MARIO BROS."
+   :system :nes
    :rom "/mnt/data/nes-deck/mario.nes"
-   :description "Press Start to begin; Mario's title and attract demo are silent."
-   :color "#E74C3C"
-   :license "Proprietary; user-supplied, not redistributed")
+   :color "#E74C3C")
   (:id "falling"
    :title "FALLING"
+   :system :nes
    :rom "/mnt/data/nes-deck/roms/falling.nes"
-   :description "Survive a fast arcade challenge as the difficulty keeps rising."
-   :color "#6C5CE7"
-   :license "MIT")
+   :color "#6C5CE7")
   (:id "thwaite"
    :title "THWAITE"
+   :system :nes
    :rom "/mnt/data/nes-deck/roms/thwaite.nes"
-   :description "Defend your town from missiles with firework anti-ballistic missiles."
-   :color "#F5A623"
-   :license "GPL-3.0-or-later")
+   :color "#F5A623")
   (:id "concentration-room"
    :title "CONCENTRATION ROOM"
+   :system :nes
    :rom "/mnt/data/nes-deck/roms/croom.nes"
-   :description "Match cards, clear the toxin, and face CPU or human rivals."
-   :color "#00A8A8"
-   :license "GPL-3.0-or-later; exact-ROM copy exception")
+   :color "#00A8A8")
   (:id "robotfindskitten"
    :title "ROBOTFINDSKITTEN"
+   :system :nes
    :rom "/mnt/data/nes-deck/roms/robotfindskitten.nes"
-   :description "Guide robot through non-kittens until robot finds kitten."
-   :color "#62C370"
-   :license "zlib License")))
+   :color "#62C370")
+  (:id "micro-mages"
+   :title "MICRO MAGES"
+   :system :nes
+   :rom "/mnt/data/nes-deck/roms/micro-mages.nes"
+   :color "#E05B9A")
+  (:id "adjustris"
+   :title "ADJUSTRIS"
+   :system :gb
+   :rom "/mnt/data/nes-deck/roms/adjustris.gb"
+   :color "#8BAC0F")
+  (:id "geometrix"
+   :title "GEOMETRIX"
+   :system :gbc
+   :rom "/mnt/data/nes-deck/roms/geometrix.gbc"
+   :color "#2D98DA")
+  (:id "outlaw"
+   :title "OUTLAW"
+   :system :chip8
+   :rom "/mnt/data/nes-deck/roms/outlaw.ch8"
+   :color "#AA6633")
+  (:id "space-racer"
+   :title "SPACE RACER"
+   :system :chip8
+   :rom "/mnt/data/nes-deck/roms/spaceracer.ch8"
+   :color "#FCFCFC")))

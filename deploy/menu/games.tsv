@@ -1,5 +1,10 @@
-mario	SUPER MARIO BROS.	/mnt/data/nes-deck/mario.nes	Press Start to begin; Mario's title and attract demo are silent.	#E74C3C	Proprietary; user-supplied, not redistributed
-falling	FALLING	/mnt/data/nes-deck/roms/falling.nes	Survive a fast arcade challenge as the difficulty keeps rising.	#6C5CE7	MIT
-thwaite	THWAITE	/mnt/data/nes-deck/roms/thwaite.nes	Defend your town from missiles with firework anti-ballistic missiles.	#F5A623	GPL-3.0-or-later
-concentration-room	CONCENTRATION ROOM	/mnt/data/nes-deck/roms/croom.nes	Match cards, clear the toxin, and face CPU or human rivals.	#00A8A8	GPL-3.0-or-later; exact-ROM copy exception
-robotfindskitten	ROBOTFINDSKITTEN	/mnt/data/nes-deck/roms/robotfindskitten.nes	Guide robot through non-kittens until robot finds kitten.	#62C370	zlib License
+mario	SUPER MARIO BROS.	nes	/mnt/data/nes-deck/mario.nes	#E74C3C
+falling	FALLING	nes	/mnt/data/nes-deck/roms/falling.nes	#6C5CE7
+thwaite	THWAITE	nes	/mnt/data/nes-deck/roms/thwaite.nes	#F5A623
+concentration-room	CONCENTRATION ROOM	nes	/mnt/data/nes-deck/roms/croom.nes	#00A8A8
+robotfindskitten	ROBOTFINDSKITTEN	nes	/mnt/data/nes-deck/roms/robotfindskitten.nes	#62C370
+micro-mages	MICRO MAGES	nes	/mnt/data/nes-deck/roms/micro-mages.nes	#E05B9A
+adjustris	ADJUSTRIS	gb	/mnt/data/nes-deck/roms/adjustris.gb	#8BAC0F
+geometrix	GEOMETRIX	gbc	/mnt/data/nes-deck/roms/geometrix.gbc	#2D98DA
+outlaw	OUTLAW	chip8	/mnt/data/nes-deck/roms/outlaw.ch8	#AA6633
+space-racer	SPACE RACER	chip8	/mnt/data/nes-deck/roms/spaceracer.ch8	#FCFCFC
