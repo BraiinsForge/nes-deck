@@ -196,7 +196,7 @@ passphrases, WireGuard private keys, or ROM data.
   `f80d7c10da0e0a09bde089c8e9ad650701befa14a76f1fc740ddae036dacd536`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `d2f191f6adb03acb8855c9be738bbcb7ef823ac4d826925f96f7b33b0fc0316b`.
+  `73df69b960c9b93f7ee87b821ec87cdd8aa57c0689935da2f4a5797f06e7a2e7`.
   It validates the manifest and system-specific NES/GB/GBC/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
@@ -212,8 +212,13 @@ passphrases, WireGuard private keys, or ROM data.
   oversized title is `RETRO DECK`; the redundant play instruction, old blue
   divider, and tile, tab, and top-control outer outlines are gone. No
   description or license text remains in the launcher. Full 1280x480 captures
-  of all five tabs, mute and keymap states, and four Wi-Fi editor states are in
-  `/root/retro-deck-screens` on the deployment host.
+  of all five tabs, mute and keymap states, four Wi-Fi editor states, and the
+  live timer result screen are in `/root/retro-deck-screens` on the deployment
+  host.
+- Menu transitions build the complete rotated frame in cacheable memory before
+  publishing finished rows to live scanout. This removes the visible black
+  clear between screens and reduces live framebuffer writes per transition
+  from about 2.76 MB to 1.23 MB.
 - `games.sexp` is the editable schema-checked source. Schema version 3 keeps
   id, title, system, ROM path, and card color; game cards render only the
   centered title, while redistribution details remain in `FOSS_GAMES.md` and
@@ -415,7 +420,8 @@ immediately preceding the simplified header is retained there as
 `deck-menu.pre-header`. The xterm palette and mute-toggle deployment rollback is
 `/mnt/data/nes-deck/backups/20260713-184842-pre-xterm-mute/`; it also retains the
 menu binary immediately preceding unified title sizing as
-`deck-menu.pre-unified-titles`.
+`deck-menu.pre-unified-titles` and the binary immediately preceding staged menu
+transitions as `deck-menu.pre-staged-present`.
 
 ```sh
 # Stock UI must stay disabled
