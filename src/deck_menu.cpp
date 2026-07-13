@@ -1642,6 +1642,86 @@ void draw_cover_placeholder(Canvas *canvas, const Rect &bounds,
                      shown_title, kGameTitleScale, xterm_pixel(kColorText));
 }
 
+void draw_seven_segment_digit(Canvas *canvas, int x, int y, char digit,
+                              uint16_t active, uint16_t inactive) {
+  static const unsigned int segments[10] = {
+      0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f};
+  const int width = 52;
+  const int height = 94;
+  const int thickness = 8;
+  const Rect bounds[7] = {
+      Rect{x + thickness, y, width - 2 * thickness, thickness},
+      Rect{x + width - thickness, y + thickness, thickness,
+           height / 2 - thickness},
+      Rect{x + width - thickness, y + height / 2, thickness,
+           height / 2 - thickness},
+      Rect{x + thickness, y + height - thickness, width - 2 * thickness,
+           thickness},
+      Rect{x, y + height / 2, thickness, height / 2 - thickness},
+      Rect{x, y + thickness, thickness, height / 2 - thickness},
+      Rect{x + thickness, y + height / 2 - thickness / 2,
+           width - 2 * thickness, thickness}};
+  const unsigned int mask = digit >= '0' && digit <= '9'
+                                ? segments[digit - '0']
+                                : 0;
+  for (int segment = 0; segment < 7; ++segment)
+    fill_rect(canvas, bounds[segment],
+              mask & (1u << segment) ? active : inactive);
+}
+
+void draw_coverless_title(Canvas *canvas, const Rect &bounds,
+                          const std::string &title) {
+  const std::string shown_title =
+      fit_text_width(title, bounds.width - 48, kGameTitleScale);
+  draw_centered_text(canvas,
+                     Rect{bounds.x + 24, bounds.y + 260,
+                          bounds.width - 48, 54},
+                     shown_title, kGameTitleScale, xterm_pixel(kColorText));
+}
+
+bool draw_deck_app_logo(Canvas *canvas, const Rect &bounds,
+                        const GameEntry &game) {
+  if (game.system != "deck")
+    return false;
+
+  const uint16_t accent = game.color.pixel();
+  if (game.id == "ten-seconds") {
+    const int origin_x = bounds.x + 74;
+    const int digit_y = bounds.y + 72;
+    const uint16_t inactive = xterm_pixel(kColorTextDark);
+    draw_seven_segment_digit(canvas, origin_x, digit_y, '1', accent,
+                             inactive);
+    draw_seven_segment_digit(canvas, origin_x + 64, digit_y, '0', accent,
+                             inactive);
+    fill_rect(canvas, Rect{origin_x + 132, digit_y + 82, 10, 10}, accent);
+    draw_seven_segment_digit(canvas, origin_x + 148, digit_y, '0', accent,
+                             inactive);
+    draw_seven_segment_digit(canvas, origin_x + 212, digit_y, '0', accent,
+                             inactive);
+    draw_coverless_title(canvas, bounds, game.title);
+    return true;
+  }
+
+  if (is_built_in_terminal(game)) {
+    const Rect screen{bounds.x + 76, bounds.y + 46, bounds.width - 152, 150};
+    stroke_rect(canvas, screen, 6, accent);
+    draw_centered_text(canvas,
+                       Rect{screen.x + 18, screen.y + 18,
+                            screen.width - 36, screen.height - 36},
+                       ">_", 8, xterm_pixel(kColorText));
+    fill_rect(canvas,
+              Rect{bounds.x + bounds.width / 2 - 10, bounds.y + 202, 20, 26},
+              accent);
+    fill_rect(canvas,
+              Rect{bounds.x + bounds.width / 2 - 70, bounds.y + 228, 140, 8},
+              accent);
+    draw_coverless_title(canvas, bounds, game.title);
+    return true;
+  }
+
+  return false;
+}
+
 void render_top_controls(unsigned int volume, const std::string &keymap,
                          Canvas *canvas, MenuLayout *layout) {
   const int gap = 0;
@@ -1766,9 +1846,12 @@ void render_menu(const std::vector<GameEntry> &games,
       draw_cover(canvas, layout->game_art, games[game_index].cover);
     } else {
       layout->game_placeholder = Rect{430, 88, 420, 350};
-      draw_cover_placeholder(canvas, layout->game_placeholder,
-                             games[game_index].title,
-                             games[game_index].color.pixel());
+      if (!draw_deck_app_logo(canvas, layout->game_placeholder,
+                              games[game_index])) {
+        draw_cover_placeholder(canvas, layout->game_placeholder,
+                               games[game_index].title,
+                               games[game_index].color.pixel());
+      }
     }
     const int indicator_width = 16;
     const int indicator_height = 8;

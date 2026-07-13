@@ -362,6 +362,12 @@ int main() {
     entry.id = additional_systems[index];
     entry.title = additional_systems[index];
     entry.system = additional_systems[index];
+    if (entry.system == "deck") {
+      entry.id = "ten-seconds";
+      entry.title = "10 SECONDS";
+      entry.color = xterm_color(216);
+      entry.cover = CoverImage();
+    }
     tab_games.push_back(entry);
   }
   const GameEntry terminal_entry = built_in_terminal_entry(terminal);
@@ -651,12 +657,42 @@ int main() {
            "visible card launches its catalog game after filtering");
   }
 
+  render_menu(tab_games, "deck", 42, "us", true, 0, std::string(), &canvas,
+              &menu_layout);
+  expect(menu_layout.game_indices.size() == 2 &&
+             menu_layout.shown_game_index == 5 &&
+             tab_games[menu_layout.shown_game_index].id == "ten-seconds",
+         "Deck carousel exposes the Ten Seconds app entry");
+  expect(canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 72) *
+                        kLogicalWidth +
+                    menu_layout.game_placeholder.x + 82] ==
+                 xterm_pixel(kColorTextDark) &&
+             canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 80) *
+                        kLogicalWidth +
+                    menu_layout.game_placeholder.x + 118] ==
+                 tab_games[5].color.pixel() &&
+             canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 154) *
+                        kLogicalWidth +
+                    menu_layout.game_placeholder.x + 206] ==
+                 tab_games[5].color.pixel(),
+         "Ten Seconds uses its own dimmed 10.00 segment logo");
+
   render_menu(tab_games, "deck", 42, "us", true, 1, std::string(), &canvas,
               &menu_layout);
   expect(menu_layout.game_indices.size() == 2 &&
              menu_layout.shown_game_index == 6 &&
              is_built_in_terminal(tab_games[menu_layout.shown_game_index]),
          "Deck carousel exposes the built-in terminal entry");
+  expect(canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 46) *
+                        kLogicalWidth +
+                    menu_layout.game_placeholder.x + 76] ==
+                 tab_games[6].color.pixel() &&
+             rect_contains_color(
+                 canvas,
+                 Rect{menu_layout.game_placeholder.x + 76,
+                      menu_layout.game_placeholder.y + 46, 268, 150},
+                 xterm_pixel(kColorText)),
+         "Terminal uses its own CRT prompt logo");
 
   WifiState wifi_state;
   WifiLayout wifi_layout;
