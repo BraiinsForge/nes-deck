@@ -112,10 +112,13 @@ passphrases, WireGuard private keys, or ROM data.
   0-100) instead of relying on ALSA softvol.
 - The menu's top-right minus/display/plus group persists a canonical 0-100
   value in `/mnt/data/nes-deck/state/menu-volume.state`. Adjustments move in
-  5-point steps, zero mutes, and each nonzero adjustment plays a two-note
-  confirmation through `/dev/dsp`. The selected value is passed to every
-  emulator and survives service restarts and reboot. The launcher migrates the
-  former exact `on\n`/`off\n` state to 42/0 once.
+  5-point steps. The display is a mute toggle: it is green and shows the
+  percentage while audible, then turns red and reads `VOL OFF` when muted.
+  Tapping the display or plus restores the last audible level, or the configured
+  default when the launcher started muted. Each nonzero adjustment plays a
+  two-note confirmation through `/dev/dsp`. The selected value is passed to
+  every emulator and survives service restarts and reboot. The launcher
+  migrates the former exact `on\n`/`off\n` state to 42/0 once.
 - On 2026-07-13 a reported Mario-muted launch was traced to the persisted sound
   state being `off\n`: logd showed the preceding emulator launch opening at 42%
   and the later launch opening at exactly 0%. Mario's title and attract demo are
@@ -193,7 +196,7 @@ passphrases, WireGuard private keys, or ROM data.
   `f80d7c10da0e0a09bde089c8e9ad650701befa14a76f1fc740ddae036dacd536`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `8519764039c707ecd32806beb3fd29918a359629947775d8af3985300b7eccf0`.
+  `d2f191f6adb03acb8855c9be738bbcb7ef823ac4d826925f96f7b33b0fc0316b`.
   It validates the manifest and system-specific NES/GB/GBC/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
@@ -202,18 +205,15 @@ passphrases, WireGuard private keys, or ROM data.
   editor, and a supervised framebuffer-terminal action. The installed launcher
   SHA-256 is
   `b210fcff0c3be84fa6845f18653bfe5457c16ae83b090c3b38641888758db0e9`.
-- A post-deployment capture of the live 1280x480 framebuffer verified that all
-  game tiles render only their centered names on flat, dusty catalog colors.
-  The palette is perceptually mixed toward warm parchment, with measured text
-  contrast ranging from 6.6:1 to 15.1:1 across all fourteen tiles. Five
-  flat tabs labeled `NES`, `GAME BOY`, `GAME BOY COLOR`, `CHIP-8`, and `DECK`
-  filter the catalog; the selected tab uses a cool washed blue distinct from
-  the warm title color. The oversized title is `RETRO DECK`; the redundant
-  play instruction, old blue divider, and tile, tab, and top-control outer
-  outlines are gone. No description or license text remains in the launcher.
-  A later capture verified the computer,
-  `KEYS US`, Wi-Fi, minus, `VOL 42%`, and plus controls fit above those tabs
-  without overlap.
+- The renderer uses only canonical xterm-256 colors. Five flat tabs labeled
+  `NES`, `GAME BOY`, `GAME BOY COLOR`, `CHIP-8`, and `DECK` filter the catalog;
+  the selected tab is cool xterm blue-green 109, distinct from warm title 229.
+  Every game name is centered at the same compact bitmap-font scale. The
+  oversized title is `RETRO DECK`; the redundant play instruction, old blue
+  divider, and tile, tab, and top-control outer outlines are gone. No
+  description or license text remains in the launcher. Full 1280x480 captures
+  of all five tabs, mute and keymap states, and four Wi-Fi editor states are in
+  `/root/retro-deck-screens` on the deployment host.
 - `games.sexp` is the editable schema-checked source. Schema version 3 keeps
   id, title, system, ROM path, and card color; game cards render only the
   centered title, while redistribution details remain in `FOSS_GAMES.md` and
@@ -222,9 +222,12 @@ passphrases, WireGuard private keys, or ROM data.
   `/mnt/data/nes-deck/state/games.tsv`; the checked-in TSV is a known-good
   fallback. The actual Deck ECL output was verified byte-for-byte against that
   fallback for all fourteen entries. The deployed `games.sexp` SHA-256 is
-  `260971e4efaa074eaf9a769c0016e2fbe72fa176c1401646dad5f7b912c7930f`;
+  `f40e93cd78fde396d31bb79f5e9b8074814f54b9386a3d62abb70d4100adbc4d`;
   the generated and fallback TSV SHA-256 is
-  `cd8b989e1796759c28aab2948635a7ed171a1a6af35445b8fe7a9765c059b505`.
+  `6eef36e8687231cf86425f6a0e6d3d9115543ae41e956f2527badb3a1603a4f6`.
+  The installed compiler SHA-256 is
+  `eeb68d83d8fddf0b9e2996f8c6005d4b91e816a9fb57b75b7cbb8253c4d4d44e`;
+  both it and the native loader reject off-palette colors.
 - Four pinned, freely licensed mapper-0 homebrew releases are installed:
   Falling, Thwaite, Concentration Room, and robotfindskitten. Provenance,
   license texts, and ROM hashes are recorded in [FOSS_GAMES.md](FOSS_GAMES.md).
@@ -409,7 +412,10 @@ initialized volume 42 and US terminal keys without changing Wi-Fi.
 The current timer/menu/NES deployment rollback is
 `/mnt/data/nes-deck/backups/20260713-163052-pre-ten-seconds/`; the menu binary
 immediately preceding the simplified header is retained there as
-`deck-menu.pre-header`.
+`deck-menu.pre-header`. The xterm palette and mute-toggle deployment rollback is
+`/mnt/data/nes-deck/backups/20260713-184842-pre-xterm-mute/`; it also retains the
+menu binary immediately preceding unified title sizing as
+`deck-menu.pre-unified-titles`.
 
 ```sh
 # Stock UI must stay disabled

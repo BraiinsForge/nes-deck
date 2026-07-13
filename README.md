@@ -136,11 +136,12 @@ filtering. Every game name uses the same compact font size. The **- / VOL / +**
 control changes the next game's PCM volume in
 5-point steps from 0 through 100. Tap the green volume display to mute it; the
 display turns red and reads **VOL OFF**. Tap that display or **+** to restore
-the last audible level. Each nonzero adjustment plays a short two-note
-confirmation at the selected level. The value is saved under `/mnt/data` and
-survives reboot. While a game is running, hold anywhere on the touchscreen for
-two seconds to return to the menu. Touch does not emulate a game controller.
-The emulators support two Retro Games
+the last audible level, or the configured default if the launcher started
+muted. Each nonzero adjustment plays a short two-note confirmation at the
+selected level. The value is saved under `/mnt/data` and survives reboot. While
+a game is running, hold anywhere on the touchscreen for two seconds to return
+to the menu. Touch does not emulate a game controller. The emulators support
+two Retro Games
 THEGamepad USB controllers (`1c59:0026`) with stable player ordering, while
 the keyboard remains a Player 1 fallback. Space Racer uses both controllers
 simultaneously.

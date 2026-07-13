@@ -51,9 +51,10 @@ license details remain in `FOSS_GAMES.md` and the installed license files. The
 top-right minus and plus buttons atomically persist volume in 5-point steps.
 The green volume display is also a button: tapping it mutes, turns it red, and
 labels it `VOL OFF`. Tapping the display or plus while muted restores the last
-audible level. Every nonzero adjustment plays a short confirmation chime. The
-selected volume is passed to every emulator. A continuous two-second hold
-anywhere on the touchscreen
+audible level, or the configured default if the launcher started muted. Every
+nonzero adjustment plays a short confirmation chime. The selected volume is
+passed to every emulator. A continuous two-second hold anywhere on the
+touchscreen
 terminates the emulator child and redraws the menu. Touch does not supply
 controller input; a keyboard or mapped controller is still needed to press
 Start and play.
