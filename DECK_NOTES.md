@@ -87,6 +87,25 @@ passphrases, WireGuard private keys, or ROM data.
   Diagnostic mode was then stopped, and the normal menu was verified running
   again with both controllers still attached.
 
+## Cartridge saves
+
+- Cartridge saving is automatic and uses sidecars beside each canonical ROM.
+  The current InfoNES build has SHA-256
+  `91e7e844b34ebdbc862717832342b3bcb94ade2fb05256b8b3516145f9482a24`.
+  For an NES cartridge with the iNES battery flag, it loads `.srm`, checks for
+  changed SRAM every 600 frames, and writes through a synced temporary file
+  plus atomic rename. It also performs a final save during graceful shutdown.
+  Kirby's Adventure is the only NES title currently filed with that flag.
+- Gambatte loads `.sav` and `.rtc` memory exposed by the cartridge, then saves
+  changed data every 600 frames and at shutdown using the same temporary-file
+  replacement pattern. Final Fantasy Legend III, Pokemon Red, Donkey Kong
+  Country, and Super Mario Bros. Deluxe have battery-backed RAM. The current
+  Kirby's Dream Land cartridge has neither RAM nor a battery.
+- The menu sends SIGTERM and gives an emulator four seconds to flush its save
+  before escalating. Existing live Pokémon Red, Donkey Kong Country, and Super
+  Mario Bros. Deluxe saves were preserved during the ROM layout migration.
+  CHIP-8 titles in this catalog do not expose cartridge save memory.
+
 ## Audio
 
 - ALSA card 0 is `BMC100-MAX98357A-Audio`: STM32 I2S driving a MAX98357A.

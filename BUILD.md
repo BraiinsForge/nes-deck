@@ -159,6 +159,7 @@ This project patches the upstream InfoNES source at build time. To build manuall
    cp src/joypad_input.cpp infones-upstream/linux/
    cp src/nes_audio_mixer.h infones-upstream/linux/
    cp src/nes_apu_noise.h infones-upstream/linux/
+   cp src/nes_sram.h infones-upstream/linux/
    ```
 
 3. Build with the cross-compiler:
@@ -242,7 +243,8 @@ deck-infones/
 │   ├── deck_menu.cpp            # Games, volume, keymap, Wi-Fi, and terminal
 │   ├── joypad_input.cpp         # Two THEGamepads plus keyboard fallback
 │   ├── nes_audio_mixer.h        # Mixer, DC blocker, and rate conversion
-│   └── nes_apu_noise.h          # Tested 15-bit noise clock helpers
+│   ├── nes_apu_noise.h          # Tested 15-bit noise clock helpers
+│   └── nes_sram.h               # Tested NES battery-save codec
 ├── patches/
 │   ├── infones-apu-register.patch # Fixes out-of-bounds APU status access
 │   ├── infones-apu.patch          # Frame/envelope corrections
@@ -255,7 +257,8 @@ deck-infones/
 │   ├── joypad_input_test.cpp    # THEGamepad mapping and two-player state
 │   ├── chip8_core_test.c        # CHIP-8 pitch and real-ROM core smoke checks
 │   ├── nes_audio_test.cpp       # Host-side mixer/resampler checks
-│   └── nes_apu_noise_test.cpp   # LFSR period and high-rate clock checks
+│   ├── nes_apu_noise_test.cpp   # LFSR period and high-rate clock checks
+│   └── nes_sram_test.cpp        # Battery-save round-trip and damage checks
 ├── deploy/menu/                 # Catalog compiler, fallback, and S99 service
 ├── deploy/terminal/             # Terminal launcher and private fontconfig
 ├── terminal/                    # Vendored GPL-2 fbterm source and provenance

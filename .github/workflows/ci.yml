@@ -31,6 +31,9 @@ jobs:
         g++ -std=c++11 -Wall -Wextra -Werror -Isrc \
           tests/nes_apu_noise_test.cpp -o nes_apu_noise_test
         ./nes_apu_noise_test
+        g++ -std=c++11 -Wall -Wextra -Werror -Isrc \
+          tests/nes_sram_test.cpp -o nes_sram_test
+        ./nes_sram_test
 
     - name: Test two-player input
       run: |

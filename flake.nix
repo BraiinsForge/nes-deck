@@ -29,6 +29,7 @@
       joypadSrc = builtins.readFile ./src/joypad_input.cpp;
       audioMixerSrc = builtins.readFile ./src/nes_audio_mixer.h;
       apuNoiseSrc = builtins.readFile ./src/nes_apu_noise.h;
+      nesSramSrc = builtins.readFile ./src/nes_sram.h;
 
     in
     {
@@ -80,6 +81,11 @@
             cat > linux/nes_apu_noise.h << 'APU_NOISE_EOF'
             ${apuNoiseSrc}
             APU_NOISE_EOF
+
+            # Install the tested battery-backed SRAM codec
+            cat > linux/nes_sram.h << 'NES_SRAM_EOF'
+            ${nesSramSrc}
+            NES_SRAM_EOF
 
             # Create Makefile for static build
             cat > linux/Makefile << 'MAKEFILE_EOF'

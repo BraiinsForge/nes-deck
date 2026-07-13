@@ -30,6 +30,7 @@
 #include "../InfoNES_System.h"
 #include "../InfoNES_pAPU.h"
 #include "nes_audio_mixer.h"
+#include "nes_sram.h"
 
 #define TRUE 1
 #define FALSE 0
@@ -81,6 +82,10 @@ extern "C" unsigned int GetJoypadInput(unsigned int player);
 char szRomName[256];
 char szSaveName[256];
 int nSRAM_SaveFlag;
+static unsigned char last_saved_sram[SRAM_SIZE];
+static int sram_snapshot_valid = 0;
+static unsigned int sram_frames_since_check = 0;
+static const unsigned int kSramSaveCheckFrames = 600;
 
 /*-------------------------------------------------------------------*/
 /*  Global Variables                                                 */
@@ -371,7 +376,8 @@ int main(int argc, char **argv) {
   if (emulation_thread_started) {
     pthread_join(emulation_tid, NULL);
     emulation_thread_started = 0;
-    SaveSRAM();
+    if (SaveSRAM() != 0)
+      printf("InfoNES: Cannot write final SRAM save: %s\n", strerror(errno));
   }
 
   return 0;
@@ -391,7 +397,11 @@ void *emulation_thread(void *args) {
 /*===================================================================*/
 
 void start_application(char *filename) {
-  strcpy(szRomName, filename);
+  if (snprintf(szRomName, sizeof(szRomName), "%s", filename) >=
+      (int)sizeof(szRomName)) {
+    printf("InfoNES: ROM path is too long\n");
+    return;
+  }
 
   if (InfoNES_Load(szRomName) == 0) {
     LoadSRAM();
@@ -413,44 +423,51 @@ void start_application(char *filename) {
 
 int LoadSRAM(void) {
   FILE *fp;
-  unsigned char pSrcBuf[SRAM_SIZE];
-  unsigned char chData, chTag;
-  int nRunLen, nDecoded, nDecLen, nIdx;
+  unsigned char encoded[SRAM_SIZE * 3 + 1];
+  unsigned char decoded[SRAM_SIZE];
 
   nSRAM_SaveFlag = 0;
+  sram_snapshot_valid = 0;
+  sram_frames_since_check = 0;
 
   if (!ROM_SRAM)
     return 0;
 
   nSRAM_SaveFlag = 1;
 
-  strcpy(szSaveName, szRomName);
-  strcpy(strrchr(szSaveName, '.') + 1, "srm");
+  const char *extension = strrchr(szRomName, '.');
+  const size_t base_length = extension ? (size_t)(extension - szRomName)
+                                       : strlen(szRomName);
+  if (base_length + sizeof(".srm") > sizeof(szSaveName)) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(szSaveName, szRomName, base_length);
+  memcpy(szSaveName + base_length, ".srm", sizeof(".srm"));
+
+  memcpy(last_saved_sram, SRAM, SRAM_SIZE);
+  sram_snapshot_valid = 1;
 
   fp = fopen(szSaveName, "rb");
-  if (fp == NULL)
+  if (fp == NULL) {
+    if (errno == ENOENT)
+      return 0;
     return -1;
-
-  fread(pSrcBuf, SRAM_SIZE, 1, fp);
-  fclose(fp);
-
-  nDecoded = 0;
-  nDecLen = 0;
-  chTag = pSrcBuf[nDecoded++];
-
-  while (nDecLen < 8192) {
-    chData = pSrcBuf[nDecoded++];
-
-    if (chData == chTag) {
-      chData = pSrcBuf[nDecoded++];
-      nRunLen = pSrcBuf[nDecoded++];
-      for (nIdx = 0; nIdx < nRunLen + 1; ++nIdx) {
-        SRAM[nDecLen++] = chData;
-      }
-    } else {
-      SRAM[nDecLen++] = chData;
-    }
   }
+
+  const size_t encoded_size = fread(encoded, 1, sizeof(encoded), fp);
+  const int extra_byte = fgetc(fp);
+  const int read_failed = ferror(fp);
+  fclose(fp);
+  if (read_failed || extra_byte != EOF ||
+      !NesSramDecode(encoded, encoded_size, decoded, sizeof(decoded))) {
+    printf("InfoNES: Ignoring invalid SRAM save: %s\n", szSaveName);
+    errno = EINVAL;
+    return -1;
+  }
+
+  memcpy(SRAM, decoded, SRAM_SIZE);
+  memcpy(last_saved_sram, SRAM, SRAM_SIZE);
 
   return 0;
 }
@@ -460,68 +477,76 @@ int LoadSRAM(void) {
 /*===================================================================*/
 
 int SaveSRAM(void) {
-  FILE *fp;
-  int nUsedTable[256];
-  unsigned char chData, chPrevData, chTag;
-  int nIdx, nEncoded, nEncLen, nRunLen;
-  unsigned char pDstBuf[SRAM_SIZE];
-
   if (!nSRAM_SaveFlag)
     return 0;
+  if (sram_snapshot_valid && memcmp(last_saved_sram, SRAM, SRAM_SIZE) == 0)
+    return 0;
 
-  memset(nUsedTable, 0, sizeof(nUsedTable));
-
-  for (nIdx = 0; nIdx < SRAM_SIZE; ++nIdx) {
-    ++nUsedTable[SRAM[nIdx++]];
-  }
-  for (nIdx = 1, chTag = 0; nIdx < 256; ++nIdx) {
-    if (nUsedTable[nIdx] < nUsedTable[chTag])
-      chTag = nIdx;
-  }
-
-  nEncoded = 0;
-  nEncLen = 0;
-  nRunLen = 1;
-
-  pDstBuf[nEncLen++] = chTag;
-  chPrevData = SRAM[nEncoded++];
-
-  while (nEncoded < SRAM_SIZE && nEncLen < SRAM_SIZE - 133) {
-    chData = SRAM[nEncoded++];
-
-    if (chPrevData == chData && nRunLen < 256)
-      ++nRunLen;
-    else {
-      if (nRunLen >= 4 || chPrevData == chTag) {
-        pDstBuf[nEncLen++] = chTag;
-        pDstBuf[nEncLen++] = chPrevData;
-        pDstBuf[nEncLen++] = nRunLen - 1;
-      } else {
-        for (nIdx = 0; nIdx < nRunLen; ++nIdx)
-          pDstBuf[nEncLen++] = chPrevData;
-      }
-      chPrevData = chData;
-      nRunLen = 1;
-    }
+  unsigned char encoded[SRAM_SIZE * 3 + 1];
+  size_t encoded_size = 0;
+  if (!NesSramEncode(SRAM, SRAM_SIZE, encoded, sizeof(encoded),
+                     &encoded_size)) {
+    errno = EOVERFLOW;
+    return -1;
   }
 
-  if (nRunLen >= 4 || chPrevData == chTag) {
-    pDstBuf[nEncLen++] = chTag;
-    pDstBuf[nEncLen++] = chPrevData;
-    pDstBuf[nEncLen++] = nRunLen - 1;
-  } else {
-    for (nIdx = 0; nIdx < nRunLen; ++nIdx)
-      pDstBuf[nEncLen++] = chPrevData;
+  char temporary[sizeof(szSaveName) + 32];
+  if (snprintf(temporary, sizeof(temporary), "%s.tmp.%ld", szSaveName,
+               (long)getpid()) >= (int)sizeof(temporary)) {
+    errno = ENAMETOOLONG;
+    return -1;
   }
-
-  fp = fopen(szSaveName, "wb");
-  if (fp == NULL)
+  const int fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+                      0600);
+  if (fd < 0)
     return -1;
 
-  fwrite(pDstBuf, nEncLen, 1, fp);
-  fclose(fp);
+  size_t written = 0;
+  int saved_errno = 0;
+  while (written < encoded_size) {
+    const ssize_t amount = write(fd, encoded + written, encoded_size - written);
+    if (amount > 0)
+      written += (size_t)amount;
+    else if (amount < 0 && errno == EINTR)
+      continue;
+    else {
+      saved_errno = amount < 0 ? errno : EIO;
+      break;
+    }
+  }
+  int ok = written == encoded_size;
+  if (ok && fsync(fd) != 0) {
+    ok = 0;
+    saved_errno = errno;
+  }
+  if (close(fd) != 0 && ok) {
+    ok = 0;
+    saved_errno = errno;
+  }
+  if (ok && rename(temporary, szSaveName) != 0) {
+    ok = 0;
+    saved_errno = errno;
+  }
+  if (!ok) {
+    unlink(temporary);
+    errno = saved_errno ? saved_errno : EIO;
+    return -1;
+  }
+
+  memcpy(last_saved_sram, SRAM, SRAM_SIZE);
+  sram_snapshot_valid = 1;
 
   return 0;
+}
+
+static void MaybeSaveSRAM(void) {
+  if (!nSRAM_SaveFlag)
+    return;
+  if (++sram_frames_since_check < kSramSaveCheckFrames)
+    return;
+  sram_frames_since_check = 0;
+  if (SaveSRAM() != 0)
+    printf("InfoNES: Cannot write periodic SRAM save: %s\n", strerror(errno));
 }
 
 /*===================================================================*/
@@ -708,6 +733,7 @@ void InfoNES_LoadFrame(void) {
   }
 #endif
   record_render_time(render_started);
+  MaybeSaveSRAM();
 }
 
 /*===================================================================*/
