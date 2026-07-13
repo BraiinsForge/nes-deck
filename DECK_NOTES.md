@@ -193,7 +193,7 @@ passphrases, WireGuard private keys, or ROM data.
   `f80d7c10da0e0a09bde089c8e9ad650701befa14a76f1fc740ddae036dacd536`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `1eb15ee840b6d20521e02ca1892a9435b76c33baf91838108a2df58e2823c699`.
+  `8e70d4e76df7b6e105f1ef2dcd63296668ccaf80440c49e95de026fa31b0da72`.
   It validates the manifest and system-specific NES/GB/GBC/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
@@ -203,7 +203,9 @@ passphrases, WireGuard private keys, or ROM data.
   SHA-256 is
   `b210fcff0c3be84fa6845f18653bfe5457c16ae83b090c3b38641888758db0e9`.
 - A post-deployment capture of the live 1280x480 framebuffer verified that all
-  game tiles render only their centered names on flat catalog colors. Five
+  game tiles render only their centered names on flat, dusty catalog colors.
+  The palette is perceptually mixed toward warm parchment, with measured text
+  contrast ranging from 6.6:1 to 15.1:1 across all fourteen tiles. Five
   flat tabs labeled `NES`, `GAME BOY`, `GAME BOY COLOR`, `CHIP-8`, and `DECK`
   filter the catalog; the selected tab uses the pale-yellow title color. The
   title is `RETRO DECK`, the old blue divider and tile/tab outlines are gone,
@@ -219,9 +221,9 @@ passphrases, WireGuard private keys, or ROM data.
   `/mnt/data/nes-deck/state/games.tsv`; the checked-in TSV is a known-good
   fallback. The actual Deck ECL output was verified byte-for-byte against that
   fallback for all fourteen entries. The deployed `games.sexp` SHA-256 is
-  `6e61a9d51ebeba2410fd72145c51b911566357c8bc42ed8a71278186452c4162`;
+  `260971e4efaa074eaf9a769c0016e2fbe72fa176c1401646dad5f7b912c7930f`;
   the generated and fallback TSV SHA-256 is
-  `c2b91cf313f159df85eca2d7d1fc61c71067dcd8108c0976f49ec87b7cfbe6f6`.
+  `cd8b989e1796759c28aab2948635a7ed171a1a6af35445b8fe7a9765c059b505`.
 - Four pinned, freely licensed mapper-0 homebrew releases are installed:
   Falling, Thwaite, Concentration Room, and robotfindskitten. Provenance,
   license texts, and ROM hashes are recorded in [FOSS_GAMES.md](FOSS_GAMES.md).
