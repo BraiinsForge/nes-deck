@@ -285,7 +285,7 @@ int main() {
     const Rect &selected_tab = menu_layout.system_tabs[0].bounds;
     const Rect &inactive_tab = menu_layout.system_tabs[1].bounds;
     expect(canvas[static_cast<size_t>(selected_tab.y) * kLogicalWidth +
-                  selected_tab.x] == rgb565(255, 245, 171),
+                  selected_tab.x] == rgb565(216, 205, 164),
            "selected system tab stays flat through its edge");
     expect(canvas[static_cast<size_t>(inactive_tab.y) * kLogicalWidth +
                   inactive_tab.x] == rgb565(25, 25, 25),

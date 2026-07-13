@@ -1160,7 +1160,7 @@ void render_menu(const std::vector<GameEntry> &games,
   layout->volume_display = Rect{1062, 10, 130, 62};
   layout->volume_up_button = Rect{1198, 10, 62, 62};
   const RgbColor volume_color =
-      volume == 0 ? RgbColor{210, 61, 69} : RgbColor{31, 180, 96};
+      volume == 0 ? RgbColor{189, 121, 124} : RgbColor{116, 169, 137};
   fill_rect(canvas, layout->volume_down_button, rgb565(25, 25, 25));
   stroke_rect(canvas, layout->volume_down_button, 3, rgb565(130, 130, 130));
   draw_centered_text(canvas, layout->volume_down_button, "-", 4,
@@ -1185,7 +1185,7 @@ void render_menu(const std::vector<GameEntry> &games,
     const Rect tab{tab_x, 84, kSystemDefinitions[definition].width, 48};
     const bool selected = active_system == kSystemDefinitions[definition].system;
     const RgbColor tab_color =
-        selected ? RgbColor{255, 245, 171} : RgbColor{25, 25, 25};
+        selected ? RgbColor{216, 205, 164} : RgbColor{25, 25, 25};
     fill_rect(canvas, tab, tab_color.pixel());
     draw_centered_text(canvas, tab, kSystemDefinitions[definition].label, 2,
                        selected ? contrasting_text(tab_color)
@@ -1291,7 +1291,8 @@ std::string tail_for_field(const std::string &value, size_t maximum) {
 
 void draw_wifi_button(Canvas *canvas, const Rect &bounds,
                       const std::string &label, bool active) {
-  const uint16_t background = active ? rgb565(55, 94, 180) : rgb565(29, 29, 29);
+  const uint16_t background =
+      active ? rgb565(102, 121, 165) : rgb565(29, 29, 29);
   fill_rect(canvas, bounds, background);
   stroke_rect(canvas, bounds, 3,
               active ? rgb565(160, 190, 255) : rgb565(105, 105, 105));
