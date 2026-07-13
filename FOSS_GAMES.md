@@ -39,6 +39,7 @@ SCHIP, and XO-CHIP use the c-octo emulator core pinned at
 `5f62f185c9e6ae324dcbe9e7fe35ec7c3bdebfb1`, under MIT. Both binaries install
 their upstream license into their Nix output.
 
-The existing Mario files are user-supplied cartridge dumps/downloads and are
-not FOSS. This private repository retains them for the owner's reproducible
-setup, but does not claim a license or redistribution rights for them.
+The Super Mario, Pokemon, and Donkey Kong files are user-supplied cartridge
+dumps/downloads and are not FOSS. This private repository retains them for the
+owner's reproducible setup, but does not claim a license or redistribution
+rights for them.

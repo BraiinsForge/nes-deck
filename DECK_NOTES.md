@@ -201,14 +201,22 @@ passphrases, WireGuard private keys, or ROM data.
   the ECL compiler atomically generates
   `/mnt/data/nes-deck/state/games.tsv`; the checked-in TSV is a known-good
   fallback. The actual Deck ECL output was verified byte-for-byte against that
-  fallback for all ten entries. The final deployed catalog/fallback SHA-256
-  is `efc59bba6b5f2b70dfe4827690be4c822ea3aa156c441b781a80623c83dacb8e`.
+  fallback for all thirteen entries. The deployed `games.sexp` SHA-256 is
+  `7fccd662d99107a6fd677f5718f8e020fe853cdb33ca5503bff65ee31f1951d5`;
+  the generated and fallback TSV SHA-256 is
+  `440fdaa26af5d538d5eb557f15750c24e9490fb3809ffaf5e240a178ea7fadc3`.
 - Four pinned, freely licensed mapper-0 homebrew releases are installed:
   Falling, Thwaite, Concentration Room, and robotfindskitten. Provenance,
   license texts, and ROM hashes are recorded in [FOSS_GAMES.md](FOSS_GAMES.md).
-  `mario.nes` and `micro-mages.nes` are user-supplied and are not
-  redistributed. The deployed Micro Mages ROM SHA-256 is
-  `a4b5b736a84b260314c18783381fe2dca7b803f7c29e78fb403a0f9087a7e570`.
+  The private repository retains the owner's locally supplied ROM library
+  without claiming redistribution rights. The deployed catalog includes
+  Super Mario Bros., Micro Mages, Pokemon Red, Donkey Kong Country, and Super
+  Mario Bros. Deluxe from that library. Their deployed SHA-256 values are,
+  respectively, `f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de`,
+  `a4b5b736a84b260314c18783381fe2dca7b803f7c29e78fb403a0f9087a7e570`,
+  `5ca7ba01642a3b27b0cc0b5349b52792795b62d3ed977e98a09390659af96b7b`,
+  `e22324dfd7884a593d265bc3776af6d06c9cf049a060ac7d05613c5303672fca`,
+  and `db81dd4acbd0c7a3b9004f169ee278450c764c842ae777abd28073fbedf4078b`.
 
 ## GB, GBC, and CHIP-8 emulators
 
@@ -266,7 +274,7 @@ passphrases, WireGuard private keys, or ROM data.
   `terminal/PROVENANCE.md`.
 - `/mnt/data/nes-deck/terminal/fbterm` is a statically linked ARMv7 hard-float
   executable, SHA-256
-  `9e70e6091926cdff75196c419a031a1acaddd613b51f543ebe1bbb741567df89`.
+  `25cba8b94e194e412a3a7d5f50cbd208927ac795fc7533e8e501fa1d49f623c0`.
   The bundled DejaVu Sans Mono font SHA-256 is
   `9d9bfebceb1c3f6f4ad383ded568a6926086208f43f7f92f92f7e93a1383fa38`.
 - fbterm validates the actual 600x1280 RGB565 framebuffer and its stride. It
@@ -277,9 +285,17 @@ passphrases, WireGuard private keys, or ROM data.
   punctuation with no old glyph smear. A bottom-row marker remained inside
   the padded viewport. The terminal launcher uses the active `/dev/tty1` and a
   private fontconfig file; its SHA-256 is
-  `d8f475eeee6e66a24294bcf6817fa241f8b4e7ea4e9cad893bd30a12b20450db`.
+  `78bd1b3679fe90c191161ef2e09fb6d6fcdf9ba408b72b846567a294b3f6a155`.
   A live launch reached the interactive `root@braiins-deck` prompt. Exiting the
   shell or using the two-second touch hold returns to the menu.
+- BusyBox `ash` attaches `/dev/null` to a non-interactive background job when
+  that job has no explicit stdin redirection. The terminal launcher must keep
+  fbterm in the background so it can wait for complete shutdown and restore
+  the US keymap. The launcher therefore opens `/dev/tty1` read/write both for
+  itself and explicitly on the fbterm command. fbterm validates the descriptor
+  with `VT_GETSTATE` instead of a pathname lookup. A live four-second probe
+  confirmed the fixed terminal remained running; initialization diagnostics
+  now stay on the persistent menu log instead of disappearing onto the VT.
 - The terminal package includes static ARM `loadkeys`, SHA-256
   `a4c1f63d21bd95708e868079a54be54c012021f4bc8bc1a44fd7140f8eb3e984`,
   plus self-contained US ANSI and Czech QWERTZ maps from kbd 2.7.1. The menu
@@ -287,6 +303,8 @@ passphrases, WireGuard private keys, or ROM data.
   loads that selection before fbterm and restores US after fbterm has fully
   exited, including menu-requested TERM. Both packaged maps passed parse-only
   `loadkeys -p` checks on the live Deck before installation.
+- The ROM and terminal deployment backup is
+  `/mnt/data/nes-deck/backup-roms-terminal-20260713-1551/`.
 
 ## Wi-Fi
 

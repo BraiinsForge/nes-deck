@@ -160,7 +160,8 @@ The freely licensed catalog contains four NES games plus Adjustris (GB),
 Geometrix (GBC), Outlaw (CHIP-8), and the simultaneous two-player Space Racer
 (CHIP-8). Their pinned sources, licenses, and hashes are in
 [FOSS_GAMES.md](FOSS_GAMES.md). The private repository also retains the locally
-supplied ROM files and archives so another clone can reproduce the working
+supplied Super Mario Bros., Micro Mages, Pokemon Red, Donkey Kong Country, and
+Super Mario Bros. Deluxe payloads so another clone can reproduce the working
 library.
 
 Hardware, framebuffer, audio, Wi-Fi, WireGuard, and recovery findings for the
