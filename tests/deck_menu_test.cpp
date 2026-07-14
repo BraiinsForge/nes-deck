@@ -97,6 +97,65 @@ int main() {
              menu_gamepad_axis_to_button(255, 0, 255, kMenuPadLeft,
                                          kMenuPadRight) == kMenuPadRight,
          "dashboard applies a center dead zone to gamepad axes");
+  expect(menu_keyboard_key_to_button(KEY_ENTER, false) == kMenuPadConfirm &&
+             menu_keyboard_key_to_button(KEY_KPENTER, false) ==
+                 kMenuPadConfirm &&
+             menu_keyboard_key_to_button(KEY_ESC, false) == kMenuPadBack &&
+             menu_keyboard_key_to_button(KEY_UP, false) == kMenuPadUp &&
+             menu_keyboard_key_to_button(KEY_DOWN, false) == kMenuPadDown &&
+             menu_keyboard_key_to_button(KEY_LEFT, false) == kMenuPadLeft &&
+             menu_keyboard_key_to_button(KEY_RIGHT, false) == kMenuPadRight &&
+             menu_keyboard_key_to_button(KEY_TAB, false) ==
+                 kMenuPadSystemNext &&
+             menu_keyboard_key_to_button(KEY_TAB, true) ==
+                 kMenuPadSystemPrevious &&
+             menu_keyboard_key_repeats(KEY_LEFT) &&
+             menu_keyboard_key_repeats(KEY_DOWN) &&
+             !menu_keyboard_key_repeats(KEY_ENTER) &&
+             !menu_keyboard_key_repeats(KEY_TAB),
+         "dashboard maps keyboard navigation and bounded repeat behavior");
+  bool keyboard_left_shift = false;
+  bool keyboard_right_shift = false;
+  expect(menu_keyboard_event_to_button(KEY_TAB, 1, &keyboard_left_shift,
+                                       &keyboard_right_shift) ==
+                 kMenuPadSystemNext &&
+             menu_keyboard_event_to_button(KEY_LEFTSHIFT, 1,
+                                           &keyboard_left_shift,
+                                           &keyboard_right_shift) == 0 &&
+             menu_keyboard_event_to_button(KEY_TAB, 1, &keyboard_left_shift,
+                                           &keyboard_right_shift) ==
+                 kMenuPadSystemPrevious &&
+             menu_keyboard_event_to_button(KEY_TAB, 2, &keyboard_left_shift,
+                                           &keyboard_right_shift) == 0 &&
+             menu_keyboard_event_to_button(KEY_RIGHT, 2,
+                                           &keyboard_left_shift,
+                                           &keyboard_right_shift) ==
+                 kMenuPadRight &&
+             menu_keyboard_event_to_button(KEY_LEFTSHIFT, 0,
+                                           &keyboard_left_shift,
+                                           &keyboard_right_shift) == 0 &&
+             !keyboard_left_shift,
+         "dashboard tracks Shift-Tab and accepts only arrow key repeats");
+  const size_t keyboard_words =
+      (KEY_MAX + sizeof(unsigned long) * CHAR_BIT) /
+      (sizeof(unsigned long) * CHAR_BIT);
+  std::vector<unsigned long> keyboard_keys(keyboard_words, 0);
+  const auto set_keyboard_key = [&](unsigned int code) {
+    const unsigned int bits_per_word = sizeof(unsigned long) * CHAR_BIT;
+    keyboard_keys[code / bits_per_word] |= 1UL << (code % bits_per_word);
+  };
+  set_keyboard_key(KEY_ENTER);
+  set_keyboard_key(KEY_ESC);
+  set_keyboard_key(KEY_TAB);
+  set_keyboard_key(KEY_UP);
+  set_keyboard_key(KEY_DOWN);
+  set_keyboard_key(KEY_LEFT);
+  set_keyboard_key(KEY_RIGHT);
+  expect(!menu_keyboard_capabilities(&keyboard_keys[0]),
+         "dashboard rejects incomplete keyboard event devices");
+  set_keyboard_key(KEY_LEFTSHIFT);
+  expect(menu_keyboard_capabilities(&keyboard_keys[0]),
+         "dashboard recognizes complete keyboard event devices");
   MenuGamepadDevice menu_pad;
   menu_pad.x_info.minimum = 0;
   menu_pad.x_info.maximum = 255;

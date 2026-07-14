@@ -113,6 +113,7 @@ const unsigned int kMenuPadSettings = 1u << 8;
 const unsigned short kTheGamepadVendor = 0x1c59;
 const unsigned short kTheGamepadProduct = 0x0026;
 const size_t kMaximumMenuGamepads = 2;
+const size_t kMaximumMenuKeyboards = 4;
 const int64_t kMenuSoundInputTailMs = 60;
 const unsigned int kMenuControllerBurstLimit = 12;
 const int64_t kMenuControllerBurstWindowMs = 1000;
@@ -3069,6 +3070,64 @@ unsigned int menu_gamepad_key_to_button(unsigned short code) {
   }
 }
 
+unsigned int menu_keyboard_key_to_button(unsigned short code, bool shift) {
+  switch (code) {
+  case KEY_ENTER:
+  case KEY_KPENTER:
+    return kMenuPadConfirm;
+  case KEY_ESC:
+    return kMenuPadBack;
+  case KEY_UP:
+    return kMenuPadUp;
+  case KEY_DOWN:
+    return kMenuPadDown;
+  case KEY_LEFT:
+    return kMenuPadLeft;
+  case KEY_RIGHT:
+    return kMenuPadRight;
+  case KEY_TAB:
+    return shift ? kMenuPadSystemPrevious : kMenuPadSystemNext;
+  default:
+    return 0;
+  }
+}
+
+bool menu_keyboard_key_repeats(unsigned short code) {
+  return code == KEY_UP || code == KEY_DOWN || code == KEY_LEFT ||
+         code == KEY_RIGHT;
+}
+
+unsigned int menu_keyboard_event_to_button(unsigned short code, int value,
+                                           bool *left_shift,
+                                           bool *right_shift) {
+  if (!left_shift || !right_shift)
+    return 0;
+  if (code == KEY_LEFTSHIFT) {
+    *left_shift = value != 0;
+    return 0;
+  }
+  if (code == KEY_RIGHTSHIFT) {
+    *right_shift = value != 0;
+    return 0;
+  }
+  const bool fresh_press = value == 1;
+  const bool allowed_repeat = value == 2 && menu_keyboard_key_repeats(code);
+  if (!fresh_press && !allowed_repeat)
+    return 0;
+  return menu_keyboard_key_to_button(code, *left_shift || *right_shift);
+}
+
+bool menu_keyboard_capabilities(const unsigned long *keys) {
+  if (!keys)
+    return false;
+  return bit_is_set(keys, KEY_ENTER) && bit_is_set(keys, KEY_ESC) &&
+         bit_is_set(keys, KEY_TAB) && bit_is_set(keys, KEY_UP) &&
+         bit_is_set(keys, KEY_DOWN) && bit_is_set(keys, KEY_LEFT) &&
+         bit_is_set(keys, KEY_RIGHT) &&
+         (bit_is_set(keys, KEY_LEFTSHIFT) ||
+          bit_is_set(keys, KEY_RIGHTSHIFT));
+}
+
 unsigned int menu_gamepad_axis_to_button(int value, int minimum, int maximum,
                                          unsigned int negative,
                                          unsigned int positive) {
@@ -3348,6 +3407,240 @@ private:
   }
 
   std::vector<MenuGamepadDevice> devices_;
+  int64_t last_scan_ms_;
+};
+
+struct MenuKeyboardDevice {
+  int fd;
+  std::string path;
+  std::string name;
+  bool left_shift;
+  bool right_shift;
+  bool dropping_events;
+  bool grabbed;
+
+  MenuKeyboardDevice()
+      : fd(-1), left_shift(false), right_shift(false),
+        dropping_events(false), grabbed(false) {}
+};
+
+class MenuKeyboards {
+public:
+  MenuKeyboards() : last_scan_ms_(0) {}
+  ~MenuKeyboards() { close_devices(); }
+
+  size_t count() const {
+    size_t connected = 0;
+    for (size_t i = 0; i < devices_.size(); ++i)
+      connected += devices_[i].fd >= 0 ? 1 : 0;
+    return connected;
+  }
+
+  bool scan_if_due(bool force, std::string *error) {
+    const int64_t now = monotonic_ms();
+    if (!force && last_scan_ms_ > 0 && now - last_scan_ms_ < 1000)
+      return true;
+    last_scan_ms_ = now;
+    return scan(error);
+  }
+
+  void append_poll_descriptors(std::vector<struct pollfd> *descriptors) const {
+    if (!descriptors)
+      return;
+    for (size_t i = 0; i < devices_.size(); ++i) {
+      struct pollfd descriptor;
+      descriptor.fd = devices_[i].fd;
+      descriptor.events = POLLIN;
+      descriptor.revents = 0;
+      descriptors->push_back(descriptor);
+    }
+  }
+
+  unsigned int read_ready(const std::vector<struct pollfd> &descriptors,
+                          size_t first_descriptor) {
+    unsigned int pressed = 0;
+    for (size_t i = 0; i < devices_.size(); ++i) {
+      if (first_descriptor + i >= descriptors.size())
+        break;
+      const short revents = descriptors[first_descriptor + i].revents;
+      if (!(revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL)))
+        continue;
+      if ((revents & POLLIN) && drain_device(&devices_[i], &pressed))
+        continue;
+      close_device(&devices_[i]);
+      last_scan_ms_ = 0;
+    }
+    return pressed;
+  }
+
+  void close_for_child() {
+    close_devices();
+    last_scan_ms_ = 0;
+  }
+
+private:
+  bool scan(std::string *error) {
+    DIR *directory = opendir("/dev/input");
+    if (!directory) {
+      if (error)
+        *error = errno_message("cannot scan keyboards");
+      return false;
+    }
+
+    const size_t key_words = (KEY_MAX + sizeof(unsigned long) * CHAR_BIT) /
+                             (sizeof(unsigned long) * CHAR_BIT);
+    std::vector<MenuKeyboardDevice> candidates;
+    for (struct dirent *entry = readdir(directory); entry;
+         entry = readdir(directory)) {
+      const std::string filename(entry->d_name);
+      if (filename.size() <= 5 || filename.compare(0, 5, "event") != 0)
+        continue;
+      bool numeric = true;
+      for (size_t i = 5; i < filename.size(); ++i) {
+        numeric = numeric &&
+                  std::isdigit(static_cast<unsigned char>(filename[i]));
+      }
+      if (!numeric)
+        continue;
+
+      MenuKeyboardDevice candidate;
+      candidate.path = "/dev/input/" + filename;
+      candidate.fd = open(candidate.path.c_str(),
+                          O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+      if (candidate.fd < 0)
+        continue;
+      std::vector<unsigned long> keys(key_words, 0);
+      if (ioctl(candidate.fd,
+                EVIOCGBIT(EV_KEY, keys.size() * sizeof(unsigned long)),
+                &keys[0]) < 0 ||
+          !menu_keyboard_capabilities(&keys[0])) {
+        close(candidate.fd);
+        continue;
+      }
+      char name[256] = {};
+      if (ioctl(candidate.fd, EVIOCGNAME(sizeof(name)), name) >= 0)
+        candidate.name = name;
+      if (candidate.name.empty())
+        candidate.name = filename;
+      candidates.push_back(candidate);
+    }
+    closedir(directory);
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const MenuKeyboardDevice &left,
+                 const MenuKeyboardDevice &right) {
+                return left.path < right.path;
+              });
+    while (candidates.size() > kMaximumMenuKeyboards) {
+      close(candidates.back().fd);
+      candidates.pop_back();
+    }
+
+    bool unchanged = candidates.size() == devices_.size();
+    for (size_t i = 0; unchanged && i < candidates.size(); ++i) {
+      unchanged = candidates[i].path == devices_[i].path &&
+                  devices_[i].fd >= 0;
+    }
+    if (unchanged) {
+      for (size_t i = 0; i < candidates.size(); ++i)
+        close(candidates[i].fd);
+      return true;
+    }
+
+    close_devices();
+    devices_.swap(candidates);
+    for (size_t i = 0; i < devices_.size(); ++i) {
+      if (ioctl(devices_[i].fd, EVIOCGRAB, 1) == 0) {
+        devices_[i].grabbed = true;
+      } else {
+        std::cerr << "deck-menu: warning: cannot exclusively grab "
+                  << devices_[i].path << ": " << std::strerror(errno)
+                  << std::endl;
+      }
+      resynchronize(&devices_[i]);
+    }
+    if (!devices_.empty()) {
+      std::cerr << "deck-menu: " << count()
+                << " keyboard(s) ready for dashboard" << std::endl;
+    }
+    return true;
+  }
+
+  static bool resynchronize(MenuKeyboardDevice *keyboard) {
+    if (!keyboard || keyboard->fd < 0)
+      return false;
+    const size_t key_words = (KEY_MAX + sizeof(unsigned long) * CHAR_BIT) /
+                             (sizeof(unsigned long) * CHAR_BIT);
+    std::vector<unsigned long> keys(key_words, 0);
+    if (ioctl(keyboard->fd,
+              EVIOCGKEY(keys.size() * sizeof(unsigned long)), &keys[0]) < 0) {
+      return false;
+    }
+    keyboard->left_shift = bit_is_set(&keys[0], KEY_LEFTSHIFT);
+    keyboard->right_shift = bit_is_set(&keys[0], KEY_RIGHTSHIFT);
+    keyboard->dropping_events = false;
+    return true;
+  }
+
+  static bool drain_device(MenuKeyboardDevice *keyboard,
+                           unsigned int *pressed) {
+    if (!keyboard || keyboard->fd < 0 || !pressed)
+      return false;
+    while (true) {
+      struct input_event events[32];
+      const ssize_t amount = read(keyboard->fd, events, sizeof(events));
+      if (amount < 0) {
+        if (errno == EINTR)
+          continue;
+        return errno == EAGAIN || errno == EWOULDBLOCK;
+      }
+      if (amount == 0 ||
+          amount % static_cast<ssize_t>(sizeof(struct input_event)) != 0) {
+        return false;
+      }
+      const size_t count = static_cast<size_t>(amount) / sizeof(events[0]);
+      for (size_t i = 0; i < count; ++i) {
+        const struct input_event &event = events[i];
+        if (keyboard->dropping_events) {
+          if (event.type == EV_SYN && event.code == SYN_REPORT &&
+              !resynchronize(keyboard)) {
+            return false;
+          }
+          continue;
+        }
+        if (event.type == EV_SYN && event.code == SYN_DROPPED) {
+          keyboard->dropping_events = true;
+          continue;
+        }
+        if (event.type != EV_KEY)
+          continue;
+        *pressed |= menu_keyboard_event_to_button(
+            event.code, event.value, &keyboard->left_shift,
+            &keyboard->right_shift);
+      }
+    }
+  }
+
+  static void close_device(MenuKeyboardDevice *keyboard) {
+    if (!keyboard || keyboard->fd < 0)
+      return;
+    if (keyboard->grabbed)
+      ioctl(keyboard->fd, EVIOCGRAB, 0);
+    close(keyboard->fd);
+    keyboard->fd = -1;
+    keyboard->grabbed = false;
+    keyboard->left_shift = false;
+    keyboard->right_shift = false;
+    keyboard->dropping_events = false;
+  }
+
+  void close_devices() {
+    for (size_t i = 0; i < devices_.size(); ++i)
+      close_device(&devices_[i]);
+    devices_.clear();
+  }
+
+  std::vector<MenuKeyboardDevice> devices_;
   int64_t last_scan_ms_;
 };
 
@@ -4346,12 +4639,18 @@ int application_main(const Options &options) {
   }
 
   MenuGamepads menu_gamepads;
+  MenuKeyboards menu_keyboards;
   MenuSoundPlayer menu_sound_player;
   MenuControllerInputGuard controller_input_guard;
   std::string gamepad_error;
   if (!menu_gamepads.scan_if_due(true, &gamepad_error)) {
     std::cerr << "deck-menu: controller navigation unavailable: "
               << gamepad_error << std::endl;
+  }
+  std::string keyboard_error;
+  if (!menu_keyboards.scan_if_due(true, &keyboard_error)) {
+    std::cerr << "deck-menu: keyboard navigation unavailable: "
+              << keyboard_error << std::endl;
   }
 
   Framebuffer framebuffer;
@@ -4393,6 +4692,7 @@ int application_main(const Options &options) {
   int64_t reboot_armed_until = 0;
   std::string last_touch_error;
   std::string last_gamepad_error = gamepad_error;
+  std::string last_keyboard_error = keyboard_error;
 
   while (!g_shutdown_requested) {
     menu_sound_player.reap_finished();
@@ -4422,6 +4722,17 @@ int application_main(const Options &options) {
       last_gamepad_error.clear();
     }
 
+    keyboard_error.clear();
+    if (!menu_keyboards.scan_if_due(false, &keyboard_error)) {
+      if (keyboard_error != last_keyboard_error) {
+        std::cerr << "deck-menu: keyboard navigation unavailable: "
+                  << keyboard_error << std::endl;
+        last_keyboard_error = keyboard_error;
+      }
+    } else {
+      last_keyboard_error.clear();
+    }
+
     std::vector<struct pollfd> descriptors;
     struct pollfd touch_descriptor;
     touch_descriptor.fd = touch.fd();
@@ -4430,6 +4741,8 @@ int application_main(const Options &options) {
     descriptors.push_back(touch_descriptor);
     const size_t first_gamepad_descriptor = descriptors.size();
     menu_gamepads.append_poll_descriptors(&descriptors);
+    const size_t first_keyboard_descriptor = descriptors.size();
+    menu_keyboards.append_poll_descriptors(&descriptors);
     const int poll_result =
         poll(&descriptors[0], static_cast<nfds_t>(descriptors.size()), 250);
     if (poll_result < 0) {
@@ -4453,9 +4766,11 @@ int application_main(const Options &options) {
 
     unsigned int controller_pressed =
         menu_gamepads.read_ready(descriptors, first_gamepad_descriptor);
+    unsigned int keyboard_pressed =
+        menu_keyboards.read_ready(descriptors, first_keyboard_descriptor);
     const bool touch_ready =
         descriptors[0].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL);
-    if (!touch_ready && controller_pressed == 0)
+    if (!touch_ready && controller_pressed == 0 && keyboard_pressed == 0)
       continue;
 
     std::vector<TouchReport> reports;
@@ -4486,6 +4801,7 @@ int application_main(const Options &options) {
     }
     if (menu_sound_player.quarantines_input(input_time)) {
       controller_pressed = 0;
+      keyboard_pressed = 0;
       reports.clear();
       pressed_target = MenuTargetNone;
     }
@@ -4626,7 +4942,8 @@ int application_main(const Options &options) {
     };
 
     const MenuGamepadCommand controller_command =
-        menu_gamepad_command(controller_pressed, wifi_view, settings_view);
+        menu_gamepad_command(controller_pressed | keyboard_pressed, wifi_view,
+                             settings_view);
     if (controller_command != MenuGamepadCommandNone) {
       pressed_target = MenuTargetNone;
       reports.clear();
@@ -4830,6 +5147,7 @@ int application_main(const Options &options) {
     // queue and the menu cannot accumulate gameplay events while it waits.
     menu_sound_player.finish();
     menu_gamepads.close_for_child();
+    menu_keyboards.close_for_child();
     const ChildResult child =
         !terminal_mode.empty()
             ? run_terminal(options.terminal, keymap, terminal_mode, &touch,
@@ -4848,6 +5166,12 @@ int application_main(const Options &options) {
       std::cerr << "deck-menu: controller navigation unavailable: "
                 << gamepad_error << std::endl;
       last_gamepad_error = gamepad_error;
+    }
+    keyboard_error.clear();
+    if (!menu_keyboards.scan_if_due(true, &keyboard_error)) {
+      std::cerr << "deck-menu: keyboard navigation unavailable: "
+                << keyboard_error << std::endl;
+      last_keyboard_error = keyboard_error;
     }
 
     if (!framebuffer.open_device(&error)) {

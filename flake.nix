@@ -683,6 +683,29 @@
           };
         };
 
+        rlwrap-deck = staticCross.rlwrap.overrideAttrs (old: {
+          pname = "rlwrap-deck";
+          nativeBuildInputs = (old.nativeBuildInputs or []) ++
+            [ pkgs.nukeReferences ];
+          allowedReferences = [ ];
+
+          postInstall = (old.postInstall or "") + ''
+            rm -rf $out/share
+            mkdir -p $out/share/licenses/rlwrap-deck
+            install -m644 COPYING $out/share/licenses/rlwrap-deck/COPYING
+          '';
+
+          postFixup = (old.postFixup or "") + ''
+            rm -rf $out/nix-support
+            nuke-refs $out/bin/rlwrap
+          '';
+
+          meta = (old.meta or {}) // {
+            description = "Static rlwrap for the Deck Lisp REPL";
+            platforms = [ "armv7l-linux" ];
+          };
+        });
+
         fbterm-deck = staticCross.fbterm.overrideAttrs (old: {
           pname = "fbterm-deck";
           version = "1.7-deck";

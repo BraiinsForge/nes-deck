@@ -66,7 +66,8 @@ The Deck section contains:
 
 - 10 Seconds, a native touch and controller timing game
 - a `/bin/ash` framebuffer terminal with US ANSI and Czech QWERTZ layouts
-- Lua 5.5, ECL Common Lisp 26.5.5, MicroPython 1.25, and Chibi Scheme 0.11
+- Lua 5.5, rlwrap-backed ECL Common Lisp 26.5.5, MicroPython 1.25, and
+  Chibi Scheme 0.11
 - a native GME and Ogg Vorbis chiptune player
 - a guarded reboot action
 
@@ -97,12 +98,21 @@ sections. Tap a visible card, or select it with Left/Right and press A, to
 launch it. The small hollow rectangles show the selected position and total
 number of entries.
 
+A connected keyboard uses the arrow keys to move, Enter to activate, and
+Escape to go back. Tab changes to the next console and Shift-Tab changes to the
+previous console, matching the controller's R/L shoulders. The dashboard grabs
+keyboard input only while it is visible and releases it before starting a game
+or terminal.
+
 The gear or controller Select opens settings. Its controls adjust volume and
 backlight brightness, open the terminal, switch terminal keymaps, and add a
 Wi-Fi profile. Volume and brightness persist below `/mnt/data`; volume uses
 five-point steps and brightness is bounded from 10 through 100. Menu actions
 play short cues while sound is enabled. The service disables console blanking
 at boot and whenever a child program returns.
+
+The Common Lisp REPL runs through `rlwrap`; editable command history persists
+privately as `/mnt/data/langs/lisp/.ecl_history`.
 
 Hold the touchscreen for two seconds to leave a running emulator or terminal.
 Touch does not emulate game controls. In the chiptune player, the top-right

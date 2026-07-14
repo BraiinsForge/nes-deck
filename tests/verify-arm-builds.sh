@@ -71,6 +71,7 @@ verify_package chip8-deck bin/chip8-deck
 verify_package ten-seconds-deck bin/ten-seconds-deck
 verify_package deck-menu bin/deck-menu
 verify_package fbterm-deck bin/fbterm bin/loadkeys
+verify_package rlwrap-deck bin/rlwrap
 verify_package lua-deck bin/lua
 verify_package python-deck bin/python
 verify_package chibi-deck bin/chibi-scheme

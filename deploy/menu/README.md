@@ -36,7 +36,7 @@ The launcher also expects:
 - `/mnt/data/nes-deck/langs/chibi/chibi-scheme` (Chibi Scheme 0.11)
 - `/mnt/data/nes-deck/langs/chibi/lib/` (Chibi Scheme module library)
 - `/mnt/data/nes-deck/terminal/retro-terminal`
-- `/mnt/data/nes-deck/terminal/{fbterm,loadkeys,keymaps/}`
+- `/mnt/data/nes-deck/terminal/{fbterm,loadkeys,rlwrap,keymaps/}`
 - `/usr/sbin/deck-wifi-profile-add`
 - `/mnt/data/roms/{nes,gb,gbc,zx,chip8}/` and the ROM paths listed in
   `games.sexp`
@@ -82,6 +82,11 @@ index for launch routing. Descriptions and license labels stay out of the
 launcher; redistribution and license details remain in `FOSS_GAMES.md` and the
 installed license files.
 
+USB keyboards are discovered and hot-plugged through evdev. Arrows move the
+selection, Enter activates it, Escape goes back, Tab moves to the next console,
+and Shift-Tab moves to the previous console. The dashboard exclusively grabs
+each keyboard while visible, then releases it before a managed child starts.
+
 The top-right gear or controller Select opens settings. D-pad directions move
 among volume down/up, brightness down/up, terminal, keymap, and Wi-Fi; A
 activates the selected control and B or the cross closes the screen. Volume is
@@ -108,13 +113,13 @@ restores US when its child exits or the menu terminates it. The DECK carousel
 also routes exact `lua`, `lisp`, `python`, and `scheme` modes to Lua 5.5.0,
 ECL 26.5.5, MicroPython 1.25, and Chibi Scheme 0.11. They start in private
 persistent working directories below `/mnt/data/langs`; no catalog or user
-text is evaluated as a command.
+text is evaluated as a command. ECL runs through the static `rlwrap` payload,
+with private history at `/mnt/data/langs/lisp/.ecl_history`.
 
 The built-in CHIPTUNES entry runs the native player against
 `/mnt/data/chiptunes`. It supports the GME console-music formats plus 44.1 kHz
-mono or stereo Ogg Vorbis. Side arrows move between files, the center control
-pauses, the track controls select subsongs, the mode control cycles through
-loop all, loop one, and shuffle, and the top-right cross closes the player.
+mono or stereo Ogg Vorbis. Its bottom controls select playback mode, previous
+file, play/pause, and next file; the top-right cross closes the player.
 Controller Up/Down changes and persists volume, controller L/R selects
 subsongs, and Start changes playback mode. Files are read with a 16 MiB limit,
 directory recursion is

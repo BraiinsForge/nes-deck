@@ -2,7 +2,7 @@
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 LAUNCHER=$ROOT/deploy/terminal/retro-terminal
 FIXTURE=$(mktemp -d /tmp/retro-terminal-test.XXXXXX)
 trap 'rm -rf "$FIXTURE"' EXIT INT TERM HUP
@@ -79,6 +79,10 @@ cat > "$FIXTURE/lisp" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
+cat > "$FIXTURE/rlwrap" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
 cat > "$FIXTURE/python" <<'EOF'
 #!/bin/sh
 exit 0
@@ -89,7 +93,7 @@ exit 0
 EOF
 mkdir -p "$FIXTURE/chibi"
 : > "$FIXTURE/chibi/init-7.scm"
-chmod 0700 "$FIXTURE/lua" "$FIXTURE/lisp" "$FIXTURE/python" \
+chmod 0700 "$FIXTURE/lua" "$FIXTURE/lisp" "$FIXTURE/rlwrap" "$FIXTURE/python" \
   "$FIXTURE/scheme"
 
 RETRO_DECK_TERMINAL_BASE=$FIXTURE \
@@ -112,16 +116,19 @@ RETRO_DECK_KEYMAP=us \
 RETRO_DECK_LANG_BASE=$FIXTURE/langs \
 RETRO_DECK_LISP=$FIXTURE/lisp \
 RETRO_DECK_ECL_DIR=$FIXTURE/ecl/lib/ecl \
+RETRO_DECK_RLWRAP=$FIXTURE/rlwrap \
   "$LAUNCHER" lisp
 [ "$(cat "$FBTERM_ARGS_LOG")" = \
-    "-n DejaVu Sans Mono -s 16 -f 7 -b 0 -- $FIXTURE/lisp --norc" ] ||
-  fail 'Lisp mode launches only the configured ECL interpreter'
+    "-n DejaVu Sans Mono -s 16 -f 7 -b 0 -- $FIXTURE/rlwrap -H $FIXTURE/langs/lisp/.ecl_history $FIXTURE/lisp --norc" ] ||
+  fail 'Lisp mode wraps the configured ECL interpreter with persistent history'
 [ "$(cat "$FBTERM_CWD_LOG")" = "$FIXTURE/langs/lisp" ] ||
   fail 'Lisp mode uses its persistent working directory'
 [ "$(cat "$FBTERM_ECLDIR_LOG")" = "$FIXTURE/ecl/lib/ecl" ] ||
   fail 'Lisp mode exports the configured ECL runtime directory'
 [ "$(stat -c %a "$FIXTURE/langs/lisp")" = 700 ] ||
   fail 'Lisp working directory is private'
+[ "$(stat -c %a "$FIXTURE/langs/lisp/.ecl_history")" = 600 ] ||
+  fail 'Lisp history is private'
 
 RETRO_DECK_TERMINAL_BASE=$FIXTURE \
 RETRO_DECK_TERMINAL_TTY=$TEST_TTY \

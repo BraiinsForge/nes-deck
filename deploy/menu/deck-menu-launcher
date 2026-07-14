@@ -38,6 +38,7 @@ BRIGHTNESS_MAX=/sys/class/backlight/display-bl/max_brightness
 LEGACY_SOUND_STATE=$STATE_DIR/menu-sound.state
 KEYMAP_STATE=$STATE_DIR/terminal-keymap.state
 TERMINAL=$BASE/terminal/retro-terminal
+RLWRAP=$BASE/terminal/rlwrap
 LUA=$BASE/langs/lua
 PYTHON=$BASE/langs/python
 SCHEME=$BASE/langs/chibi/chibi-scheme
@@ -158,8 +159,8 @@ if [ ! -x "$SCHEME" ] || [ ! -r "$CHIBI_MODULE_PATH/init-7.scm" ]; then
 	log_message "Chibi Scheme runtime is unavailable under $BASE/langs/chibi"
 	exit 1
 fi
-if [ ! -x "$ECL" ] || [ ! -d "$ECLDIR" ]; then
-	log_message "Lisp runtime is unavailable under $BASE/ecl"
+if [ ! -x "$ECL" ] || [ ! -d "$ECLDIR" ] || [ ! -x "$RLWRAP" ]; then
+	log_message "Lisp runtime or rlwrap is unavailable under $BASE"
 	exit 1
 fi
 if [ ! -x "$WIFI_HELPER" ]; then

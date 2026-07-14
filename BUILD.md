@@ -47,6 +47,7 @@ nix build --no-link --print-out-paths .#chip8-deck
 nix build --no-link --print-out-paths .#ten-seconds-deck
 nix build --no-link --print-out-paths .#deck-menu
 nix build --no-link --print-out-paths .#fbterm-deck
+nix build --no-link --print-out-paths .#rlwrap-deck
 nix build --no-link --print-out-paths .#lua-deck
 nix build --no-link --print-out-paths .#python-deck
 nix build --no-link --print-out-paths .#chibi-deck
@@ -64,6 +65,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `ten-seconds-deck` | `bin/ten-seconds-deck` |
 | `deck-menu` | `bin/deck-menu` |
 | `fbterm-deck` | `bin/{fbterm,loadkeys}` plus font and keymaps |
+| `rlwrap-deck` | `bin/rlwrap` |
 | `lua-deck` | `bin/lua` |
 | `python-deck` | `bin/python` |
 | `chibi-deck` | `bin/chibi-scheme` plus Scheme modules |
@@ -100,10 +102,10 @@ clean:
 tests/run-host-tests.sh
 ```
 
-It covers the NES mixer, APU noise, SRAM codec, two-controller ordering,
+It covers the NES mixer, APU noise, SRAM codec, controller and keyboard input,
 dashboard geometry and behavior, ROM catalog, cover cache, Wi-Fi profile
-helper, terminal lifecycle, shared framebuffer/audio runtime, timer
-configuration, and CHIP-8 core.
+helper, rlwrap-backed terminal lifecycle, shared framebuffer/audio runtime,
+timer configuration, and CHIP-8 core.
 
 The suite also runs the uploader's Go tests for authentication, request
 boundaries, ROM validation, atomic storage, and the Paper UI contract.

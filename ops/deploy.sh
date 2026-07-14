@@ -42,6 +42,7 @@ chip8=$(build_flake .#chip8-deck)
 timer=$(build_flake .#ten-seconds-deck)
 menu=$(build_flake .#deck-menu)
 fbterm=$(build_flake .#fbterm-deck)
+rlwrap=$(build_flake .#rlwrap-deck)
 lua=$(build_flake .#lua-deck)
 python=$(build_flake .#python-deck)
 chibi=$(build_flake .#chibi-deck)
@@ -84,6 +85,7 @@ cp -a "$ecl/bin" "$ecl/lib" "$payload/nes-deck/ecl/"
 
 cp "$fbterm/bin/fbterm" "$fbterm/bin/loadkeys" \
   "$payload/nes-deck/terminal/"
+cp "$rlwrap/bin/rlwrap" "$payload/nes-deck/terminal/"
 cp "$fbterm/share/retro-deck/fonts/DejaVuSansMono.ttf" \
   "$payload/nes-deck/terminal/fonts/"
 cp -a "$fbterm/share/retro-deck/keymaps/." \
@@ -101,7 +103,7 @@ cp deploy/menu/nes-deck.init "$payload/etc/init.d/nes-deck"
 cp deploy/uploader/nes-deck-uploader.init \
   "$payload/etc/init.d/nes-deck-uploader"
 
-for result in "$nes" "$gb" "$zx" "$chip8" "$fbterm" "$lua" \
+for result in "$nes" "$gb" "$zx" "$chip8" "$fbterm" "$rlwrap" "$lua" \
               "$python" "$chibi" "$chiptune"; do
   if [[ -d $result/share/licenses ]]; then
     cp -a "$result/share/licenses/." "$payload/nes-deck/licenses/"
@@ -132,6 +134,7 @@ find "$payload/nes-deck" -type f \( \
   -name 'chiptune-deck' -o -name 'deck-menu' -o \
   -name 'deck-menu-launcher' -o -name 'fetch-covers' -o \
   -name 'retro-terminal' -o -name 'fbterm' -o -name 'loadkeys' -o \
+  -name 'rlwrap' -o \
   -name 'lua' -o -name 'python' -o -name 'chibi-scheme' -o \
   -name 'ecl.bin' \) -exec chmod 0700 {} +
 chmod 0700 "$payload/nes-deck/uploader/rom-uploader"
@@ -198,7 +201,7 @@ for executable in \
 done
 for executable in \
   menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
-  terminal/fbterm terminal/loadkeys terminal/retro-terminal \
+  terminal/fbterm terminal/loadkeys terminal/retro-terminal terminal/rlwrap \
   langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin \
   uploader/rom-uploader; do
   [ -x "$stage/nes-deck/$executable" ] || {
