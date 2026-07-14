@@ -69,8 +69,10 @@ start and result chiptunes follow the dashboard volume.
 The computer icon launches `/mnt/data/nes-deck/terminal/retro-terminal`. The
 adjacent keymap action toggles between US ANSI and Czech QWERTZ. The terminal
 launcher applies that map for fbterm and restores US when the shell exits or
-the menu terminates it. The WIFI button opens the on-screen keyboard and passes
-credentials to
+the menu terminates it. The Deck carousel adds a built-in red power-on entry
+for `/sbin/reboot`; two taps within four seconds are required, and any other
+touch cancels the armed action. The WIFI button opens the on-screen keyboard
+and passes credentials to
 `deck-wifi-profile-add` over stdin, never argv. The helper only writes a
 root-only profile; it does not scan, reload, roam, or alter the active network.
 Saving an existing SSID commits the canonical replacement first and then

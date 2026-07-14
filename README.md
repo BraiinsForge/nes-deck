@@ -163,6 +163,9 @@ The computer icon opens a real framebuffer shell with a 16-pixel safe area for
 the display's rounded corners. **KEYS US** and **KEYS CZ** select the terminal
 layout; the launcher applies it only for that terminal session and restores US
 ANSI afterward. Type `exit` or use the same two-second touch hold to return.
+The Deck carousel also includes a red power-on icon for rebooting the device.
+Its first tap arms the action for four seconds; tap it again during that window
+to reboot. Any other action or an expired window cancels the request.
 The **WIFI** action opens a touch keyboard for adding PSK
 networks. Saving a network never reloads or changes the live Wi-Fi connection.
 A profile with the same SSID atomically replaces all older records and becomes

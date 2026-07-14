@@ -346,6 +346,17 @@ int main() {
            "terminal child inherits selected keymap");
   }
   unsetenv("TERMINAL_CAPTURE");
+  {
+    Framebuffer framebuffer;
+    const ChildResult child = run_reboot("/bin/true", NULL, &framebuffer);
+    expect(child.started && child.error.empty(), "start reboot command child");
+    expect(WIFEXITED(child.status) && WEXITSTATUS(child.status) == 0,
+           "reboot command child exits cleanly");
+  }
+  expect(reboot_confirmation_active(5000, 4999) &&
+             !reboot_confirmation_active(5000, 5000) &&
+             !reboot_confirmation_active(0, 0),
+         "reboot confirmation is bounded by its deadline");
 
   Canvas canvas;
   MenuLayout menu_layout;
@@ -379,6 +390,13 @@ int main() {
              is_built_in_terminal(terminal_entry),
          "built-in terminal is a routed Deck entry");
   tab_games.push_back(terminal_entry);
+  const GameEntry reboot_entry = built_in_reboot_entry("/bin/true");
+  expect(reboot_entry.title == "REBOOT" && reboot_entry.system == "deck" &&
+             reboot_entry.rom == "/bin/true" &&
+             reboot_entry.color.red == 215 && reboot_entry.color.green == 95 &&
+             reboot_entry.color.blue == 95 && is_built_in_reboot(reboot_entry),
+         "built-in reboot is a red routed Deck entry");
+  tab_games.push_back(reboot_entry);
   render_menu(tab_games, "nes", 42, "us", false, 0, std::string(),
               &canvas, &menu_layout);
   expect(canvas.size() == static_cast<size_t>(kLogicalWidth * kLogicalHeight),
@@ -661,7 +679,7 @@ int main() {
 
   render_menu(tab_games, "deck", 42, "us", true, 0, std::string(), &canvas,
               &menu_layout);
-  expect(menu_layout.game_indices.size() == 2 &&
+  expect(menu_layout.game_indices.size() == 3 &&
              menu_layout.shown_game_index == 5 &&
              tab_games[menu_layout.shown_game_index].id == "ten-seconds",
          "Deck carousel exposes the Ten Seconds app entry");
@@ -681,7 +699,7 @@ int main() {
 
   render_menu(tab_games, "deck", 42, "us", true, 1, std::string(), &canvas,
               &menu_layout);
-  expect(menu_layout.game_indices.size() == 2 &&
+  expect(menu_layout.game_indices.size() == 3 &&
              menu_layout.shown_game_index == 6 &&
              is_built_in_terminal(tab_games[menu_layout.shown_game_index]),
          "Deck carousel exposes the built-in terminal entry");
@@ -695,6 +713,24 @@ int main() {
                       menu_layout.game_placeholder.y + 46, 268, 150},
                  xterm_pixel(kColorText)),
          "Terminal uses its own CRT prompt logo");
+
+  render_menu(tab_games, "deck", 42, "us", true, 2, std::string(), &canvas,
+              &menu_layout);
+  expect(menu_layout.game_indices.size() == 3 &&
+             menu_layout.shown_game_index == 7 &&
+             is_built_in_reboot(tab_games[menu_layout.shown_game_index]),
+         "Deck carousel exposes the built-in reboot entry");
+  expect(canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 38) *
+                        kLogicalWidth +
+                    menu_layout.game_placeholder.x +
+                        menu_layout.game_placeholder.width / 2 - 10] ==
+                 tab_games[7].color.pixel() &&
+             canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 150) *
+                        kLogicalWidth +
+                    menu_layout.game_placeholder.x +
+                        menu_layout.game_placeholder.width / 2] ==
+                 xterm_pixel(kColorBackground),
+         "Reboot uses the broken-ring power-on icon");
 
   WifiState wifi_state;
   WifiLayout wifi_layout;
