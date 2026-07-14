@@ -27,6 +27,10 @@ int main() {
   assert(DeckRgb888To565(0x0000ff) == 0x001f);
   assert(DeckRgb888To565(0xffffff) == 0xffff);
 
+  assert(DeckAudioOutputRate(48000, 48000) == 47328);
+  assert(DeckAudioOutputRate(32768, 32000) == 32000);
+  assert(DeckAudioOutputRate(44100, 44100) == 44100);
+
   unsigned int volume = 0;
   std::string error;
   unsetenv("RETRO_DECK_VOLUME_PERCENT");

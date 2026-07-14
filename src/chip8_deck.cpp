@@ -10,6 +10,7 @@
 #include <fstream>
 #include <string>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include <vector>
 
@@ -276,6 +277,12 @@ int main(int argc, char **argv) {
   std::printf("chip8-deck: %zu-byte ROM, %d instructions/frame, volume %u%%\n",
               rom.size(), configuration.core.tickrate, volume);
   DeckFrameClock clock(60.0);
+  const bool runtime_diagnostics =
+      std::getenv("RETRO_DECK_RUNTIME_DIAGNOSTICS") != NULL;
+  uint64_t frames = 0;
+  struct timespec diagnostics_started;
+  std::memset(&diagnostics_started, 0, sizeof(diagnostics_started));
+  clock_gettime(CLOCK_MONOTONIC, &diagnostics_started);
   while (!shutdown_requested && !Chip8CoreHalted(core)) {
     update_input(core, configuration.input);
     const bool sound = Chip8CoreRunFrame(core) != 0;
@@ -292,6 +299,21 @@ int main(int argc, char **argv) {
     if (audio.available())
       audio.write_square_frame(sound);
     clock.wait_for_next_frame();
+    ++frames;
+    if (runtime_diagnostics && frames % 60 == 0) {
+      struct timespec now;
+      std::memset(&now, 0, sizeof(now));
+      clock_gettime(CLOCK_MONOTONIC, &now);
+      const double elapsed =
+          static_cast<double>(now.tv_sec - diagnostics_started.tv_sec) +
+          static_cast<double>(now.tv_nsec - diagnostics_started.tv_nsec) /
+              1000000000.0;
+      std::printf("chip8-deck: diagnostics video=60 wall=%.3f queued=%zu "
+                  "dropped=%llu\n",
+                  elapsed, audio.queued_frames(),
+                  static_cast<unsigned long long>(audio.dropped_frames()));
+      diagnostics_started = now;
+    }
   }
 
   if (Chip8CoreHalted(core) && Chip8CoreHaltMessage(core)[0] != '\0')

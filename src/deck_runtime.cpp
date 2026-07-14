@@ -21,6 +21,8 @@ const int kLogicalHeight = 480;
 const int kPhysicalWidth = 600;
 const int kPhysicalHeight = 1280;
 const int kSafeInset = 16;
+const size_t kAudioQueueFrames = 16384;
+const size_t kAudioWriteChunkFrames = 2048;
 
 std::string system_error(const std::string &what) {
   return what + ": " + std::strerror(errno);
@@ -110,6 +112,18 @@ bool DeckReadVolumePercent(unsigned int *volume, std::string *error) {
   }
   *volume = parsed;
   return true;
+}
+
+unsigned int DeckAudioOutputRate(unsigned int source_rate,
+                                 unsigned int negotiated_rate) {
+  // The Deck's OSS bridge reports an exact 48 kHz stream, but live queue and
+  // frame-clock measurements show that it consumes about 47,328 mono
+  // application frames per second.  Sending all 48,000 blocks the emulator
+  // about 1.5 percent slow.  Resample to the measured application clock while
+  // leaving ALSA configured at its required nominal 48 kHz rate.
+  if (source_rate == 48000 && negotiated_rate == 48000)
+    return 47328;
+  return negotiated_rate;
 }
 
 DeckFramebuffer::DeckFramebuffer()
@@ -359,10 +373,19 @@ bool DeckFramebuffer::present_indexed(const uint8_t *pixels,
 }
 
 DeckAudio::DeckAudio()
-    : fd_(-1), source_rate_(0), device_rate_(0), volume_percent_(0),
-      rate_remainder_(0), square_phase_(0), trigger_pending_(false) {}
+    : fd_(-1), source_rate_(0), output_rate_(0), volume_percent_(0),
+      rate_remainder_(0), square_phase_(0), trigger_pending_(false), thread_(),
+      thread_started_(false), stopping_(false), worker_failed_(false),
+      queue_head_(0), queue_size_(0), dropped_frames_(0) {
+  pthread_mutex_init(&mutex_, NULL);
+  pthread_cond_init(&condition_, NULL);
+}
 
-DeckAudio::~DeckAudio() { close_device(); }
+DeckAudio::~DeckAudio() {
+  close_device();
+  pthread_cond_destroy(&condition_);
+  pthread_mutex_destroy(&mutex_);
+}
 
 bool DeckAudio::open_device(unsigned int source_rate,
                             unsigned int volume_percent,
@@ -411,7 +434,8 @@ bool DeckAudio::open_device(unsigned int source_rate,
   }
 
   source_rate_ = source_rate;
-  device_rate_ = static_cast<unsigned int>(rate);
+  output_rate_ = DeckAudioOutputRate(source_rate,
+                                     static_cast<unsigned int>(rate));
   volume_percent_ = volume_percent;
 
   // Hold playback while the complete ring is primed.  Starting an empty OSS
@@ -433,25 +457,150 @@ bool DeckAudio::open_device(unsigned int source_rate,
       return false;
     }
   }
+
+  queue_.assign(kAudioQueueFrames, 0);
+  queue_head_ = 0;
+  queue_size_ = 0;
+  dropped_frames_ = 0;
+  stopping_ = false;
+  worker_failed_ = false;
+  const int thread_error =
+      pthread_create(&thread_, NULL, audio_thread_entry, this);
+  if (thread_error != 0) {
+    if (error)
+      *error = "cannot start audio writer: " +
+               std::string(std::strerror(thread_error));
+    close_device();
+    return false;
+  }
+  thread_started_ = true;
   return true;
 }
 
 void DeckAudio::close_device() {
+  if (thread_started_) {
+    pthread_mutex_lock(&mutex_);
+    stopping_ = true;
+    pthread_cond_broadcast(&condition_);
+    pthread_mutex_unlock(&mutex_);
+    pthread_join(thread_, NULL);
+    thread_started_ = false;
+  }
   if (fd_ >= 0) {
     close(fd_);
     fd_ = -1;
   }
   source_rate_ = 0;
-  device_rate_ = 0;
+  output_rate_ = 0;
   volume_percent_ = 0;
   rate_remainder_ = 0;
   square_phase_ = 0;
   trigger_pending_ = false;
+  stopping_ = false;
+  worker_failed_ = false;
+  queue_head_ = 0;
+  queue_size_ = 0;
+  dropped_frames_ = 0;
   mono_buffer_.clear();
   resample_buffer_.clear();
+  queue_.clear();
 }
 
-bool DeckAudio::available() const { return fd_ >= 0; }
+bool DeckAudio::available() const {
+  pthread_mutex_lock(&mutex_);
+  const bool available = thread_started_ && !worker_failed_;
+  pthread_mutex_unlock(&mutex_);
+  return available;
+}
+
+size_t DeckAudio::queued_frames() const {
+  pthread_mutex_lock(&mutex_);
+  const size_t queued = queue_size_;
+  pthread_mutex_unlock(&mutex_);
+  return queued;
+}
+
+uint64_t DeckAudio::dropped_frames() const {
+  pthread_mutex_lock(&mutex_);
+  const uint64_t dropped = dropped_frames_;
+  pthread_mutex_unlock(&mutex_);
+  return dropped;
+}
+
+void *DeckAudio::audio_thread_entry(void *context) {
+  DeckAudio *audio = static_cast<DeckAudio *>(context);
+  if (audio)
+    audio->audio_thread_main();
+  return NULL;
+}
+
+void DeckAudio::audio_thread_main() {
+  std::vector<int16_t> output(kAudioWriteChunkFrames);
+  while (true) {
+    pthread_mutex_lock(&mutex_);
+    while (!stopping_ && queue_size_ == 0)
+      pthread_cond_wait(&condition_, &mutex_);
+    if (stopping_) {
+      pthread_mutex_unlock(&mutex_);
+      break;
+    }
+
+    const size_t count = std::min(queue_size_, output.size());
+    const size_t first = std::min(count, queue_.size() - queue_head_);
+    std::memcpy(&output[0], &queue_[queue_head_],
+                first * sizeof(output[0]));
+    if (count > first) {
+      std::memcpy(&output[first], &queue_[0],
+                  (count - first) * sizeof(output[0]));
+    }
+    queue_head_ = (queue_head_ + count) % queue_.size();
+    queue_size_ -= count;
+    pthread_mutex_unlock(&mutex_);
+
+    if (start_playback() && write_all(&output[0], count))
+      continue;
+    pthread_mutex_lock(&mutex_);
+    worker_failed_ = true;
+    queue_size_ = 0;
+    pthread_mutex_unlock(&mutex_);
+    break;
+  }
+}
+
+bool DeckAudio::enqueue(const int16_t *samples, size_t count) {
+  if (!samples || count == 0)
+    return false;
+  pthread_mutex_lock(&mutex_);
+  if (!thread_started_ || stopping_ || worker_failed_ || queue_.empty()) {
+    pthread_mutex_unlock(&mutex_);
+    return false;
+  }
+
+  if (count > queue_.size()) {
+    const size_t skipped = count - queue_.size();
+    samples += skipped;
+    count -= skipped;
+    dropped_frames_ += skipped;
+  }
+  if (count > queue_.size() - queue_size_) {
+    const size_t discarded = count - (queue_.size() - queue_size_);
+    queue_head_ = (queue_head_ + discarded) % queue_.size();
+    queue_size_ -= discarded;
+    dropped_frames_ += discarded;
+  }
+
+  const size_t tail = (queue_head_ + queue_size_) % queue_.size();
+  const size_t first = std::min(count, queue_.size() - tail);
+  std::memcpy(&queue_[tail], samples, first * sizeof(samples[0]));
+  if (count > first) {
+    std::memcpy(&queue_[0], samples + first,
+                (count - first) * sizeof(samples[0]));
+  }
+  queue_size_ += count;
+  pthread_cond_signal(&condition_);
+  pthread_mutex_unlock(&mutex_);
+  return true;
+}
 
 bool DeckAudio::start_playback() {
   if (!trigger_pending_)
@@ -488,7 +637,7 @@ bool DeckAudio::write_all(const int16_t *samples, size_t count) {
 }
 
 bool DeckAudio::write_stereo(const int16_t *samples, size_t frames) {
-  if (fd_ < 0 || !samples)
+  if (!available() || !samples)
     return false;
   mono_buffer_.resize(frames);
   for (size_t i = 0; i < frames; ++i) {
@@ -501,14 +650,12 @@ bool DeckAudio::write_stereo(const int16_t *samples, size_t frames) {
 }
 
 bool DeckAudio::write_mono(const int16_t *samples, size_t frames) {
-  if (fd_ < 0 || !samples || frames == 0)
+  if (!samples || frames == 0)
     return false;
-  if (!start_playback())
-    return false;
-  if (source_rate_ == device_rate_)
-    return write_all(samples, frames);
+  if (source_rate_ == output_rate_)
+    return enqueue(samples, frames);
 
-  const uint64_t scaled = static_cast<uint64_t>(frames) * device_rate_ +
+  const uint64_t scaled = static_cast<uint64_t>(frames) * output_rate_ +
                           rate_remainder_;
   const size_t output_frames = static_cast<size_t>(scaled / source_rate_);
   rate_remainder_ = scaled % source_rate_;
@@ -537,11 +684,11 @@ bool DeckAudio::write_mono(const int16_t *samples, size_t frames) {
       position += step;
     }
   }
-  return write_all(&resample_buffer_[0], output_frames);
+  return enqueue(&resample_buffer_[0], output_frames);
 }
 
 bool DeckAudio::write_square_frame(bool active) {
-  if (fd_ < 0 || source_rate_ == 0)
+  if (!available() || source_rate_ == 0)
     return false;
   const size_t frames = source_rate_ / 60;
   mono_buffer_.resize(frames);

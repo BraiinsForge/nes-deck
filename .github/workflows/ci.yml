@@ -61,7 +61,7 @@ jobs:
     - name: Test shared emulator runtime
       run: |
         g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-          tests/deck_runtime_test.cpp src/deck_runtime.cpp \
+          tests/deck_runtime_test.cpp src/deck_runtime.cpp -pthread \
           -o deck-runtime-test
         ./deck-runtime-test
 

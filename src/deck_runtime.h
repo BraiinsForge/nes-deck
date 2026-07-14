@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <pthread.h>
 
 #include <string>
 #include <vector>
@@ -27,6 +28,8 @@ bool DeckComputeScaledLayout(unsigned int source_width,
                              DeckScaledLayout *layout);
 uint16_t DeckRgb888To565(uint32_t color);
 bool DeckReadVolumePercent(unsigned int *volume, std::string *error);
+unsigned int DeckAudioOutputRate(unsigned int source_rate,
+                                 unsigned int negotiated_rate);
 
 class DeckFramebuffer {
 public:
@@ -73,23 +76,38 @@ public:
                    std::string *error);
   void close_device();
   bool available() const;
+  size_t queued_frames() const;
+  uint64_t dropped_frames() const;
   bool write_stereo(const int16_t *samples, size_t frames);
   bool write_mono(const int16_t *samples, size_t frames);
   bool write_square_frame(bool active);
 
 private:
+  static void *audio_thread_entry(void *context);
+  void audio_thread_main();
+  bool enqueue(const int16_t *samples, size_t count);
   bool start_playback();
   bool write_all(const int16_t *samples, size_t count);
 
   int fd_;
   unsigned int source_rate_;
-  unsigned int device_rate_;
+  unsigned int output_rate_;
   unsigned int volume_percent_;
   uint64_t rate_remainder_;
   uint32_t square_phase_;
   bool trigger_pending_;
+  pthread_t thread_;
+  mutable pthread_mutex_t mutex_;
+  pthread_cond_t condition_;
+  bool thread_started_;
+  bool stopping_;
+  bool worker_failed_;
+  size_t queue_head_;
+  size_t queue_size_;
+  uint64_t dropped_frames_;
   std::vector<int16_t> mono_buffer_;
   std::vector<int16_t> resample_buffer_;
+  std::vector<int16_t> queue_;
 };
 
 class DeckFrameClock {

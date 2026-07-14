@@ -520,12 +520,15 @@ int main(int argc, char **argv) {
           static_cast<double>(now.tv_nsec - diagnostics_started.tv_nsec) /
               1000000000.0;
       std::printf("%s: diagnostics video=60 wall=%.3f audio=%llu "
-                  "callbacks=%llu\n",
+                  "callbacks=%llu queued=%zu dropped=%llu\n",
                   kFrontendName, elapsed,
                   static_cast<unsigned long long>(audio_frames_received -
                                                   previous_audio_frames),
                   static_cast<unsigned long long>(audio_callbacks_received -
-                                                  previous_audio_callbacks));
+                                                  previous_audio_callbacks),
+                  audio ? audio->queued_frames() : 0,
+                  static_cast<unsigned long long>(
+                      audio ? audio->dropped_frames() : 0));
       diagnostics_started = now;
       previous_audio_frames = audio_frames_received;
       previous_audio_callbacks = audio_callbacks_received;
