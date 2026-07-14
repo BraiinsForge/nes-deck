@@ -102,9 +102,12 @@ text is evaluated as a command.
 
 The built-in CHIPTUNES entry runs the native player against
 `/mnt/data/chiptunes`. It supports the GME console-music formats plus 44.1 kHz
-mono or stereo Ogg Vorbis. Its top-left arrow is a direct back target, side
-arrows move between files, the center control pauses, and the track controls
-select subsongs. Files are read with a 16 MiB limit, directory recursion is
+mono or stereo Ogg Vorbis. Side arrows move between files, the center control
+pauses, the track controls select subsongs, the mode control cycles through
+loop all, loop one, and shuffle, and the top-right cross closes the player.
+Controller Up/Down changes and persists volume, controller L/R selects
+subsongs, and Start changes playback mode. Files are read with a 16 MiB limit,
+directory recursion is
 bounded, and symbolic links are not followed.
 
 The Deck carousel adds a built-in red power-on entry for `/sbin/reboot`; two

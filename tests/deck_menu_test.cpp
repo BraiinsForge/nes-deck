@@ -451,7 +451,9 @@ int main() {
   const std::string emulator = directory + "/capture-volume.sh";
   const std::string captured = rom + ".volume";
   const std::string helper =
-      "#!/bin/sh\nprintf '%s' \"$INFONES_VOLUME_PERCENT\" > \"$1.volume\"\n";
+      "#!/bin/sh\n"
+      "printf '%s' \"$INFONES_VOLUME_PERCENT\" > \"$1.volume\"\n"
+      "printf '%s' \"${RETRO_DECK_VOLUME_STATE:-}\" > \"$1.volume-state\"\n";
   expect(write_file(emulator, helper.data(), helper.size()),
          "write emulator fixture");
   expect(chmod(emulator.c_str(), 0700) == 0, "make emulator fixture executable");
@@ -463,6 +465,9 @@ int main() {
            "volume child exits cleanly");
     expect(read_file(captured) == "63", "child inherits selected volume");
     unlink(captured.c_str());
+    expect(read_file(rom + ".volume-state").empty(),
+           "ordinary child receives no writable volume path");
+    unlink((rom + ".volume-state").c_str());
 
     child = run_game(emulator, games[0], 0, NULL, &framebuffer);
     expect(child.started && child.error.empty(), "start muted child");
@@ -470,6 +475,16 @@ int main() {
            "muted child exits cleanly");
     expect(read_file(captured) == "0", "muted child receives zero volume");
     unlink(captured.c_str());
+    unlink((rom + ".volume-state").c_str());
+
+    child = run_game(emulator, games[0], 42, NULL, &framebuffer, volume_state);
+    expect(child.started && WIFEXITED(child.status) &&
+               WEXITSTATUS(child.status) == 0,
+           "start volume-aware child");
+    expect(read_file(rom + ".volume-state") == volume_state,
+           "volume-aware child receives the exact persistent state path");
+    unlink(captured.c_str());
+    unlink((rom + ".volume-state").c_str());
   }
 
   const std::string terminal = directory + "/capture-keymap.sh";

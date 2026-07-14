@@ -3705,7 +3705,8 @@ ChildResult run_managed_child(
 
 ChildResult run_game(const std::string &emulator, const GameEntry &game,
                      unsigned int volume,
-                     TouchDevice *touch, Framebuffer *framebuffer) {
+                     TouchDevice *touch, Framebuffer *framebuffer,
+                     const std::string &volume_state = std::string()) {
   ChildResult result;
   result.started = false;
   result.exited_for_touch = false;
@@ -3724,6 +3725,9 @@ ChildResult run_game(const std::string &emulator, const GameEntry &game,
       std::make_pair("INFONES_VOLUME_PERCENT", volume_text));
   environment.push_back(
       std::make_pair("RETRO_DECK_VOLUME_PERCENT", volume_text));
+  if (!volume_state.empty())
+    environment.push_back(
+        std::make_pair("RETRO_DECK_VOLUME_STATE", volume_state));
   std::cerr << "deck-menu: game volume " << volume_text << "%" << std::endl;
   TouchDevice *supervisor_touch = touch;
   if (game.system == "deck") {
@@ -4812,7 +4816,7 @@ int application_main(const Options &options) {
                    ? run_reboot(games[selected_game].rom, &touch, &framebuffer)
                    : run_game(emulator_for_game(options, games[selected_game]),
                               games[selected_game], volume, &touch,
-                              &framebuffer));
+                              &framebuffer, options.volume_state));
     pressed_target = MenuTargetNone;
     if (g_shutdown_requested)
       break;
@@ -4827,6 +4831,21 @@ int application_main(const Options &options) {
     if (!framebuffer.open_device(&error)) {
       std::cerr << "deck-menu: " << error << std::endl;
       return 1;
+    }
+    unsigned int child_volume = volume;
+    std::string child_volume_error;
+    if (load_volume_state(options.volume_state, default_volume, &child_volume,
+                          &child_volume_error)) {
+      if (child_volume != volume) {
+        volume = child_volume;
+        if (volume != 0)
+          last_audible_volume = volume;
+        std::cerr << "deck-menu: child updated game volume to " << volume
+                  << "%" << std::endl;
+      }
+    } else {
+      std::cerr << "deck-menu: cannot reload child volume: "
+                << child_volume_error << std::endl;
     }
     if (!child.error.empty()) {
       status = !terminal_mode.empty()

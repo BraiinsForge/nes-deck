@@ -9,6 +9,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
@@ -43,12 +44,13 @@ struct Rect {
   int height;
 };
 
-const Rect kBackButton = {6, 3, 64, 34};
+const Rect kCloseButton = {554, 3, 62, 34};
 const Rect kPreviousFileButton = {8, 66, 62, 82};
 const Rect kNextFileButton = {554, 66, 62, 82};
-const Rect kPreviousTrackButton = {148, 177, 94, 34};
-const Rect kPauseButton = {252, 177, 120, 34};
-const Rect kNextTrackButton = {382, 177, 94, 34};
+const Rect kPlaybackModeButton = {78, 177, 130, 34};
+const Rect kPreviousTrackButton = {218, 177, 90, 34};
+const Rect kPauseButton = {318, 177, 112, 34};
+const Rect kNextTrackButton = {440, 177, 90, 34};
 
 typedef std::vector<uint16_t> Canvas;
 
@@ -59,7 +61,10 @@ enum ControlCommand {
   ControlNextFile = 1 << 2,
   ControlTogglePause = 1 << 3,
   ControlPreviousTrack = 1 << 4,
-  ControlNextTrack = 1 << 5
+  ControlNextTrack = 1 << 5,
+  ControlVolumeDown = 1 << 6,
+  ControlVolumeUp = 1 << 7,
+  ControlCyclePlaybackMode = 1 << 8
 };
 
 void request_shutdown(int signal_number) {
@@ -318,6 +323,90 @@ bool read_chiptune(const std::string &path, std::vector<unsigned char> *bytes,
   return true;
 }
 
+bool save_player_volume(const std::string &path, unsigned int volume,
+                        std::string *error) {
+  if (path.empty())
+    return true;
+  if (path[0] != '/' || path.size() > static_cast<size_t>(PATH_MAX) ||
+      volume > 100) {
+    if (error)
+      *error = "volume state path or value is invalid";
+    return false;
+  }
+  const size_t slash = path.find_last_of('/');
+  if (slash == std::string::npos || slash + 1 >= path.size()) {
+    if (error)
+      *error = "volume state path has no filename";
+    return false;
+  }
+  const std::string directory = slash == 0 ? "/" : path.substr(0, slash);
+  const std::string filename = path.substr(slash + 1);
+  const int directory_fd =
+      open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+  if (directory_fd < 0) {
+    if (error)
+      *error = std::string("cannot open volume state directory: ") +
+               std::strerror(errno);
+    return false;
+  }
+
+  int state_fd = -1;
+  std::string temporary;
+  for (unsigned int attempt = 0; attempt < 8 && state_fd < 0; ++attempt) {
+    char suffix[64];
+    std::snprintf(suffix, sizeof(suffix), ".chiptune.%ld.%u",
+                  static_cast<long>(getpid()), attempt);
+    temporary = filename + suffix;
+    if (temporary.size() > static_cast<size_t>(NAME_MAX))
+      break;
+    state_fd = openat(directory_fd, temporary.c_str(),
+                      O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+                      0600);
+    if (state_fd < 0 && errno != EEXIST)
+      break;
+  }
+  if (state_fd < 0) {
+    if (error)
+      *error = std::string("cannot create volume state: ") +
+               std::strerror(errno);
+    close(directory_fd);
+    return false;
+  }
+
+  const std::string value = std::to_string(volume) + "\n";
+  size_t written = 0;
+  while (written < value.size()) {
+    const ssize_t amount =
+        write(state_fd, value.data() + written, value.size() - written);
+    if (amount > 0) {
+      written += static_cast<size_t>(amount);
+    } else if (amount < 0 && errno == EINTR) {
+      continue;
+    } else {
+      break;
+    }
+  }
+  bool valid = written == value.size() && fsync(state_fd) == 0;
+  if (close(state_fd) != 0)
+    valid = false;
+  if (valid &&
+      renameat(directory_fd, temporary.c_str(), directory_fd,
+               filename.c_str()) == 0) {
+    valid = fsync(directory_fd) == 0;
+  } else {
+    valid = false;
+  }
+  if (!valid) {
+    const int saved_errno = errno;
+    unlinkat(directory_fd, temporary.c_str(), 0);
+    if (error)
+      *error = std::string("cannot save volume state: ") +
+               std::strerror(saved_errno);
+  }
+  close(directory_fd);
+  return valid;
+}
+
 unsigned int axis_buttons(int value, const struct input_absinfo &info,
                           unsigned int negative, unsigned int positive) {
   if (info.maximum <= info.minimum)
@@ -342,6 +431,8 @@ unsigned int gamepad_key(unsigned short code) {
     return ControlPreviousTrack;
   case BTN_PINKIE:
     return ControlNextTrack;
+  case BTN_BASE2:
+    return ControlCyclePlaybackMode;
   default:
     return 0;
   }
@@ -373,8 +464,8 @@ unsigned int gamepad_state(const GamepadDevice &device) {
   }
   state |= axis_buttons(device.x_value, device.x_info, ControlPreviousFile,
                         ControlNextFile);
-  state |= axis_buttons(device.y_value, device.y_info, ControlPreviousTrack,
-                        ControlNextTrack);
+  state |= axis_buttons(device.y_value, device.y_info, ControlVolumeUp,
+                        ControlVolumeDown);
   return state;
 }
 
@@ -517,7 +608,7 @@ private:
   static unsigned int touch_command(int logical_x, int logical_y) {
     const int x = (logical_x - kCanvasOffset) / kCanvasScale;
     const int y = (logical_y - kCanvasOffset) / kCanvasScale;
-    if (contains(kBackButton, x, y))
+    if (contains(kCloseButton, x, y))
       return ControlBack;
     if (contains(kPreviousFileButton, x, y))
       return ControlPreviousFile;
@@ -525,6 +616,8 @@ private:
       return ControlTogglePause;
     if (contains(kNextFileButton, x, y))
       return ControlNextFile;
+    if (contains(kPlaybackModeButton, x, y))
+      return ControlCyclePlaybackMode;
     if (contains(kPreviousTrackButton, x, y))
       return ControlPreviousTrack;
     if (contains(kNextTrackButton, x, y))
@@ -656,13 +749,17 @@ long vorbis_memory_tell(void *datasource) {
 }
 
 enum PlayerBackend { BackendNone, BackendGme, BackendVorbis };
+enum PlaybackMode { PlaybackLoopAll, PlaybackLoopOne, PlaybackShuffle };
 
 class ChiptunePlayer {
 public:
   explicit ChiptunePlayer(const std::vector<std::string> &files)
       : files_(files), file_index_(0), backend_(BackendNone), emulator_(NULL),
         info_(NULL), vorbis_open_(false), vorbis_channels_(0), track_index_(0),
-        track_count_(0), paused_(false), length_ms_(-1) {
+        track_count_(0), paused_(false), length_ms_(-1),
+        playback_mode_(PlaybackLoopAll),
+        random_state_(0x9e3779b9U ^ static_cast<uint32_t>(getpid()) ^
+                      static_cast<uint32_t>(files.size())) {
     std::memset(&vorbis_, 0, sizeof(vorbis_));
   }
   ~ChiptunePlayer() { close_track(); }
@@ -682,9 +779,15 @@ public:
     if (files_.empty())
       return false;
     const size_t count = files_.size();
-    file_index_ = direction < 0 ? (file_index_ + count - 1) % count
-                                : (file_index_ + 1) % count;
-    return open_file(file_index_, 0, error);
+    const size_t current = file_index_;
+    for (size_t attempt = 1; attempt <= count; ++attempt) {
+      const size_t candidate =
+          direction < 0 ? (current + count - attempt % count) % count
+                        : (current + attempt) % count;
+      if (open_file(candidate, 0, error))
+        return true;
+    }
+    return false;
   }
 
   bool change_track(int direction, std::string *error) {
@@ -712,15 +815,27 @@ public:
     visual_ = samples_;
     if (audio && audio->available())
       audio->write_stereo(&samples_[0], kFramesPerTick);
-    if (gme_track_ended(emulator_)) {
-      if (track_index_ + 1 < track_count_)
-        return start_track(track_index_ + 1, error);
-      return change_file(1, error);
-    }
+    if (gme_track_ended(emulator_))
+      return advance_after_end(error);
     return true;
   }
 
   void toggle_pause() { paused_ = !paused_; }
+  void cycle_playback_mode() {
+    if (playback_mode_ == PlaybackLoopAll)
+      playback_mode_ = PlaybackLoopOne;
+    else if (playback_mode_ == PlaybackLoopOne)
+      playback_mode_ = PlaybackShuffle;
+    else
+      playback_mode_ = PlaybackLoopAll;
+  }
+  const char *playback_mode_label() const {
+    if (playback_mode_ == PlaybackLoopOne)
+      return "LOOP ONE";
+    if (playback_mode_ == PlaybackShuffle)
+      return "SHUFFLE";
+    return "LOOP ALL";
+  }
   bool ready() const { return backend_ != BackendNone; }
   bool paused() const { return paused_; }
   int position_ms() const {
@@ -868,6 +983,12 @@ private:
           *error = "Ogg Vorbis stream is damaged";
         return false;
       }
+      if (playback_mode_ != PlaybackLoopOne) {
+        visual_ = samples_;
+        if (audio && audio->available())
+          audio->write_stereo(&samples_[0], kFramesPerTick);
+        return advance_after_end(error);
+      }
       if (rewound || ov_time_seek(&vorbis_, 0.0) != 0) {
         if (error)
           *error = "Ogg Vorbis stream contains no audio";
@@ -879,6 +1000,56 @@ private:
     if (audio && audio->available())
       audio->write_stereo(&samples_[0], kFramesPerTick);
     return true;
+  }
+
+  uint32_t next_random() {
+    if (random_state_ == 0)
+      random_state_ = 0x6d2b79f5U;
+    random_state_ ^= random_state_ << 13;
+    random_state_ ^= random_state_ >> 17;
+    random_state_ ^= random_state_ << 5;
+    return random_state_;
+  }
+
+  bool change_random_file(std::string *error) {
+    if (files_.empty())
+      return false;
+    const size_t count = files_.size();
+    const size_t current = file_index_;
+    const size_t offset = count > 1 ? 1 + next_random() % (count - 1) : 0;
+    for (size_t attempt = 0; attempt < count; ++attempt) {
+      const size_t candidate = (current + offset + attempt) % count;
+      if (count > 1 && candidate == current)
+        continue;
+      if (open_file(candidate, 0, error)) {
+        if (backend_ == BackendGme && track_count_ > 1)
+          return start_track(static_cast<int>(next_random() % track_count_),
+                             error);
+        return true;
+      }
+    }
+    if (!open_file(current, 0, error))
+      return false;
+    if (backend_ == BackendGme && track_count_ > 1)
+      return start_track(static_cast<int>(next_random() % track_count_), error);
+    return true;
+  }
+
+  bool advance_after_end(std::string *error) {
+    if (playback_mode_ == PlaybackLoopOne) {
+      if (backend_ == BackendGme)
+        return start_track(track_index_, error);
+      if (backend_ == BackendVorbis && ov_time_seek(&vorbis_, 0.0) == 0)
+        return true;
+      if (error)
+        *error = "cannot restart track";
+      return false;
+    }
+    if (playback_mode_ == PlaybackShuffle)
+      return change_random_file(error);
+    if (backend_ == BackendGme && track_index_ + 1 < track_count_)
+      return start_track(track_index_ + 1, error);
+    return change_file(1, error);
   }
 
   bool start_track(int track, std::string *error) {
@@ -943,6 +1114,8 @@ private:
   int track_count_;
   bool paused_;
   int length_ms_;
+  PlaybackMode playback_mode_;
+  uint32_t random_state_;
   std::vector<int16_t> samples_;
   std::vector<int16_t> mono_samples_;
   std::vector<int16_t> visual_;
@@ -1016,6 +1189,17 @@ void draw_outline_arrow(Canvas *canvas, const Rect &bounds, bool points_left,
   block(12, 1, 2, 2);
 }
 
+void draw_close_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
+  const int center_x = bounds.x + bounds.width / 2;
+  const int center_y = bounds.y + bounds.height / 2;
+  for (int offset = -8; offset <= 8; offset += 2) {
+    fill_rect(canvas,
+              Rect{center_x + offset, center_y + offset, 2, 2}, color);
+    fill_rect(canvas,
+              Rect{center_x + offset, center_y - offset, 2, 2}, color);
+  }
+}
+
 void draw_control_button(Canvas *canvas, const Rect &rect,
                          const std::string &label, bool selected,
                          uint16_t background, uint16_t active,
@@ -1062,17 +1246,15 @@ void render_player(Canvas *canvas, const ChiptunePlayer &player,
   const uint16_t indicator = DeckRgb888To565(0x6c6c6c);
   canvas->assign(static_cast<size_t>(kCanvasWidth * kCanvasHeight), background);
 
-  draw_outline_arrow(canvas, kBackButton, true, orange);
   draw_pixel_panel(canvas, Rect{236, 4, 152, 29}, active, orange);
   draw_centered_text(canvas, 12, "CHIPTUNES", 1, text);
+  draw_close_icon(canvas, kCloseButton, text);
   char volume[24];
   if (volume_percent)
     std::snprintf(volume, sizeof(volume), "VOL %u", volume_percent);
   else
     std::snprintf(volume, sizeof(volume), "VOL OFF");
-  const int volume_width = static_cast<int>(std::strlen(volume) * 6 - 1);
-  draw_text(canvas, 616 - volume_width, 14, volume, 1,
-            volume_percent ? green : red);
+  draw_text(canvas, 8, 14, volume, 1, volume_percent ? green : red);
 
   if (!player.ready()) {
     draw_pixel_panel(canvas, Rect{78, 42, 468, 120}, active, orange);
@@ -1126,6 +1308,9 @@ void render_player(Canvas *canvas, const ChiptunePlayer &player,
 
   draw_outline_arrow(canvas, kPreviousFileButton, true, orange);
   draw_outline_arrow(canvas, kNextFileButton, false, orange);
+  draw_control_button(canvas, kPlaybackModeButton,
+                      player.playback_mode_label(), true, background, active,
+                      orange, text);
   draw_control_button(canvas, kPreviousTrackButton, "TRK -", false,
                       background, active, orange, text);
   draw_control_button(canvas, kPauseButton,
@@ -1279,6 +1464,10 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "chiptune-deck: %s; audio muted\n", error.c_str());
     volume_percent = 0;
   }
+  const char *volume_state_environment =
+      std::getenv("RETRO_DECK_VOLUME_STATE");
+  const std::string volume_state =
+      volume_state_environment ? volume_state_environment : std::string();
   DeckAudio audio;
   if (!audio.open_device(kSampleRate, volume_percent, &error)) {
     std::fprintf(stderr, "chiptune-deck: %s; continuing muted\n",
@@ -1311,6 +1500,31 @@ int main(int argc, char **argv) {
     if (commands & ControlTogglePause) {
       player.toggle_pause();
       dirty = true;
+    }
+    if (commands & ControlCyclePlaybackMode) {
+      player.cycle_playback_mode();
+      dirty = true;
+    }
+    if (commands & (ControlVolumeDown | ControlVolumeUp)) {
+      const unsigned int requested =
+          commands & ControlVolumeUp
+              ? std::min(100u, volume_percent + 5u)
+              : (volume_percent >= 5 ? volume_percent - 5 : 0);
+      if (requested != volume_percent) {
+        std::string volume_error;
+        if (audio.open_device(kSampleRate, requested, &volume_error)) {
+          volume_percent = requested;
+          dirty = true;
+          if (!save_player_volume(volume_state, volume_percent,
+                                  &volume_error)) {
+            std::fprintf(stderr, "chiptune-deck: %s\n",
+                         volume_error.c_str());
+          }
+        } else {
+          std::fprintf(stderr, "chiptune-deck: cannot change volume: %s\n",
+                       volume_error.c_str());
+        }
+      }
     }
 
     if (!player.generate(&audio, &error)) {

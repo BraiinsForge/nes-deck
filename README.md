@@ -88,10 +88,12 @@ play short cues while sound is enabled. The service disables console blanking
 at boot and whenever a child program returns.
 
 Hold the touchscreen for two seconds to leave a running emulator or terminal.
-Touch does not emulate game controls. In the chiptune player, the top-left
-arrow returns immediately, the side arrows change files, the center button
-pauses, and `TRK -`/`TRK +` change subsongs. Controller Left/Right changes
-files, Up/Down changes subsongs, A pauses, and B returns.
+Touch does not emulate game controls. In the chiptune player, the top-right
+cross returns immediately, the side arrows change files, the center button
+pauses, `TRK -`/`TRK +` change subsongs, and the playback mode cycles through
+loop all, loop one, and shuffle. Controller Left/Right changes files, Up/Down
+changes the persistent volume in five-point steps, L/R changes subsongs, A
+pauses, Start changes playback mode, and B returns.
 
 The Wi-Fi editor only writes a root-only profile. Saving does not scan, roam,
 reload networking, or disturb the current connection. The profile becomes
