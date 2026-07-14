@@ -138,9 +138,10 @@ Use the orange console selector to choose **NES**, **GAME BOY**,
 **GAME BOY COLOR**, **CHIP-8**, or **DECK**. Tap its Up/Down arrows, or use
 either controller's D-pad, to switch consoles. Tap the console or press A to
 open its game carousel. Left/Right selects a game, A launches it, and B returns
-to the console selector. The touchscreen arrows and game art remain fully
-usable without a controller. The **- / VOL / +** control changes the next
-game's PCM volume in
+to the console selector. Successful controller navigation plays a brief
+chiptune while volume is audible. The touchscreen arrows and game art remain
+fully usable without a controller. The **- / VOL / +** control and controller
+L/R buttons change the next game's PCM volume in
 5-point steps from 0 through 100. Tap the green volume display to mute it; the
 display turns red and reads **VOL OFF**. Tap that display or **+** to restore
 the last audible level, or the configured default if the launcher started
