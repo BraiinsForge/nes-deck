@@ -52,11 +52,12 @@
           version = "0.1.0-20260714-deck";
 
           src = fceumm-src;
-          nativeBuildInputs = [ pkgs.gnumake ];
+          nativeBuildInputs = [ pkgs.gnumake pkgs.nukeReferences ];
           buildInputs = [
             pkgsCross.glibc.static
             staticCross.zlib
           ];
+          allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3";
           NIX_LDFLAGS = "-static";
@@ -98,6 +99,7 @@
             mkdir -p $out/bin $out/share/licenses/nes-deck
             install -m755 nes-deck $out/bin/nes-deck
             install -m644 Copying $out/share/licenses/nes-deck/FCEUmm-COPYING
+            nuke-refs $out/bin/nes-deck
             runHook postInstall
           '';
 
@@ -121,8 +123,9 @@
             ./patches/infones-apu-noise.patch
           ];
 
-          nativeBuildInputs = [ pkgs.gnumake ];
+          nativeBuildInputs = [ pkgs.gnumake pkgs.nukeReferences ];
           buildInputs = [ pkgsCross.glibc.static ];
+          allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3 -fsigned-char -fomit-frame-pointer -marm -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard";
           NIX_LDFLAGS = "-static";
@@ -205,6 +208,7 @@
             runHook preInstall
             mkdir -p $out/bin
             cp InfoNES $out/bin/infones
+            nuke-refs $out/bin/infones
             runHook postInstall
           '';
 
@@ -220,11 +224,13 @@
           version = "1.0.0";
 
           dontUnpack = true;
+          nativeBuildInputs = [ pkgs.nukeReferences ];
           buildInputs = [
             pkgsCross.glibc.static
             staticCross.libpng
             staticCross.zlib
           ];
+          allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -Os";
           NIX_LDFLAGS = "-static";
@@ -240,6 +246,7 @@
             runHook preInstall
             mkdir -p $out/bin
             install -m755 deck-menu $out/bin/deck-menu
+            nuke-refs $out/bin/deck-menu
             runHook postInstall
           '';
 
@@ -309,7 +316,9 @@
           version = "1.0.0";
 
           dontUnpack = true;
+          nativeBuildInputs = [ pkgs.nukeReferences ];
           buildInputs = [ pkgsCross.glibc.static ];
+          allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3";
           NIX_LDFLAGS = "-static";
@@ -328,6 +337,7 @@
             runHook preInstall
             mkdir -p $out/bin
             install -m755 ten-seconds-deck $out/bin/ten-seconds-deck
+            nuke-refs $out/bin/ten-seconds-deck
             runHook postInstall
           '';
 
@@ -342,8 +352,9 @@
           version = "0.5.0-20260703-deck";
 
           src = gambatte-src;
-          nativeBuildInputs = [ pkgs.gnumake ];
+          nativeBuildInputs = [ pkgs.gnumake pkgs.nukeReferences ];
           buildInputs = [ pkgsCross.glibc.static ];
+          allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3";
           NIX_LDFLAGS = "-static";
@@ -398,6 +409,7 @@
             mkdir -p $out/bin $out/share/licenses/gb-deck
             install -m755 gb-deck $out/bin/gb-deck
             install -m644 COPYING $out/share/licenses/gb-deck/Gambatte-COPYING
+            nuke-refs $out/bin/gb-deck
             runHook postInstall
           '';
 
@@ -414,8 +426,9 @@
           version = "1.6.0-20260420-deck";
 
           src = fuse-src;
-          nativeBuildInputs = [ pkgs.gnumake ];
+          nativeBuildInputs = [ pkgs.gnumake pkgs.nukeReferences ];
           buildInputs = [ pkgsCross.glibc.static ];
+          allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3";
           NIX_LDFLAGS = "-static";
@@ -440,15 +453,18 @@
               CC=$CC \
               CXX=$CXX \
               AR=$CC-ar
+            cp ${./src/libretro_deck.cpp} deck_libretro_deck.cpp
+            cp ${./src/deck_runtime.cpp} deck_runtime.cpp
+            cp ${./src/joypad_input.cpp} deck_joypad_input.cpp
             $CXX -std=c++11 -O3 -fomit-frame-pointer \
               -marm -march=armv7-a -mtune=cortex-a7 \
               -mfpu=neon-vfpv4 -mfloat-abi=hard \
               -Wall -Wextra -Wpedantic -Werror \
               -DRETRO_DECK_ZX=1 \
               -Isrc -I${./src} \
-              ${./src/libretro_deck.cpp} \
-              ${./src/deck_runtime.cpp} \
-              ${./src/joypad_input.cpp} \
+              deck_libretro_deck.cpp \
+              deck_runtime.cpp \
+              deck_joypad_input.cpp \
               fuse_libretro.a \
               -static -pthread -lm -o zx-deck
             runHook postBuild
@@ -463,6 +479,7 @@
               $out/share/licenses/zx-deck/libspectrum-COPYING
             install -m644 bzip2/LICENSE \
               $out/share/licenses/zx-deck/bzip2-LICENSE
+            nuke-refs $out/bin/zx-deck
             runHook postInstall
           '';
 
@@ -479,21 +496,27 @@
           version = "1.2-deck";
 
           dontUnpack = true;
+          nativeBuildInputs = [ pkgs.nukeReferences ];
           buildInputs = [ pkgsCross.glibc.static ];
+          allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3";
           NIX_LDFLAGS = "-static";
 
           buildPhase = ''
             runHook preBuild
+            cp ${./src/chip8_core.c} deck_chip8_core.c
+            cp ${./src/chip8_deck.cpp} deck_chip8_deck.cpp
+            cp ${./src/deck_runtime.cpp} deck_runtime.cpp
+            cp ${./src/joypad_input.cpp} deck_joypad_input.cpp
             $CC -std=c99 -O3 -Wall -Wextra -Werror \
               -I${c-octo-src}/src -I${./src} \
-              -c ${./src/chip8_core.c} -o chip8_core.o
+              -c deck_chip8_core.c -o chip8_core.o
             $CXX -std=c++11 -O3 -Wall -Wextra -Wpedantic -Werror \
               -I${./src} \
-              ${./src/chip8_deck.cpp} \
-              ${./src/deck_runtime.cpp} \
-              ${./src/joypad_input.cpp} \
+              deck_chip8_deck.cpp \
+              deck_runtime.cpp \
+              deck_joypad_input.cpp \
               chip8_core.o -static -pthread -lm -o chip8-deck
             runHook postBuild
           '';
@@ -504,6 +527,7 @@
             install -m755 chip8-deck $out/bin/chip8-deck
             install -m644 ${c-octo-src}/LICENSE.txt \
               $out/share/licenses/chip8-deck/c-octo-LICENSE
+            nuke-refs $out/bin/chip8-deck
             runHook postInstall
           '';
 
@@ -668,9 +692,12 @@
           # pinned nixpkgs leaves dangling shared-library symlinks.  Keep the
           # terminal fully static by disabling that optional integration.
           configureFlags = (old.configureFlags or []) ++ [ "--disable-gpm" ];
+          nativeBuildInputs = (old.nativeBuildInputs or []) ++
+            [ pkgs.nukeReferences ];
           propagatedBuildInputs = builtins.filter
             (dependency: dependency != staticCross.gpm)
             (old.propagatedBuildInputs or []);
+          allowedReferences = [ ];
 
           postInstall = (old.postInstall or "") + ''
             mkdir -p $out/share/retro-deck/fonts \
@@ -702,6 +729,11 @@
             tar --extract --xz --to-stdout --file=${pkgs.kbd.src} \
               --wildcards 'kbd-*/COPYING' \
               > $out/share/licenses/fbterm-deck/kbd-COPYING
+          '';
+
+          postFixup = (old.postFixup or "") + ''
+            rm -rf $out/etc $out/nix-support/propagated-build-inputs
+            nuke-refs $out/bin/fbterm $out/bin/loadkeys
           '';
 
           meta = (old.meta or {}) // {

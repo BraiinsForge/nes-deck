@@ -79,6 +79,16 @@ test -z "$(nix-store -q --references "$out")"
 
 The expected executable is a statically linked 32-bit ARM EABI5 binary.
 
+Build and inspect the complete deployable matrix with:
+
+```sh
+tests/verify-arm-builds.sh
+```
+
+This rejects a missing executable, a non-ARM or dynamically linked binary, a
+Nix store reference, an incomplete ECL or fbterm runtime, and a changed CC0
+music payload.
+
 ## Run the host test suite
 
 The test runner compiles into a temporary directory and leaves the worktree
@@ -97,7 +107,7 @@ Run shell checks on deployment code with:
 
 ```sh
 nix shell nixpkgs#shellcheck -c shellcheck \
-  ops/deploy.sh tests/run-host-tests.sh
+  ops/deploy.sh tests/run-host-tests.sh tests/verify-arm-builds.sh
 ```
 
 ## Validate language and music runtimes on a Deck

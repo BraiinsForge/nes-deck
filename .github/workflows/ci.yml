@@ -2,143 +2,63 @@ name: CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
-  release:
-    types: [ published ]
+    branches: [master]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-    - uses: cachix/install-nix-action@v31
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
+      - name: Install Nix
+        uses: cachix/install-nix-action@ab739621df7a23f52766f9ccc97f38da6b7af14f # v31.10.5
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
-    - name: Test audio mixer
-      run: |
-        g++ -std=c++11 -Wall -Wextra -Werror -Isrc \
-          tests/nes_audio_test.cpp -o nes_audio_test
-        ./nes_audio_test
-        g++ -std=c++11 -Wall -Wextra -Werror -Isrc \
-          tests/nes_apu_noise_test.cpp -o nes_apu_noise_test
-        ./nes_apu_noise_test
-        g++ -std=c++11 -Wall -Wextra -Werror -Isrc \
-          tests/nes_sram_test.cpp -o nes_sram_test
-        ./nes_sram_test
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libpng-dev pkg-config
 
-    - name: Test two-player input
-      run: |
-        g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-          tests/joypad_input_test.cpp -pthread -o joypad-input-test
-        ./joypad-input-test
+      - name: Check shell scripts
+        run: |
+          nix shell nixpkgs#shellcheck -c shellcheck \
+            ops/deploy.sh \
+            tests/run-host-tests.sh \
+            tests/verify-arm-builds.sh
 
-    - name: Test touchscreen menu
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libpng-dev
-        g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-          src/deck_menu.cpp $(pkg-config --cflags --libs libpng) \
-          -o deck-menu-host
-        ./deck-menu-host --geometry-test
-        g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-          tests/deck_menu_test.cpp $(pkg-config --cflags --libs libpng) \
-          -o deck-menu-test
-        ./deck-menu-test
-        tests/rom_library_test.sh
-        tests/fetch_covers_test.sh
-        tests/deck_wifi_profile_add_test.sh
-        tests/retro_terminal_test.sh
+      - name: Run host regression suite
+        run: tests/run-host-tests.sh
 
-    - name: Test shared emulator runtime
-      run: |
-        g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-          tests/deck_runtime_test.cpp src/deck_runtime.cpp -pthread \
-          -o deck-runtime-test
-        ./deck-runtime-test
+  arm-payloads:
+    name: Static ARM payloads
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
 
-    - name: Test CHIP-8 core
-      run: |
-        octo_src=$(nix eval --raw --impure --expr \
-          '(builtins.getFlake ("path:" + toString ./.)).inputs."c-octo-src".outPath')
-        cc -std=c99 -O2 -Wall -Wextra -Werror -I"$octo_src/src" \
-          tests/chip8_core_test.c src/chip8_core.c -o chip8-core-test
-        ./chip8-core-test
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-    - name: Build infones-deck
-      run: nix build -L
+      - name: Install Nix
+        uses: cachix/install-nix-action@ab739621df7a23f52766f9ccc97f38da6b7af14f # v31.10.5
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
-    - name: Build deck-menu
-      run: nix build -L .#deck-menu -o result-menu
-
-    - name: Build GB and GBC emulator
-      run: nix build -L .#gb-deck -o result-gb-deck
-
-    - name: Build ZX Spectrum emulator
-      run: nix build -L .#zx-deck -o result-zx-deck
-
-    - name: Build CHIP-8 emulator
-      run: nix build -L .#chip8-deck -o result-chip8-deck
-
-    - name: Build ten-second game
-      run: nix build -L .#ten-seconds-deck -o result-ten-seconds
-
-    - name: Build fbterm-deck
-      run: nix build -L .#fbterm-deck -o result-fbterm
-
-    - name: Build Lua runtime
-      run: nix build -L .#lua-deck -o result-lua
-
-    - name: Test binary
-      run: |
-        file ./result/bin/infones
-        file ./result-menu/bin/deck-menu
-        file ./result-gb-deck/bin/gb-deck
-        file ./result-zx-deck/bin/zx-deck
-        file ./result-chip8-deck/bin/chip8-deck
-        file ./result-ten-seconds/bin/ten-seconds-deck
-        file ./result-fbterm/bin/fbterm
-        file ./result-fbterm/bin/loadkeys
-        file ./result-lua/bin/lua
-        test -z "$(nix-store -q --references "$(readlink -f result-lua)")"
-        test -s ./result-fbterm/share/retro-deck/keymaps/us.map
-        test -s ./result-fbterm/share/retro-deck/keymaps/cz.map
-        ls -lh ./result/bin/infones
-        ls -lh ./result-menu/bin/deck-menu
-        ls -lh ./result-gb-deck/bin/gb-deck
-        ls -lh ./result-zx-deck/bin/zx-deck
-        ls -lh ./result-chip8-deck/bin/chip8-deck
-        ls -lh ./result-ten-seconds/bin/ten-seconds-deck
-        ls -lh ./result-fbterm/bin/fbterm
-        ls -lh ./result-fbterm/bin/loadkeys
-        ls -lh ./result-lua/bin/lua
-
-    - name: Create release archive
-      if: github.event_name == 'release'
-      run: |
-        VERSION=$GITHUB_REF_NAME
-        echo "Building release for version: $VERSION"
-
-        mkdir -p deck-infones-release
-        cp result/bin/infones deck-infones-release/
-        cp README.md deck-infones-release/
-        zip -r deck-infones-${VERSION}-armv7l.zip deck-infones-release/
-
-    - name: Upload release asset
-      if: github.event_name == 'release'
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./deck-infones-${{ github.ref_name }}-armv7l.zip
-        asset_name: deck-infones-${{ github.ref_name }}-armv7l.zip
-        asset_content_type: application/zip
+      - name: Build and inspect complete payload
+        run: tests/verify-arm-builds.sh
