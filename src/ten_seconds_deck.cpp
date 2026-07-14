@@ -182,7 +182,7 @@ void render_timer(Canvas *canvas, TimerState state,
                   unsigned int displayed_centiseconds) {
   const uint16_t background = DeckRgb888To565(0x100d0c);
   const uint16_t amber = DeckRgb888To565(0xff7138);
-  const uint16_t dim_amber = DeckRgb888To565(0x351b15);
+  const uint16_t dim_amber = DeckRgb888To565(0x1c1c1c);
   const uint16_t cream = DeckRgb888To565(0xffedc2);
   const uint16_t muted = DeckRgb888To565(0xaa8f7c);
   const uint16_t success = DeckRgb888To565(0x62d38c);
