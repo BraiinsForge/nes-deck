@@ -106,11 +106,11 @@ at boot and whenever a child program returns.
 
 Hold the touchscreen for two seconds to leave a running emulator or terminal.
 Touch does not emulate game controls. In the chiptune player, the top-right
-cross returns immediately, the side arrows change files, the center button
-plays or pauses, the skip icons change subsongs, and the playback-mode icon
-cycles through loop all, loop one, and shuffle. Controller Left/Right changes
+cross returns immediately, the side arrows change files, and the two bottom
+icons control playback mode and play/pause. Controller Left/Right changes
 files, Up/Down changes the persistent volume in five-point steps, L/R changes
-subsongs, A pauses, Start changes playback mode, and B returns.
+subsongs when a music file exposes more than one, A pauses, Start changes
+playback mode, and B returns.
 
 The Wi-Fi editor only writes a root-only profile. Saving does not scan, roam,
 reload networking, or disturb the current connection. The profile becomes

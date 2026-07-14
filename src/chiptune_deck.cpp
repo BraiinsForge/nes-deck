@@ -47,10 +47,8 @@ struct Rect {
 const Rect kCloseButton = {554, 3, 62, 34};
 const Rect kPreviousFileButton = {8, 66, 62, 82};
 const Rect kNextFileButton = {554, 66, 62, 82};
-const Rect kPlaybackModeButton = {113, 177, 92, 34};
-const Rect kPreviousTrackButton = {215, 177, 92, 34};
-const Rect kPauseButton = {317, 177, 92, 34};
-const Rect kNextTrackButton = {419, 177, 92, 34};
+const Rect kPlaybackModeButton = {210, 177, 92, 34};
+const Rect kPauseButton = {322, 177, 92, 34};
 
 typedef std::vector<uint16_t> Canvas;
 
@@ -618,10 +616,6 @@ private:
       return ControlNextFile;
     if (contains(kPlaybackModeButton, x, y))
       return ControlCyclePlaybackMode;
-    if (contains(kPreviousTrackButton, x, y))
-      return ControlPreviousTrack;
-    if (contains(kNextTrackButton, x, y))
-      return ControlNextTrack;
     return ControlNone;
   }
 
@@ -1235,20 +1229,6 @@ void draw_transport_triangle(Canvas *canvas, int center_x, int center_y,
   }
 }
 
-void draw_previous_icon(Canvas *canvas, const Rect &rect, uint16_t color) {
-  const int center_x = rect.x + rect.width / 2;
-  const int center_y = rect.y + rect.height / 2;
-  fill_rect(canvas, Rect{center_x - 10, center_y - 7, 2, 14}, color);
-  draw_transport_triangle(canvas, center_x + 1, center_y, false, color);
-}
-
-void draw_next_icon(Canvas *canvas, const Rect &rect, uint16_t color) {
-  const int center_x = rect.x + rect.width / 2;
-  const int center_y = rect.y + rect.height / 2;
-  draw_transport_triangle(canvas, center_x - 1, center_y, true, color);
-  fill_rect(canvas, Rect{center_x + 8, center_y - 7, 2, 14}, color);
-}
-
 void draw_pause_icon(Canvas *canvas, const Rect &rect, bool paused,
                      uint16_t color) {
   const int center_x = rect.x + rect.width / 2;
@@ -1402,9 +1382,7 @@ void render_player(Canvas *canvas, const ChiptunePlayer &player,
   draw_outline_arrow(canvas, kNextFileButton, false, orange);
   draw_playback_mode_icon(canvas, kPlaybackModeButton, player.playback_mode(),
                           text);
-  draw_previous_icon(canvas, kPreviousTrackButton, text);
   draw_pause_icon(canvas, kPauseButton, player.paused(), text);
-  draw_next_icon(canvas, kNextTrackButton, text);
 }
 
 int render_preview(const char *track_path, const char *output_path) {
