@@ -166,9 +166,8 @@ The FCEUmm frontend writes changed NES SRAM atomically to `.srm` every ten
 seconds and on exit. It migrates the compressed `.srm` format written by the
 earlier InfoNES frontend on first load. The GB/GBC frontend does the same with
 `.sav` and, when the cartridge has a real-time clock, `.rtc`. Games without
-battery-backed storage do not create cartridge-save sidecars. The ZX Spectrum
-frontend instead writes an atomic `.state` snapshot beside each TAP every
-twelve seconds and on exit, then resumes it on the next launch.
+battery-backed storage do not create cartridge-save sidecars. ZX Spectrum TAP
+images are read-only tape media and do not create automatic save sidecars.
 
 The computer icon opens a real framebuffer shell with a 16-pixel safe area for
 the display's rounded corners. **KEYS US** and **KEYS CZ** select the terminal

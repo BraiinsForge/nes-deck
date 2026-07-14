@@ -72,9 +72,6 @@ const unsigned int PAD_L = 1u << 8;
 const unsigned int PAD_R = 1u << 9;
 #endif
 const size_t kMaximumRomBytes = 8 * 1024 * 1024;
-#if defined(RETRO_DECK_ZX)
-const size_t kMaximumStateBytes = 8 * 1024 * 1024;
-#endif
 
 volatile sig_atomic_t shutdown_requested = 0;
 DeckFramebuffer *framebuffer = NULL;
@@ -178,8 +175,7 @@ bool environment_callback(unsigned int command, void *data) {
         variable->value = "tv speaker";
       else if (std::strcmp(variable->key, "fuse_ay_stereo_separation") == 0)
         variable->value = "none";
-      else if (std::strcmp(variable->key, "fuse_key_ovrlay_transp") == 0 ||
-               std::strcmp(variable->key, "fuse_auto_size_savestate") == 0)
+      else if (std::strcmp(variable->key, "fuse_key_ovrlay_transp") == 0)
         variable->value = "enabled";
       else if (std::strcmp(variable->key, "fuse_key_hold_time") == 0)
         variable->value = "500";
@@ -446,33 +442,6 @@ void load_persistent_memory(const std::string &base) {
   if (kHasRtc)
     load_memory_file(base + ".rtc", retro_get_memory_data(RETRO_MEMORY_RTC),
                      retro_get_memory_size(RETRO_MEMORY_RTC));
-#if defined(RETRO_DECK_ZX)
-  const std::string state_path = base + ".state";
-  struct stat info;
-  if (stat(state_path.c_str(), &info) == 0) {
-    if (!S_ISREG(info.st_mode) || info.st_size <= 0 ||
-        info.st_size > static_cast<off_t>(kMaximumStateBytes)) {
-      std::fprintf(stderr, "%s: ignoring invalid state: %s\n", kFrontendName,
-                   state_path.c_str());
-    } else {
-      std::ifstream input(state_path.c_str(), std::ios::in | std::ios::binary);
-      std::vector<uint8_t> state(static_cast<size_t>(info.st_size));
-      input.read(reinterpret_cast<char *>(state.data()),
-                 static_cast<std::streamsize>(state.size()));
-      if (input.gcount() != static_cast<std::streamsize>(state.size()) ||
-          input.bad() || !retro_unserialize(state.data(), state.size())) {
-        std::fprintf(stderr, "%s: cannot load state: %s\n", kFrontendName,
-                     state_path.c_str());
-      } else {
-        std::printf("%s: resumed state: %s\n", kFrontendName,
-                    state_path.c_str());
-      }
-    }
-  } else if (errno != ENOENT) {
-    std::fprintf(stderr, "%s: cannot stat state %s: %s\n", kFrontendName,
-                 state_path.c_str(), std::strerror(errno));
-  }
-#endif
 }
 
 bool save_persistent_memory(const std::string &base) {
@@ -484,23 +453,7 @@ bool save_persistent_memory(const std::string &base) {
       !kHasRtc || save_memory_file(base + ".rtc",
                                   retro_get_memory_data(RETRO_MEMORY_RTC),
                                   retro_get_memory_size(RETRO_MEMORY_RTC));
-#if defined(RETRO_DECK_ZX)
-  const size_t state_size = retro_serialize_size();
-  if (state_size == 0 || state_size > kMaximumStateBytes) {
-    errno = EFBIG;
-    return false;
-  }
-  std::vector<uint8_t> state(state_size);
-  if (!retro_serialize(state.data(), state.size())) {
-    errno = EIO;
-    return false;
-  }
-  const bool saved_state =
-      save_memory_file(base + ".state", state.data(), state.size());
-  return ram && rtc && saved_state;
-#else
   return ram && rtc;
-#endif
 }
 
 void install_signal_handlers() {
