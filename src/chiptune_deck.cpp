@@ -45,10 +45,10 @@ struct Rect {
 };
 
 const Rect kCloseButton = {554, 3, 62, 34};
-const Rect kPreviousFileButton = {8, 66, 62, 82};
-const Rect kNextFileButton = {554, 66, 62, 82};
-const Rect kPlaybackModeButton = {210, 177, 92, 34};
-const Rect kPauseButton = {322, 177, 92, 34};
+const Rect kPlaybackModeButton = {113, 177, 92, 34};
+const Rect kPreviousFileButton = {215, 177, 92, 34};
+const Rect kPauseButton = {317, 177, 92, 34};
+const Rect kNextFileButton = {419, 177, 92, 34};
 
 typedef std::vector<uint16_t> Canvas;
 
@@ -1152,31 +1152,6 @@ void draw_pixel_panel(Canvas *canvas, const Rect &rect, uint16_t fill,
                       thickness, fill);
 }
 
-void draw_outline_arrow(Canvas *canvas, const Rect &bounds, bool points_left,
-                        uint16_t color) {
-  const int center_x = bounds.x + bounds.width / 2;
-  const int center_y = bounds.y + bounds.height / 2;
-  const int mirror = points_left ? -1 : 1;
-  const auto block = [&](int x, int y, int width, int height) {
-    const int left = mirror < 0 ? center_x - x - width : center_x + x;
-    fill_rect(canvas, Rect{left, center_y + y, width, height}, color);
-  };
-  block(14, -1, 2, 2);
-  block(12, -3, 2, 2);
-  block(10, -5, 2, 2);
-  block(8, -7, 2, 2);
-  block(6, -9, 2, 2);
-  block(4, -11, 2, 5);
-  block(-14, -6, 18, 2);
-  block(-14, -4, 2, 8);
-  block(-14, 4, 18, 2);
-  block(4, 6, 2, 5);
-  block(6, 7, 2, 2);
-  block(8, 5, 2, 2);
-  block(10, 3, 2, 2);
-  block(12, 1, 2, 2);
-}
-
 void draw_close_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
   const int center_x = bounds.x + bounds.width / 2;
   const int center_y = bounds.y + bounds.height / 2;
@@ -1227,6 +1202,20 @@ void draw_transport_triangle(Canvas *canvas, int center_x, int center_y,
     const int left = points_right ? center_x - 6 : center_x + 6 - width;
     fill_rect(canvas, Rect{left, center_y + row, width, 2}, color);
   }
+}
+
+void draw_previous_icon(Canvas *canvas, const Rect &rect, uint16_t color) {
+  const int center_x = rect.x + rect.width / 2;
+  const int center_y = rect.y + rect.height / 2;
+  fill_rect(canvas, Rect{center_x - 10, center_y - 7, 2, 14}, color);
+  draw_transport_triangle(canvas, center_x + 1, center_y, false, color);
+}
+
+void draw_next_icon(Canvas *canvas, const Rect &rect, uint16_t color) {
+  const int center_x = rect.x + rect.width / 2;
+  const int center_y = rect.y + rect.height / 2;
+  draw_transport_triangle(canvas, center_x - 1, center_y, true, color);
+  fill_rect(canvas, Rect{center_x + 8, center_y - 7, 2, 14}, color);
 }
 
 void draw_pause_icon(Canvas *canvas, const Rect &rect, bool paused,
@@ -1378,11 +1367,11 @@ void render_player(Canvas *canvas, const ChiptunePlayer &player,
                          orange, indicator);
   }
 
-  draw_outline_arrow(canvas, kPreviousFileButton, true, orange);
-  draw_outline_arrow(canvas, kNextFileButton, false, orange);
   draw_playback_mode_icon(canvas, kPlaybackModeButton, player.playback_mode(),
                           text);
+  draw_previous_icon(canvas, kPreviousFileButton, text);
   draw_pause_icon(canvas, kPauseButton, player.paused(), text);
+  draw_next_icon(canvas, kNextFileButton, text);
 }
 
 int render_preview(const char *track_path, const char *output_path) {

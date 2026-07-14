@@ -106,8 +106,8 @@ at boot and whenever a child program returns.
 
 Hold the touchscreen for two seconds to leave a running emulator or terminal.
 Touch does not emulate game controls. In the chiptune player, the top-right
-cross returns immediately, the side arrows change files, and the two bottom
-icons control playback mode and play/pause. Controller Left/Right changes
+cross returns immediately. The four bottom icons control playback mode,
+previous file, play/pause, and next file. Controller Left/Right also changes
 files, Up/Down changes the persistent volume in five-point steps, L/R changes
 subsongs when a music file exposes more than one, A pauses, Start changes
 playback mode, and B returns.
