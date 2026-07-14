@@ -47,10 +47,10 @@ struct Rect {
 const Rect kCloseButton = {554, 3, 62, 34};
 const Rect kPreviousFileButton = {8, 66, 62, 82};
 const Rect kNextFileButton = {554, 66, 62, 82};
-const Rect kPlaybackModeButton = {78, 177, 130, 34};
-const Rect kPreviousTrackButton = {218, 177, 90, 34};
-const Rect kPauseButton = {318, 177, 112, 34};
-const Rect kNextTrackButton = {440, 177, 90, 34};
+const Rect kPlaybackModeButton = {113, 177, 92, 34};
+const Rect kPreviousTrackButton = {215, 177, 92, 34};
+const Rect kPauseButton = {317, 177, 92, 34};
+const Rect kNextTrackButton = {419, 177, 92, 34};
 
 typedef std::vector<uint16_t> Canvas;
 
@@ -829,13 +829,7 @@ public:
     else
       playback_mode_ = PlaybackLoopAll;
   }
-  const char *playback_mode_label() const {
-    if (playback_mode_ == PlaybackLoopOne)
-      return "LOOP ONE";
-    if (playback_mode_ == PlaybackShuffle)
-      return "SHUFFLE";
-    return "LOOP ALL";
-  }
+  PlaybackMode playback_mode() const { return playback_mode_; }
   bool ready() const { return backend_ != BackendNone; }
   bool paused() const { return paused_; }
   int position_ms() const {
@@ -1200,15 +1194,118 @@ void draw_close_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
   }
 }
 
-void draw_control_button(Canvas *canvas, const Rect &rect,
-                         const std::string &label, bool selected,
-                         uint16_t background, uint16_t active,
-                         uint16_t orange, uint16_t text) {
+void draw_icon_panel(Canvas *canvas, const Rect &rect, bool selected,
+                     uint16_t background, uint16_t active, uint16_t orange) {
   draw_pixel_panel(canvas, rect, selected ? active : background, orange);
-  const int width = label.empty() ? 0 : static_cast<int>(label.size() * 12 - 2);
-  draw_text(canvas, rect.x + std::max(0, (rect.width - width) / 2),
-            rect.y + std::max(0, (rect.height - 14) / 2), label, 2,
-            selected ? background : text);
+}
+
+void draw_pixel_line(Canvas *canvas, int from_x, int from_y, int to_x,
+                     int to_y, int thickness, uint16_t color) {
+  const int delta_x = std::abs(to_x - from_x);
+  const int step_x = from_x < to_x ? 1 : -1;
+  const int delta_y = -std::abs(to_y - from_y);
+  const int step_y = from_y < to_y ? 1 : -1;
+  int error = delta_x + delta_y;
+  while (true) {
+    fill_rect(canvas, Rect{from_x, from_y, thickness, thickness}, color);
+    if (from_x == to_x && from_y == to_y)
+      break;
+    const int doubled_error = error * 2;
+    if (doubled_error >= delta_y) {
+      error += delta_y;
+      from_x += step_x;
+    }
+    if (doubled_error <= delta_x) {
+      error += delta_x;
+      from_y += step_y;
+    }
+  }
+}
+
+void draw_arrow_head(Canvas *canvas, int point_x, int point_y,
+                     bool points_right, uint16_t color) {
+  const int direction = points_right ? -1 : 1;
+  draw_pixel_line(canvas, point_x, point_y, point_x + direction * 6,
+                  point_y - 6, 2, color);
+  draw_pixel_line(canvas, point_x, point_y, point_x + direction * 6,
+                  point_y + 6, 2, color);
+}
+
+void draw_transport_triangle(Canvas *canvas, int center_x, int center_y,
+                             bool points_right, uint16_t color) {
+  for (int row = -8; row <= 8; row += 2) {
+    const int width = 18 - std::abs(row) * 2;
+    const int left = points_right ? center_x - 8 : center_x + 8 - width;
+    fill_rect(canvas, Rect{left, center_y + row, width, 2}, color);
+  }
+}
+
+void draw_previous_icon(Canvas *canvas, const Rect &rect, uint16_t color) {
+  const int center_x = rect.x + rect.width / 2;
+  const int center_y = rect.y + rect.height / 2;
+  fill_rect(canvas, Rect{center_x - 13, center_y - 9, 3, 18}, color);
+  draw_transport_triangle(canvas, center_x + 3, center_y, false, color);
+}
+
+void draw_next_icon(Canvas *canvas, const Rect &rect, uint16_t color) {
+  const int center_x = rect.x + rect.width / 2;
+  const int center_y = rect.y + rect.height / 2;
+  draw_transport_triangle(canvas, center_x - 3, center_y, true, color);
+  fill_rect(canvas, Rect{center_x + 10, center_y - 9, 3, 18}, color);
+}
+
+void draw_pause_icon(Canvas *canvas, const Rect &rect, bool paused,
+                     uint16_t color) {
+  const int center_x = rect.x + rect.width / 2;
+  const int center_y = rect.y + rect.height / 2;
+  if (paused) {
+    draw_transport_triangle(canvas, center_x, center_y, true, color);
+    return;
+  }
+  fill_rect(canvas, Rect{center_x - 7, center_y - 9, 4, 18}, color);
+  fill_rect(canvas, Rect{center_x + 3, center_y - 9, 4, 18}, color);
+}
+
+void draw_loop_icon(Canvas *canvas, const Rect &rect, bool one,
+                    uint16_t color) {
+  const int center_x = rect.x + rect.width / 2;
+  const int center_y = rect.y + rect.height / 2;
+  draw_pixel_line(canvas, center_x - 14, center_y - 7, center_x + 12,
+                  center_y - 7, 2, color);
+  draw_arrow_head(canvas, center_x + 14, center_y - 7, true, color);
+  draw_pixel_line(canvas, center_x + 14, center_y + 7, center_x - 12,
+                  center_y + 7, 2, color);
+  draw_arrow_head(canvas, center_x - 14, center_y + 7, false, color);
+  if (one)
+    draw_text(canvas, center_x - 2, center_y - 4, "1", 1, color);
+}
+
+void draw_shuffle_icon(Canvas *canvas, const Rect &rect, uint16_t color) {
+  const int center_x = rect.x + rect.width / 2;
+  const int center_y = rect.y + rect.height / 2;
+  draw_pixel_line(canvas, center_x - 15, center_y - 7, center_x - 9,
+                  center_y - 7, 2, color);
+  draw_pixel_line(canvas, center_x - 9, center_y - 7, center_x + 8,
+                  center_y + 7, 2, color);
+  draw_pixel_line(canvas, center_x - 15, center_y + 7, center_x - 9,
+                  center_y + 7, 2, color);
+  draw_pixel_line(canvas, center_x - 9, center_y + 7, center_x + 8,
+                  center_y - 7, 2, color);
+  draw_pixel_line(canvas, center_x + 8, center_y - 7, center_x + 13,
+                  center_y - 7, 2, color);
+  draw_pixel_line(canvas, center_x + 8, center_y + 7, center_x + 13,
+                  center_y + 7, 2, color);
+  draw_arrow_head(canvas, center_x + 15, center_y - 7, true, color);
+  draw_arrow_head(canvas, center_x + 15, center_y + 7, true, color);
+}
+
+void draw_playback_mode_icon(Canvas *canvas, const Rect &rect,
+                             PlaybackMode mode, uint16_t color) {
+  if (mode == PlaybackShuffle) {
+    draw_shuffle_icon(canvas, rect, color);
+    return;
+  }
+  draw_loop_icon(canvas, rect, mode == PlaybackLoopOne, color);
 }
 
 void draw_file_indicators(Canvas *canvas, size_t file_index, size_t file_count,
@@ -1308,16 +1405,17 @@ void render_player(Canvas *canvas, const ChiptunePlayer &player,
 
   draw_outline_arrow(canvas, kPreviousFileButton, true, orange);
   draw_outline_arrow(canvas, kNextFileButton, false, orange);
-  draw_control_button(canvas, kPlaybackModeButton,
-                      player.playback_mode_label(), true, background, active,
-                      orange, text);
-  draw_control_button(canvas, kPreviousTrackButton, "TRK -", false,
-                      background, active, orange, text);
-  draw_control_button(canvas, kPauseButton,
-                      player.paused() ? "PLAY" : "PAUSE", true, background,
-                      active, orange, text);
-  draw_control_button(canvas, kNextTrackButton, "TRK +", false, background,
-                      active, orange, text);
+  draw_icon_panel(canvas, kPlaybackModeButton, true, background, active,
+                  orange);
+  draw_playback_mode_icon(canvas, kPlaybackModeButton, player.playback_mode(),
+                          background);
+  draw_icon_panel(canvas, kPreviousTrackButton, false, background, active,
+                  orange);
+  draw_previous_icon(canvas, kPreviousTrackButton, text);
+  draw_icon_panel(canvas, kPauseButton, true, background, active, orange);
+  draw_pause_icon(canvas, kPauseButton, player.paused(), background);
+  draw_icon_panel(canvas, kNextTrackButton, false, background, active, orange);
+  draw_next_icon(canvas, kNextTrackButton, text);
 }
 
 int render_preview(const char *track_path, const char *output_path) {
