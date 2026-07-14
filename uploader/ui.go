@@ -51,7 +51,7 @@ const pageTemplate = `{{define "page"}}<!doctype html>
       <form action="/login" method="post">
         <label>
           <span>Password</span>
-          <input type="password" name="password" minlength="16" maxlength="128" autocomplete="current-password" required autofocus>
+          <input type="password" name="password" minlength="8" maxlength="128" autocomplete="current-password" required autofocus>
         </label>
         <button type="submit" class="primary-button">Sign in</button>
       </form>

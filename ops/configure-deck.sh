@@ -28,7 +28,7 @@ read -r -p 'Deck SSH target (root@IP): ' target
   exit 1
 }
 
-read -r -s -p 'ROM uploader password (16-128 bytes): ' uploader_password
+read -r -s -p 'ROM uploader password (8-128 bytes): ' uploader_password
 printf '\n'
 read -r -s -p 'Repeat ROM uploader password: ' confirmation
 printf '\n'
@@ -36,9 +36,9 @@ if [[ $uploader_password != "$confirmation" ]]; then
   echo "Passwords do not match" >&2
   exit 1
 fi
-if [[ ${#uploader_password} -lt 16 || ${#uploader_password} -gt 128 ||
+if [[ ${#uploader_password} -lt 8 || ${#uploader_password} -gt 128 ||
       $uploader_password == *$'\r'* || $uploader_password == *$'\n'* ]]; then
-  echo "Password must contain 16 through 128 bytes without line breaks" >&2
+  echo "Password must contain 8 through 128 bytes without line breaks" >&2
   exit 1
 fi
 

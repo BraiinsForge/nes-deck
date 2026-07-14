@@ -31,5 +31,6 @@ printf '%s\n' "$password" |
 unset password
 ```
 
-Use at least 16 bytes. The service never changes Wi-Fi, WireGuard, routes, or
-firewall rules.
+Eight bytes are accepted for a Deck that remains in a trusted location. Use at
+least 16 bytes for a Deck that may leave one. The service never changes Wi-Fi,
+WireGuard, routes, or firewall rules.

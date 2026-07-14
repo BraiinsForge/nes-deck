@@ -19,7 +19,7 @@ import (
 
 const (
 	passwordIterations  = 210000
-	minimumPasswordSize = 16
+	minimumPasswordSize = 8
 	maximumPasswordSize = 128
 )
 

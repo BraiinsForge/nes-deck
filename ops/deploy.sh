@@ -92,10 +92,10 @@ fi
   echo "DECK_SSH_TARGET must have the form root@DECK-IP" >&2
   exit 1
 }
-if [[ $password_seen -eq 0 || ${#uploader_password} -lt 16 ||
+if [[ $password_seen -eq 0 || ${#uploader_password} -lt 8 ||
       ${#uploader_password} -gt 128 || $uploader_password == *$'\r'* ||
       $uploader_password == *$'\n'* ]]; then
-  echo "ROM_UPLOADER_PASSWORD must contain 16 through 128 bytes without line breaks" >&2
+  echo "ROM_UPLOADER_PASSWORD must contain 8 through 128 bytes without line breaks" >&2
   exit 1
 fi
 
