@@ -80,10 +80,8 @@ int main() {
   expect(menu_gamepad_key_to_button(BTN_THUMB2) == kMenuPadConfirm &&
              menu_gamepad_key_to_button(BTN_TOP) == kMenuPadConfirm &&
              menu_gamepad_key_to_button(BTN_THUMB) == kMenuPadBack &&
-             menu_gamepad_key_to_button(BTN_TRIGGER) == kMenuPadBack &&
-             menu_gamepad_key_to_button(BTN_TOP2) == kMenuPadVolumeDown &&
-             menu_gamepad_key_to_button(BTN_PINKIE) == kMenuPadVolumeUp,
-         "dashboard maps face and shoulder buttons to menu actions");
+             menu_gamepad_key_to_button(BTN_TRIGGER) == kMenuPadBack,
+         "dashboard maps physical A/X to confirm and B/Y to back");
   expect(menu_gamepad_axis_to_button(0, 0, 255, kMenuPadLeft,
                                      kMenuPadRight) == kMenuPadLeft &&
              menu_gamepad_axis_to_button(127, 0, 255, kMenuPadLeft,
@@ -115,13 +113,7 @@ int main() {
              menu_gamepad_command(kMenuPadBack, false, true) ==
                  MenuGamepadCommandBack &&
              menu_gamepad_command(kMenuPadBack, true, false) ==
-                 MenuGamepadCommandBack &&
-             menu_gamepad_command(kMenuPadVolumeDown, false, false) ==
-                 MenuGamepadCommandVolumeDown &&
-             menu_gamepad_command(kMenuPadVolumeUp, false, true) ==
-                 MenuGamepadCommandVolumeUp &&
-             menu_gamepad_command(kMenuPadVolumeUp, true, false) ==
-                 MenuGamepadCommandNone,
+                 MenuGamepadCommandBack,
          "dashboard controller commands follow console and game view axes");
 
   unsigned char ines[16] = {};

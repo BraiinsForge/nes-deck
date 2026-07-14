@@ -48,13 +48,11 @@ console blanking disabled, including after the framebuffer terminal exits.
 At runtime, use Up/Down on the orange console selector, then tap it to open the
 active console's carousel. Either THEGamepad controller provides the same
 navigation: Up/Down switches consoles, A opens one, Left/Right selects a game,
-A launches it, B returns to the console selector, and L/R changes volume in
-5-point steps. Successful controller navigation plays a short directional,
-enter, or back chiptune while volume is audible. Each game retains its original
-catalog index for launch routing. Descriptions and license labels stay out of
-the launcher; redistribution and license details remain in
+A launches it, and B returns to the console selector. Each game retains its
+original catalog index for launch routing. Descriptions and license labels
+stay out of the launcher; redistribution and license details remain in
 `FOSS_GAMES.md` and the installed license files. The top-right minus and plus
-buttons and controller shoulders atomically persist volume in 5-point steps.
+buttons atomically persist volume in 5-point steps.
 The green volume display is also a button: tapping it mutes, turns it red, and
 labels it `VOL OFF`. Tapping the display or plus while muted restores the last
 audible level, or the configured default if the launcher started muted. Every

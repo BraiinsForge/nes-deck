@@ -97,8 +97,6 @@ const unsigned int kMenuPadUp = 1u << 2;
 const unsigned int kMenuPadDown = 1u << 3;
 const unsigned int kMenuPadLeft = 1u << 4;
 const unsigned int kMenuPadRight = 1u << 5;
-const unsigned int kMenuPadVolumeDown = 1u << 6;
-const unsigned int kMenuPadVolumeUp = 1u << 7;
 const unsigned short kTheGamepadVendor = 0x1c59;
 const unsigned short kTheGamepadProduct = 0x0026;
 const size_t kMaximumMenuGamepads = 2;
@@ -905,30 +903,17 @@ bool load_keymap_state(const std::string &path, std::string *keymap,
   return false;
 }
 
-struct ChiptuneNote {
-  int frequency;
-  int duration_ms;
-};
-
-bool play_chiptune(const ChiptuneNote *notes, size_t note_count,
-                   unsigned int volume_percent, const char *description,
-                   std::string *error) {
-  if (!notes || note_count == 0) {
-    if (error)
-      *error = "chiptune notes are required";
-    return false;
-  }
+bool play_sound_confirmation(unsigned int volume_percent, std::string *error) {
   if (volume_percent == 0 || volume_percent > 100) {
     if (error)
-      *error = "chiptune volume must be between 1 and 100";
+      *error = "enabled volume must be between 1 and 100 for the test tone";
     return false;
   }
 
   const int fd = open("/dev/dsp", O_WRONLY | O_CLOEXEC);
   if (fd < 0) {
     if (error)
-      *error = errno_message(std::string("cannot open /dev/dsp for ") +
-                             description);
+      *error = errno_message("cannot open /dev/dsp for sound confirmation");
     return false;
   }
 
@@ -944,37 +929,26 @@ bool play_chiptune(const ChiptuneNote *notes, size_t note_count,
     close(fd);
     errno = saved_errno;
     if (error)
-      *error = errno_message(std::string("cannot configure ") + description);
+      *error = errno_message("cannot configure sound confirmation");
     return false;
   }
 
+  const size_t total_samples = static_cast<size_t>(rate) * 6 / 25;
+  const size_t midpoint = total_samples / 2;
   const int amplitude =
       std::max(256, static_cast<int>(5000 * volume_percent / 100));
   const size_t ramp_samples = std::max<size_t>(1, static_cast<size_t>(rate) / 200);
-  std::vector<int16_t> tone;
-  for (size_t note_index = 0; note_index < note_count; ++note_index) {
-    if (notes[note_index].frequency <= 0 ||
-        notes[note_index].duration_ms <= 0) {
-      close(fd);
-      if (error)
-        *error = "chiptune notes must have positive frequency and duration";
-      return false;
-    }
-    const size_t note_samples = std::max<size_t>(
-        1, static_cast<size_t>(rate) * notes[note_index].duration_ms / 1000);
-    const size_t period = std::max<size_t>(
-        2, static_cast<size_t>(rate / notes[note_index].frequency));
-    const size_t start = tone.size();
-    tone.resize(start + note_samples, 0);
-    for (size_t i = 0; i < note_samples; ++i) {
-      int sample = (i % period) < period / 2 ? amplitude : -amplitude;
-      const size_t remaining = note_samples - i;
-      const size_t envelope =
-          std::min(ramp_samples, std::min(i + 1, remaining));
-      sample = static_cast<int>(sample * static_cast<int64_t>(envelope) /
-                                static_cast<int64_t>(ramp_samples));
-      tone[start + i] = static_cast<int16_t>(sample);
-    }
+  std::vector<int16_t> tone(total_samples, 0);
+  for (size_t i = 0; i < total_samples; ++i) {
+    const int frequency = i < midpoint ? 660 : 880;
+    const size_t period = std::max<size_t>(2, static_cast<size_t>(rate / frequency));
+    int sample = (i % period) < period / 2 ? amplitude : -amplitude;
+    const size_t remaining = total_samples - i;
+    const size_t envelope =
+        std::min(ramp_samples, std::min(i + 1, remaining));
+    sample = static_cast<int>(sample * static_cast<int64_t>(envelope) /
+                              static_cast<int64_t>(ramp_samples));
+    tone[i] = static_cast<int16_t>(sample);
   }
 
   const bool wrote =
@@ -987,45 +961,10 @@ bool play_chiptune(const ChiptuneNote *notes, size_t note_count,
   if (!wrote || close_result != 0) {
     errno = wrote ? errno : write_errno;
     if (error)
-      *error = errno_message(std::string("cannot play ") + description);
+      *error = errno_message("cannot play sound confirmation");
     return false;
   }
   return true;
-}
-
-bool play_sound_confirmation(unsigned int volume_percent, std::string *error) {
-  const ChiptuneNote notes[] = {{660, 120}, {880, 120}};
-  return play_chiptune(notes, sizeof(notes) / sizeof(notes[0]), volume_percent,
-                       "sound confirmation", error);
-}
-
-enum MenuNavigationSound {
-  MenuNavigationSoundPrevious,
-  MenuNavigationSoundNext,
-  MenuNavigationSoundConfirm,
-  MenuNavigationSoundBack
-};
-
-bool play_menu_navigation_sound(MenuNavigationSound sound,
-                                unsigned int volume_percent,
-                                std::string *error) {
-  ChiptuneNote notes[2];
-  size_t note_count = 1;
-  if (sound == MenuNavigationSoundPrevious) {
-    notes[0] = ChiptuneNote{523, 45};
-  } else if (sound == MenuNavigationSoundNext) {
-    notes[0] = ChiptuneNote{659, 45};
-  } else if (sound == MenuNavigationSoundConfirm) {
-    notes[0] = ChiptuneNote{659, 30};
-    notes[1] = ChiptuneNote{880, 40};
-    note_count = 2;
-  } else {
-    notes[0] = ChiptuneNote{659, 30};
-    notes[1] = ChiptuneNote{440, 40};
-    note_count = 2;
-  }
-  return play_chiptune(notes, note_count, volume_percent,
-                       "menu navigation sound", error);
 }
 
 struct Rect {
@@ -2497,10 +2436,6 @@ unsigned int menu_gamepad_key_to_button(unsigned short code) {
   case BTN_THUMB:
   case BTN_TRIGGER:
     return kMenuPadBack;
-  case BTN_TOP2:
-    return kMenuPadVolumeDown;
-  case BTN_PINKIE:
-    return kMenuPadVolumeUp;
   default:
     return 0;
   }
@@ -2793,9 +2728,7 @@ enum MenuGamepadCommand {
   MenuGamepadCommandPrevious,
   MenuGamepadCommandNext,
   MenuGamepadCommandConfirm,
-  MenuGamepadCommandBack,
-  MenuGamepadCommandVolumeDown,
-  MenuGamepadCommandVolumeUp
+  MenuGamepadCommandBack
 };
 
 MenuGamepadCommand menu_gamepad_command(unsigned int pressed, bool wifi_view,
@@ -2804,10 +2737,6 @@ MenuGamepadCommand menu_gamepad_command(unsigned int pressed, bool wifi_view,
     return MenuGamepadCommandBack;
   if (wifi_view)
     return MenuGamepadCommandNone;
-  if (pressed & kMenuPadVolumeDown)
-    return MenuGamepadCommandVolumeDown;
-  if (pressed & kMenuPadVolumeUp)
-    return MenuGamepadCommandVolumeUp;
   if (game_view) {
     if (pressed & kMenuPadLeft)
       return MenuGamepadCommandPrevious;
@@ -3783,43 +3712,6 @@ int application_main(const Options &options) {
         selected_game = game_index;
       }
     };
-    const auto play_controller_navigation_sound =
-        [&](MenuNavigationSound sound) {
-          if (volume == 0)
-            return;
-          std::string sound_error;
-          if (!play_menu_navigation_sound(sound, volume, &sound_error))
-            std::cerr << "deck-menu: " << sound_error << std::endl;
-        };
-    const auto apply_volume_target = [&](int target) {
-      const unsigned int requested =
-          volume_after_menu_target(target, volume, last_audible_volume);
-      std::string state_error;
-      if (save_volume_state(options.volume_state, requested, &state_error)) {
-        volume = requested;
-        if (volume != 0)
-          last_audible_volume = volume;
-        status = volume == 0
-                     ? "GAME VOLUME MUTED"
-                     : "GAME VOLUME " + std::to_string(volume) + "%";
-        render_current_menu();
-        framebuffer.present(canvas, NULL);
-        if (volume != 0) {
-          std::string tone_error;
-          if (!play_sound_confirmation(volume, &tone_error)) {
-            status = "VOLUME SAVED; CONFIRMATION TONE FAILED";
-            std::cerr << "deck-menu: " << tone_error << std::endl;
-            render_current_menu();
-            framebuffer.present(canvas, NULL);
-          }
-        }
-      } else {
-        status = "VOLUME STATE ERROR";
-        std::cerr << "deck-menu: " << state_error << std::endl;
-        render_current_menu();
-        framebuffer.present(canvas, NULL);
-      }
-    };
 
     const MenuGamepadCommand controller_command =
         menu_gamepad_command(controller_pressed, wifi_view, game_view);
@@ -3836,17 +3728,9 @@ int application_main(const Options &options) {
       }
       render_current_menu();
       framebuffer.present(canvas, NULL);
-      play_controller_navigation_sound(MenuNavigationSoundBack);
-    } else if (controller_command == MenuGamepadCommandVolumeDown ||
-               controller_command == MenuGamepadCommandVolumeUp) {
-      cancel_reboot_confirmation();
-      apply_volume_target(controller_command == MenuGamepadCommandVolumeDown
-                              ? MenuTargetVolumeDown
-                              : MenuTargetVolumeUp);
     } else if (controller_command == MenuGamepadCommandPrevious ||
                controller_command == MenuGamepadCommandNext) {
       cancel_reboot_confirmation();
-      bool moved = false;
       if (game_view && !layout.game_indices.empty()) {
         if (controller_command == MenuGamepadCommandPrevious) {
           game_position = game_position == 0
@@ -3855,23 +3739,15 @@ int application_main(const Options &options) {
         } else {
           game_position = (game_position + 1) % layout.game_indices.size();
         }
-        moved = true;
       } else if (!game_view) {
         active_system = adjacent_system(
             layout.systems, active_system,
             controller_command == MenuGamepadCommandPrevious ? -1 : 1);
         game_position = 0;
-        moved = !layout.systems.empty();
       }
       status.clear();
       render_current_menu();
       framebuffer.present(canvas, NULL);
-      if (moved) {
-        play_controller_navigation_sound(
-            controller_command == MenuGamepadCommandPrevious
-                ? MenuNavigationSoundPrevious
-                : MenuNavigationSoundNext);
-      }
     } else if (controller_command == MenuGamepadCommandConfirm) {
       if (!game_view) {
         cancel_reboot_confirmation();
@@ -3880,12 +3756,10 @@ int application_main(const Options &options) {
         status.clear();
         render_current_menu();
         framebuffer.present(canvas, NULL);
-        play_controller_navigation_sound(MenuNavigationSoundConfirm);
       } else if (layout.shown_game_index < games.size()) {
         if (!is_built_in_reboot(games[layout.shown_game_index]))
           cancel_reboot_confirmation();
         request_game(static_cast<int>(layout.shown_game_index));
-        play_controller_navigation_sound(MenuNavigationSoundConfirm);
       }
     }
 
@@ -3974,7 +3848,29 @@ int application_main(const Options &options) {
                   pressed_target == MenuTargetVolumeUp ||
                   pressed_target == MenuTargetVolumeToggle) &&
                  pressed_target == released_target) {
-        apply_volume_target(pressed_target);
+        const unsigned int requested = volume_after_menu_target(
+            pressed_target, volume, last_audible_volume);
+        std::string state_error;
+        if (save_volume_state(options.volume_state, requested, &state_error)) {
+          volume = requested;
+          if (volume != 0)
+            last_audible_volume = volume;
+          status = volume == 0
+                       ? "GAME VOLUME MUTED"
+                       : "GAME VOLUME " + std::to_string(volume) + "%";
+          if (volume != 0) {
+            std::string tone_error;
+            if (!play_sound_confirmation(volume, &tone_error)) {
+              status = "VOLUME SAVED; CONFIRMATION TONE FAILED";
+              std::cerr << "deck-menu: " << tone_error << std::endl;
+            }
+          }
+        } else {
+          status = "VOLUME STATE ERROR";
+          std::cerr << "deck-menu: " << state_error << std::endl;
+        }
+        render_current_menu();
+        framebuffer.present(canvas, NULL);
       } else if (!wifi_view && pressed_target == MenuTargetWifi &&
                  released_target == MenuTargetWifi) {
         wifi_view = true;
