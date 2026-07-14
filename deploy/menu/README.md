@@ -26,11 +26,13 @@ The launcher also expects:
 - `/mnt/data/nes-deck/ten-seconds-deck`
 - `/mnt/data/nes-deck/ecl/bin/ecl.bin` (ECL 26.5.5)
 - `/mnt/data/nes-deck/ecl/lib/ecl/` (the ECL runtime directory)
+- `/mnt/data/nes-deck/langs/lua` (Lua 5.5.0)
 - `/mnt/data/nes-deck/terminal/retro-terminal`
 - `/mnt/data/nes-deck/terminal/{fbterm,loadkeys,keymaps/}`
 - `/usr/sbin/deck-wifi-profile-add`
 - `/mnt/data/roms/{nes,gb,gbc,zx,chip8}/` and the ROM paths listed in
   `games.sexp`
+- `/mnt/data/langs/{lua,lisp}/` for persistent REPL files
 
 The launcher exports the exact trailing-slash runtime path
 `ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/`. It initializes persistent volume at
@@ -80,10 +82,13 @@ start and result chiptunes follow the dashboard volume.
 
 The computer icon launches `/mnt/data/nes-deck/terminal/retro-terminal`. The
 adjacent keymap action toggles between US ANSI and Czech QWERTZ. The terminal
-launcher applies that map for fbterm and restores US when the shell exits or
-the menu terminates it. The Deck carousel adds a built-in red power-on entry
-for `/sbin/reboot`; two selections within four seconds are required, and any
-other action cancels the armed request. The WIFI button opens the on-screen
+launcher applies that map for fbterm and restores US when its child exits or
+the menu terminates it. The DECK carousel also routes exact `lua` and `lisp`
+modes to Lua 5.5.0 and ECL 26.5.5. They start in private persistent working
+directories at `/mnt/data/langs/lua` and `/mnt/data/langs/lisp`; no catalog or
+user text is evaluated as a command. The Deck carousel adds a built-in red
+power-on entry for `/sbin/reboot`; two selections within four seconds are
+required, and any other action cancels the armed request. The WIFI button opens the on-screen
 keyboard and passes credentials to
 `deck-wifi-profile-add` over stdin, never argv. The helper only writes a
 root-only profile; it does not scan, reload, roam, or alter the active network.

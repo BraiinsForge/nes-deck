@@ -9,6 +9,7 @@ set -u
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 LC_ALL=C
 BASE=/mnt/data/nes-deck
+LANG_ROOT=/mnt/data/langs
 MENU_DIR=$BASE/menu
 STATE_DIR=$BASE/state
 LOG_DIR=$BASE/log
@@ -29,6 +30,7 @@ VOLUME_STATE=$STATE_DIR/menu-volume.state
 LEGACY_SOUND_STATE=$STATE_DIR/menu-sound.state
 KEYMAP_STATE=$STATE_DIR/terminal-keymap.state
 TERMINAL=$BASE/terminal/retro-terminal
+LUA=$BASE/langs/lua
 WIFI_HELPER=/usr/sbin/deck-wifi-profile-add
 COMPILER=$MENU_DIR/compile-catalog.lisp
 ECL=$BASE/ecl/bin/ecl.bin
@@ -42,11 +44,13 @@ export RETRO_DECK_VOLUME_PERCENT=$VOLUME_ON
 
 umask 077
 
-if ! mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMP_DIR"; then
-	logger -t nes-deck-menu "cannot create persistent state directories under $BASE"
+if ! mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" \
+	"$LANG_ROOT/lua" "$LANG_ROOT/lisp"; then
+	logger -t nes-deck-menu "cannot create persistent state and language directories"
 	exit 1
 fi
-chmod 0700 "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" 2>/dev/null || :
+chmod 0700 "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" \
+	"$LANG_ROOT/lua" "$LANG_ROOT/lisp" 2>/dev/null || :
 
 rotate_log() {
 	log_size=0
@@ -119,6 +123,14 @@ if [ ! -x "$DECK_GAME" ]; then
 fi
 if [ ! -x "$TERMINAL" ]; then
 	log_message "terminal launcher is missing or not executable: $TERMINAL"
+	exit 1
+fi
+if [ ! -x "$LUA" ]; then
+	log_message "Lua interpreter is missing or not executable: $LUA"
+	exit 1
+fi
+if [ ! -x "$ECL" ] || [ ! -d "$ECLDIR" ]; then
+	log_message "Lisp runtime is unavailable under $BASE/ecl"
 	exit 1
 fi
 if [ ! -x "$WIFI_HELPER" ]; then

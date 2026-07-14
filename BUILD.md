@@ -61,7 +61,7 @@ For active development and iteration, use the Nix development environment:
 
    The compiled binary will be at `./result/bin/infones`.
 
-   Build the static ARM touch launcher and the minimal ECL runtime separately:
+   Build the static ARM touch launcher and language runtimes separately:
    ```bash
    nix build .#deck-menu -o result-menu
    nix build .#gb-deck -o result-gb-deck
@@ -69,12 +69,14 @@ For active development and iteration, use the Nix development environment:
    nix build .#chip8-deck -o result-chip8-deck
    nix build .#ten-seconds-deck -o result-ten-seconds
    nix build .#fbterm-deck -o result-fbterm
+   nix build .#lua-deck -o result-lua
    nix build -f nix/ecl-arm-static.nix -o result-ecl
    ```
 
-   Those payloads are at `result-menu/bin/deck-menu` and
-   `result-ecl/{bin/ecl.bin,lib/ecl/help.doc}`. The ECL expression pins both
-   nixpkgs and ECL 26.5.5 and emits a closure-free static ARM runtime.
+   Those payloads include `result-menu/bin/deck-menu`,
+   `result-lua/bin/lua`, and `result-ecl/{bin/ecl.bin,lib/ecl/help.doc}`.
+   Lua 5.5.0 is pinned to its official source archive, and both language
+   interpreters are closure-free static ARM binaries.
 
 4. Run the host-side audio checks after mixer changes:
    ```bash
@@ -203,7 +205,13 @@ and Czech QWERTZ console maps:
 
 ```bash
 nix build .#fbterm-deck -o result-fbterm
+nix build .#lua-deck -o result-lua
 ```
+
+The DECK carousel starts Lua and ECL through the framebuffer terminal. Their
+private persistent working directories are `/mnt/data/langs/lua` and
+`/mnt/data/langs/lisp`; interpreter binaries remain in
+`/mnt/data/nes-deck/langs` and `/mnt/data/nes-deck/ecl`.
 
 ## Display Configuration
 

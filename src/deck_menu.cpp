@@ -497,6 +497,52 @@ bool is_built_in_terminal(const GameEntry &game) {
   return game.id == "terminal" && game.system == "deck";
 }
 
+GameEntry built_in_lua_entry(const std::string &launcher) {
+  GameEntry entry;
+  entry.id = "lua-repl";
+  entry.title = "LUA REPL";
+  entry.system = "deck";
+  entry.rom = launcher;
+  entry.color = xterm_color(69);
+  return entry;
+}
+
+bool is_built_in_lua(const GameEntry &game) {
+  return game.id == "lua-repl" && game.system == "deck";
+}
+
+GameEntry built_in_lisp_entry(const std::string &launcher) {
+  GameEntry entry;
+  entry.id = "lisp-repl";
+  entry.title = "LISP REPL";
+  entry.system = "deck";
+  entry.rom = launcher;
+  entry.color = xterm_color(149);
+  return entry;
+}
+
+bool is_built_in_lisp(const GameEntry &game) {
+  return game.id == "lisp-repl" && game.system == "deck";
+}
+
+std::string terminal_mode_for_game(const GameEntry &game) {
+  if (is_built_in_terminal(game))
+    return "shell";
+  if (is_built_in_lua(game))
+    return "lua";
+  if (is_built_in_lisp(game))
+    return "lisp";
+  return std::string();
+}
+
+std::string terminal_program_title(const std::string &mode) {
+  if (mode == "lua")
+    return "LUA REPL";
+  if (mode == "lisp")
+    return "LISP REPL";
+  return "TERMINAL";
+}
+
 GameEntry built_in_reboot_entry(const std::string &executable) {
   GameEntry entry;
   entry.id = "reboot";
@@ -1974,6 +2020,30 @@ bool draw_deck_app_logo(Canvas *canvas, const Rect &bounds,
     return true;
   }
 
+  if (is_built_in_lua(game)) {
+    const Rect screen{bounds.x + 58, bounds.y + 46, bounds.width - 116, 184};
+    stroke_rect(canvas, screen, 6, accent);
+    draw_centered_text(canvas,
+                       Rect{screen.x + 12, screen.y + 28,
+                            screen.width - 24, screen.height - 56},
+                       "LUA>", 6, accent);
+    draw_coverless_title(canvas, bounds, game.title);
+    return true;
+  }
+
+  if (is_built_in_lisp(game)) {
+    draw_centered_text(canvas,
+                       Rect{bounds.x + 46, bounds.y + 48,
+                            bounds.width - 92, 170},
+                       "( )", 12, accent);
+    draw_centered_text(canvas,
+                       Rect{bounds.x + 102, bounds.y + 106,
+                            bounds.width - 204, 54},
+                       "LISP", 4, xterm_pixel(kColorText));
+    draw_coverless_title(canvas, bounds, game.title);
+    return true;
+  }
+
   if (is_built_in_terminal(game)) {
     const Rect screen{bounds.x + 76, bounds.y + 46, bounds.width - 152, 150};
     stroke_rect(canvas, screen, 6, accent);
@@ -3339,13 +3409,15 @@ ChildResult run_game(const std::string &emulator, const GameEntry &game,
 }
 
 ChildResult run_terminal(const std::string &launcher,
-                         const std::string &keymap, TouchDevice *touch,
+                         const std::string &keymap, const std::string &mode,
+                         TouchDevice *touch,
                          Framebuffer *framebuffer) {
   std::vector<std::pair<std::string, std::string> > environment;
   environment.push_back(std::make_pair("RETRO_DECK_KEYMAP", keymap));
+  std::vector<std::string> arguments(1, mode);
   return run_managed_child(
-      launcher, std::vector<std::string>(),
-      environment, "terminal", touch, framebuffer);
+      launcher, arguments, environment,
+      mode == "shell" ? "terminal" : mode + " REPL", touch, framebuffer);
 }
 
 ChildResult run_reboot(const std::string &executable, TouchDevice *touch,
@@ -3818,6 +3890,8 @@ int application_main(const Options &options) {
     std::cerr << "deck-menu: " << error << std::endl;
     return 1;
   }
+  games.push_back(built_in_lua_entry(options.terminal));
+  games.push_back(built_in_lisp_entry(options.terminal));
   games.push_back(built_in_terminal_entry(options.terminal));
   games.push_back(built_in_reboot_entry(kRebootExecutable));
   if (!is_absolute_path(options.cover_directory)) {
@@ -3991,7 +4065,7 @@ int application_main(const Options &options) {
     }
 
     int selected_game = -1;
-    bool terminal_requested = false;
+    std::string terminal_mode;
     bool reboot_requested = false;
     const auto cancel_reboot_confirmation = [&]() {
       reboot_armed_until = 0;
@@ -4001,8 +4075,10 @@ int application_main(const Options &options) {
     const auto request_game = [&](int game_index) {
       if (game_index < 0 || game_index >= static_cast<int>(games.size()))
         return;
-      if (is_built_in_terminal(games[game_index])) {
-        terminal_requested = true;
+      const std::string requested_mode =
+          terminal_mode_for_game(games[game_index]);
+      if (!requested_mode.empty()) {
+        terminal_mode = requested_mode;
       } else if (is_built_in_reboot(games[game_index])) {
         const int64_t now = monotonic_ms();
         if (reboot_confirmation_active(reboot_armed_until, now)) {
@@ -4236,7 +4312,7 @@ int application_main(const Options &options) {
         play_menu_sound(MenuSoundCueConfirm);
       } else if (!wifi_view && pressed_target == MenuTargetTerminal &&
                  released_target == MenuTargetTerminal) {
-        terminal_requested = true;
+        terminal_mode = "shell";
         play_menu_sound(MenuSoundCueConfirm);
       } else if (!wifi_view && pressed_target == MenuTargetKeymap &&
                  released_target == MenuTargetKeymap) {
@@ -4262,11 +4338,12 @@ int application_main(const Options &options) {
       pressed_target = MenuTargetNone;
     }
 
-    if (selected_game < 0 && !terminal_requested && !reboot_requested)
+    if (selected_game < 0 && terminal_mode.empty() && !reboot_requested)
       continue;
 
-    status = terminal_requested
-                 ? "STARTING TERMINAL"
+    const std::string terminal_title = terminal_program_title(terminal_mode);
+    status = !terminal_mode.empty()
+                 ? "STARTING " + terminal_title
                  : (reboot_requested
                         ? "REBOOTING"
                         : "STARTING " + games[selected_game].title);
@@ -4278,8 +4355,9 @@ int application_main(const Options &options) {
     menu_sound_player.finish();
     menu_gamepads.close_for_child();
     const ChildResult child =
-        terminal_requested
-            ? run_terminal(options.terminal, keymap, &touch, &framebuffer)
+        !terminal_mode.empty()
+            ? run_terminal(options.terminal, keymap, terminal_mode, &touch,
+                           &framebuffer)
             : (reboot_requested
                    ? run_reboot(games[selected_game].rom, &touch, &framebuffer)
                    : run_game(emulator_for_game(options, games[selected_game]),
@@ -4301,33 +4379,33 @@ int application_main(const Options &options) {
       return 1;
     }
     if (!child.error.empty()) {
-      status = terminal_requested
-                   ? "TERMINAL ERROR - CHECK LOG"
+      status = !terminal_mode.empty()
+                   ? terminal_title + " ERROR - CHECK LOG"
                    : (reboot_requested ? "REBOOT ERROR - CHECK LOG"
                                        : "GAME ERROR - CHECK LOG");
       std::cerr << "deck-menu: " << child.error << std::endl;
     } else if (!child.started) {
-      status = terminal_requested
-                   ? "TERMINAL DID NOT START"
+      status = !terminal_mode.empty()
+                   ? terminal_title + " DID NOT START"
                    : (reboot_requested ? "REBOOT DID NOT START"
                                        : "GAME DID NOT START");
     } else if (child.exited_for_touch) {
-      status = terminal_requested
-                   ? "RETURNED FROM TERMINAL"
+      status = !terminal_mode.empty()
+                   ? "RETURNED FROM " + terminal_title
                    : (reboot_requested
                           ? "REBOOT CANCELLED"
                           : "RETURNED FROM " + games[selected_game].title);
     } else if (WIFEXITED(child.status) && WEXITSTATUS(child.status) == 0) {
-      status = terminal_requested
-                   ? "TERMINAL EXITED"
+      status = !terminal_mode.empty()
+                   ? terminal_title + " EXITED"
                    : (reboot_requested
                           ? "REBOOT COMMAND EXITED"
                           : games[selected_game].title + " EXITED");
     } else if (WIFEXITED(child.status)) {
       const std::string exit_status =
           std::to_string(WEXITSTATUS(child.status));
-      status = terminal_requested
-                   ? "TERMINAL EXITED (STATUS " + exit_status + ")"
+      status = !terminal_mode.empty()
+                   ? terminal_title + " EXITED (STATUS " + exit_status + ")"
                    : (reboot_requested
                           ? "REBOOT FAILED (STATUS " + exit_status + ")"
                           : games[selected_game].title + " EXITED (STATUS " +
@@ -4335,15 +4413,16 @@ int application_main(const Options &options) {
     } else if (WIFSIGNALED(child.status)) {
       const std::string signal_status =
           std::to_string(WTERMSIG(child.status));
-      status = terminal_requested
-                   ? "TERMINAL STOPPED (SIGNAL " + signal_status + ")"
+      status = !terminal_mode.empty()
+                   ? terminal_title + " STOPPED (SIGNAL " + signal_status +
+                         ")"
                    : (reboot_requested
                           ? "REBOOT STOPPED (SIGNAL " + signal_status + ")"
                           : games[selected_game].title + " STOPPED (SIGNAL " +
                                 signal_status + ")");
     } else {
-      status = terminal_requested
-                   ? "TERMINAL STOPPED"
+      status = !terminal_mode.empty()
+                   ? terminal_title + " STOPPED"
                    : (reboot_requested
                           ? "REBOOT STOPPED"
                           : games[selected_game].title + " STOPPED");

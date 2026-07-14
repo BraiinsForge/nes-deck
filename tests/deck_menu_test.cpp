@@ -430,7 +430,7 @@ int main() {
   const std::string terminal = directory + "/capture-keymap.sh";
   const std::string terminal_capture = directory + "/terminal.keymap";
   const std::string terminal_helper =
-      "#!/bin/sh\nprintf '%s' \"$RETRO_DECK_KEYMAP\" > "
+      "#!/bin/sh\nprintf '%s:%s' \"$RETRO_DECK_KEYMAP\" \"$1\" > "
       "\"$TERMINAL_CAPTURE\"\n";
   expect(write_file(terminal, terminal_helper.data(), terminal_helper.size()),
          "write terminal fixture");
@@ -440,12 +440,12 @@ int main() {
   {
     Framebuffer framebuffer;
     const ChildResult child =
-        run_terminal(terminal, "cz", NULL, &framebuffer);
+        run_terminal(terminal, "cz", "lisp", NULL, &framebuffer);
     expect(child.started && child.error.empty(), "start terminal child");
     expect(WIFEXITED(child.status) && WEXITSTATUS(child.status) == 0,
            "terminal child exits cleanly");
-    expect(read_file(terminal_capture) == "cz",
-           "terminal child inherits selected keymap");
+    expect(read_file(terminal_capture) == "cz:lisp",
+           "terminal child inherits the keymap and exact REPL mode");
   }
   unsetenv("TERMINAL_CAPTURE");
   {
@@ -491,6 +491,23 @@ int main() {
              terminal_entry.rom == terminal &&
              is_built_in_terminal(terminal_entry),
          "built-in terminal is a routed Deck entry");
+  const GameEntry lua_entry = built_in_lua_entry(terminal);
+  expect(lua_entry.title == "LUA REPL" && lua_entry.system == "deck" &&
+             lua_entry.rom == terminal && is_built_in_lua(lua_entry) &&
+             terminal_mode_for_game(lua_entry) == "lua",
+         "built-in Lua REPL is a routed Deck entry");
+  tab_games.push_back(lua_entry);
+  const GameEntry lisp_entry = built_in_lisp_entry(terminal);
+  expect(lisp_entry.title == "LISP REPL" && lisp_entry.system == "deck" &&
+             lisp_entry.rom == terminal && is_built_in_lisp(lisp_entry) &&
+             terminal_mode_for_game(lisp_entry) == "lisp",
+         "built-in Lisp REPL is a routed Deck entry");
+  tab_games.push_back(lisp_entry);
+  expect(terminal_mode_for_game(terminal_entry) == "shell" &&
+             terminal_program_title("shell") == "TERMINAL" &&
+             terminal_program_title("lua") == "LUA REPL" &&
+             terminal_program_title("lisp") == "LISP REPL",
+         "terminal program modes have stable launcher labels");
   tab_games.push_back(terminal_entry);
   const GameEntry reboot_entry = built_in_reboot_entry("/bin/true");
   expect(reboot_entry.title == "REBOOT" && reboot_entry.system == "deck" &&
@@ -781,7 +798,7 @@ int main() {
 
   render_menu(tab_games, "deck", 42, "us", true, 0, std::string(), &canvas,
               &menu_layout);
-  expect(menu_layout.game_indices.size() == 3 &&
+  expect(menu_layout.game_indices.size() == 5 &&
              menu_layout.shown_game_index == 6 &&
              tab_games[menu_layout.shown_game_index].id == "ten-seconds",
          "Deck carousel exposes the Ten Seconds app entry");
@@ -801,14 +818,49 @@ int main() {
 
   render_menu(tab_games, "deck", 42, "us", true, 1, std::string(), &canvas,
               &menu_layout);
-  expect(menu_layout.game_indices.size() == 3 &&
+  expect(menu_layout.game_indices.size() == 5 &&
              menu_layout.shown_game_index == 7 &&
+             is_built_in_lua(tab_games[menu_layout.shown_game_index]),
+         "Deck carousel exposes the built-in Lua REPL entry");
+  expect(canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 46) *
+                        kLogicalWidth +
+                    menu_layout.game_placeholder.x + 58] ==
+                 tab_games[7].color.pixel() &&
+             rect_contains_color(
+                 canvas,
+                 Rect{menu_layout.game_placeholder.x + 58,
+                      menu_layout.game_placeholder.y + 46, 304, 184},
+                 tab_games[7].color.pixel()),
+         "Lua REPL uses its own prompt logo");
+
+  render_menu(tab_games, "deck", 42, "us", true, 2, std::string(), &canvas,
+              &menu_layout);
+  expect(menu_layout.game_indices.size() == 5 &&
+             menu_layout.shown_game_index == 8 &&
+             is_built_in_lisp(tab_games[menu_layout.shown_game_index]),
+         "Deck carousel exposes the built-in Lisp REPL entry");
+  expect(rect_contains_color(
+             canvas,
+             Rect{menu_layout.game_placeholder.x + 46,
+                  menu_layout.game_placeholder.y + 48, 328, 170},
+             tab_games[8].color.pixel()) &&
+             rect_contains_color(
+                 canvas,
+                 Rect{menu_layout.game_placeholder.x + 102,
+                      menu_layout.game_placeholder.y + 106, 216, 54},
+                 xterm_pixel(kColorText)),
+         "Lisp REPL uses its own parenthesized logo");
+
+  render_menu(tab_games, "deck", 42, "us", true, 3, std::string(), &canvas,
+              &menu_layout);
+  expect(menu_layout.game_indices.size() == 5 &&
+             menu_layout.shown_game_index == 9 &&
              is_built_in_terminal(tab_games[menu_layout.shown_game_index]),
          "Deck carousel exposes the built-in terminal entry");
   expect(canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 46) *
                         kLogicalWidth +
                     menu_layout.game_placeholder.x + 76] ==
-                 tab_games[7].color.pixel() &&
+                 tab_games[9].color.pixel() &&
              rect_contains_color(
                  canvas,
                  Rect{menu_layout.game_placeholder.x + 76,
@@ -816,17 +868,17 @@ int main() {
                  xterm_pixel(kColorText)),
          "Terminal uses its own CRT prompt logo");
 
-  render_menu(tab_games, "deck", 42, "us", true, 2, std::string(), &canvas,
+  render_menu(tab_games, "deck", 42, "us", true, 4, std::string(), &canvas,
               &menu_layout);
-  expect(menu_layout.game_indices.size() == 3 &&
-             menu_layout.shown_game_index == 8 &&
+  expect(menu_layout.game_indices.size() == 5 &&
+             menu_layout.shown_game_index == 10 &&
              is_built_in_reboot(tab_games[menu_layout.shown_game_index]),
          "Deck carousel exposes the built-in reboot entry");
   expect(canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 38) *
                         kLogicalWidth +
                     menu_layout.game_placeholder.x +
                         menu_layout.game_placeholder.width / 2 - 10] ==
-                 tab_games[8].color.pixel() &&
+                 tab_games[10].color.pixel() &&
              canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 150) *
                         kLogicalWidth +
                     menu_layout.game_placeholder.x +

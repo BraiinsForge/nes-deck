@@ -59,9 +59,9 @@ without a keyboard, which is important for unattended boot.
 
 ## Touch launcher on boot
 
-Deck firmware with a `/mnt/data` partition should keep the emulator and ROM
-there instead of filling the small OpenWrt overlay. Build the seven ARM
-payloads and fetch the checksum-pinned homebrew set first:
+Deck firmware with a `/mnt/data` partition should keep the emulators, language
+runtimes, and ROMs there instead of filling the small OpenWrt overlay. Build
+the ARM payloads and fetch the checksum-pinned homebrew set first:
 
 ```bash
 nix build .#nes-deck -o result-nes-deck
@@ -71,6 +71,7 @@ nix build .#chip8-deck -o result-chip8-deck
 nix build .#ten-seconds-deck -o result-ten-seconds
 nix build .#deck-menu -o result-menu
 nix build .#fbterm-deck -o result-fbterm
+nix build .#lua-deck -o result-lua
 nix build -f nix/ecl-arm-static.nix -o result-ecl
 ./ops/deck-menu/fetch-foss-games.sh foss-games
 ```
@@ -81,11 +82,11 @@ The exact file map and catalog contract are documented in
 
 ```bash
 ssh root@<deck-ip> 'mkdir -p /mnt/data/nes-deck/menu \
-  /mnt/data/nes-deck/ecl /mnt/data/nes-deck/games \
+  /mnt/data/nes-deck/ecl /mnt/data/nes-deck/games /mnt/data/nes-deck/langs \
   /mnt/data/nes-deck/licenses /mnt/data/nes-deck/terminal/fonts \
   /mnt/data/nes-deck/terminal/keymaps /mnt/data/roms/nes \
   /mnt/data/roms/gb /mnt/data/roms/gbc /mnt/data/roms/zx \
-  /mnt/data/roms/chip8'
+  /mnt/data/roms/chip8 /mnt/data/langs/lua /mnt/data/langs/lisp'
 scp result-nes-deck/bin/nes-deck root@<deck-ip>:/mnt/data/nes-deck/nes-deck
 scp result-gb-deck/bin/gb-deck root@<deck-ip>:/mnt/data/nes-deck/gb-deck
 scp result-zx-deck/bin/zx-deck root@<deck-ip>:/mnt/data/nes-deck/zx-deck
@@ -110,6 +111,9 @@ scp -r result-zx-deck/share/licenses/zx-deck \
 scp -r result-chip8-deck/share/licenses/chip8-deck \
   root@<deck-ip>:/mnt/data/nes-deck/licenses/
 scp -r result-ecl/bin result-ecl/lib root@<deck-ip>:/mnt/data/nes-deck/ecl/
+scp result-lua/bin/lua root@<deck-ip>:/mnt/data/nes-deck/langs/lua
+scp -r result-lua/share/licenses/lua-deck \
+  root@<deck-ip>:/mnt/data/nes-deck/licenses/
 scp deploy/ecl root@<deck-ip>:/usr/bin/ecl
 scp -r foss-games/roms/* root@<deck-ip>:/mnt/data/roms/
 scp -r roms/nes roms/gb roms/gbc roms/zx root@<deck-ip>:/mnt/data/roms/
@@ -131,6 +135,7 @@ ssh root@<deck-ip> '
     /mnt/data/nes-deck/terminal/fbterm \
     /mnt/data/nes-deck/terminal/loadkeys \
     /mnt/data/nes-deck/terminal/retro-terminal \
+    /mnt/data/nes-deck/langs/lua \
     /usr/sbin/deck-wifi-profile-add /usr/bin/ecl \
     /etc/init.d/nes-deck.new
   /etc/init.d/bmc stop
@@ -146,8 +151,12 @@ Use the orange console selector to choose **NES**, **GAME BOY**, **GAME BOY
 COLOR**, **ZX SPECTRUM**, **CHIP-8**, or **DECK**. Tap its Up/Down arrows, or
 use either controller's D-pad, to switch consoles. Tap the console or press A
 to open its game carousel. Left/Right selects a game, A launches it, and B
-returns to the console selector. Successful controller or touchscreen
-navigation plays a brief chiptune while volume is audible. The touchscreen
+returns to the console selector. The DECK carousel includes Lua and Common
+Lisp REPLs alongside the timer, shell terminal, and reboot action. Both REPLs
+use fbterm and keep user files under `/mnt/data/langs/lua` and
+`/mnt/data/langs/lisp` respectively.
+Successful controller or touchscreen navigation plays a brief chiptune while
+volume is audible. The touchscreen
 arrows and game art remain fully usable without a controller. The **- / VOL /
 +** control and controller L/R buttons change the next game's PCM volume in
 5-point steps from 0 through 100. Tap the green volume display to mute it; the

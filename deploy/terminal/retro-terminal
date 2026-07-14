@@ -4,6 +4,10 @@ set -u
 
 BASE=${RETRO_DECK_TERMINAL_BASE:-/mnt/data/nes-deck/terminal}
 TTY=${RETRO_DECK_TERMINAL_TTY:-/dev/tty1}
+LANG_BASE=${RETRO_DECK_LANG_BASE:-/mnt/data/langs}
+LUA=${RETRO_DECK_LUA:-/mnt/data/nes-deck/langs/lua}
+LISP=${RETRO_DECK_LISP:-/mnt/data/nes-deck/ecl/bin/ecl.bin}
+ECLDIR=${RETRO_DECK_ECL_DIR:-/mnt/data/nes-deck/ecl/lib/ecl/}
 FBTERM=$BASE/fbterm
 LOADKEYS=$BASE/loadkeys
 KEYMAP_DIR=$BASE/keymaps
@@ -19,6 +23,8 @@ PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export FONTCONFIG_FILE FONTCONFIG_PATH HOME TERM SHELL PATH
 unset FONTCONFIG_SYSROOT
 
+umask 077
+
 fail() {
   printf 'retro-terminal: %s\n' "$1" >&2
   exit 1
@@ -31,6 +37,33 @@ fail() {
   fail "fontconfig file is unreadable: $FONTCONFIG_PATH/$FONTCONFIG_FILE"
 [ -r "$US_KEYMAP" ] || fail "US keymap is unreadable: $US_KEYMAP"
 [ -r "$CZ_KEYMAP" ] || fail "Czech keymap is unreadable: $CZ_KEYMAP"
+
+[ "$#" -le 1 ] || fail "usage: retro-terminal [shell|lua|lisp]"
+mode=${1:-shell}
+case $mode in
+  shell)
+    set -- /bin/ash -l
+    ;;
+  lua)
+    [ -x "$LUA" ] || fail "Lua interpreter is missing or not executable: $LUA"
+    workdir=$LANG_BASE/lua
+    mkdir -p "$workdir" || fail "cannot create Lua working directory: $workdir"
+    cd "$workdir" || fail "cannot enter Lua working directory: $workdir"
+    set -- "$LUA"
+    ;;
+  lisp)
+    [ -x "$LISP" ] || fail "Lisp interpreter is missing or not executable: $LISP"
+    [ -d "$ECLDIR" ] || fail "ECL runtime directory is unavailable: $ECLDIR"
+    workdir=$LANG_BASE/lisp
+    mkdir -p "$workdir" || fail "cannot create Lisp working directory: $workdir"
+    cd "$workdir" || fail "cannot enter Lisp working directory: $workdir"
+    export ECLDIR
+    set -- "$LISP" --norc
+    ;;
+  *)
+    fail "mode must be 'shell', 'lua', or 'lisp'"
+    ;;
+esac
 
 keymap=${RETRO_DECK_KEYMAP:-us}
 case $keymap in
@@ -62,7 +95,7 @@ trap 'signal_status=143' TERM
 "$LOADKEYS" -C "$TTY" -q -u "$selected_keymap" ||
   fail "cannot load selected $keymap keymap"
 
-"$FBTERM" -n 'DejaVu Sans Mono' -s 16 -f 7 -b 0 -- /bin/ash -l \
+"$FBTERM" -n 'DejaVu Sans Mono' -s 16 -f 7 -b 0 -- "$@" \
   0<>"$TTY" 1>&0 &
 terminal_pid=$!
 terminal_status=0

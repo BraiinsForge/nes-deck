@@ -240,31 +240,39 @@ passphrases, WireGuard private keys, or ROM data.
   `ff41f39cf00da7e078c2ea09ef7a510c75fda53fb3c771c1f4f40774e30ff11e`;
   `help.doc` is
   `f80d7c10da0e0a09bde089c8e9ad650701befa14a76f1fc740ddae036dacd536`.
+- Lua 5.5.0 is installed at `/mnt/data/nes-deck/langs/lua`, SHA-256
+  `bce111b82c9e8e9f4d77d1dae287cfcdb4bd94c9a4da57ee5e24036482ae628e`.
+  It is a stripped static ARMv7 hard-float executable built from the pinned
+  official source archive, with no Nix runtime references. Lua and ECL use
+  private persistent working directories at `/mnt/data/langs/lua` and
+  `/mnt/data/langs/lisp`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `5e449b43e76889f04ed39785e33b0381692054b5dba1ee126406bbe595983aa7`.
+  `53199519f6da67d0b8066cd1577959c9b26a90874ed781db68bb39cbe73125b9`.
   It validates the manifest and system-specific NES/GB/GBC/ZX/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
   This build includes the full-screen two-second return hold, persistent
   volume controls, a persistent US/Czech terminal keymap toggle, the Wi-Fi
-  editor, and a supervised framebuffer-terminal action. The installed launcher
-  SHA-256 is
-  `935fbedbe07f4c58fd393bbb7859661aa879254ef70f4028b0aebf28676ce25f`.
+  editor, a supervised shell terminal, and supervised Lua and Lisp REPLs. The
+  installed launcher SHA-256 is
+  `1b76dcce698775b7dd1dc9106d00f626777bacbb43394baaf1079af618559a25`.
   Successful controller and touchscreen navigation uses the same short
   chiptune cues while volume is audible.
 - The renderer uses only canonical xterm-256 colors. Its initial screen is a
   large xterm-202 orange console selector with aligned Up/Down arrows. Opening
   it reveals one horizontal game carousel with orange Left/Right arrows,
   cached cover art when available, compact position markers, and the terminal,
-  timer, and reboot app marks drawn natively. Operational controls appear only
-  in game view and have no panel background. No product label, description, or
-  license text remains in the launcher. Reproducible 1280x480 captures of every
+  Lua, Lisp, timer, and reboot app marks drawn natively. Operational controls
+  appear only in game view and have no panel background. No product label,
+  description, or license text remains in the launcher. Reproducible 1280x480
+  captures of every
   console, every game position, mute, keymap, reboot confirmation, and all four
   Wi-Fi keyboard states are in `/root/retro-deck-screens` on the deployment
   host, together with a contact sheet and the reproducibly rendered timer
-  result screen. The current set has six console selectors, all fifteen
-  catalog positions, operational variants, and the timer.
+  result screen. The current 34-PNG set has six console selectors, all
+  nineteen carousel positions, operational variants, the timer, and its
+  contact sheet.
 - Menu transitions build the complete rotated frame in cacheable memory before
   publishing finished rows to live scanout. This removes the visible black
   clear between screens and reduces live framebuffer writes per transition
@@ -373,9 +381,14 @@ passphrases, WireGuard private keys, or ROM data.
   punctuation with no old glyph smear. A bottom-row marker remained inside
   the padded viewport. The terminal launcher uses the active `/dev/tty1` and a
   private fontconfig file; its SHA-256 is
-  `78bd1b3679fe90c191161ef2e09fb6d6fcdf9ba408b72b846567a294b3f6a155`.
+  `2640b2cdfee29d92f70f2fb137e8f25e189892d7e0e69d499a91c9b16018718b`.
   A live launch reached the interactive `root@braiins-deck` prompt. Exiting the
   shell or using the two-second touch hold returns to the menu.
+- The terminal launcher accepts only exact `shell`, `lua`, and `lisp` modes.
+  Lua starts the pinned interpreter in `/mnt/data/langs/lua`; Lisp exports the
+  exact ECL runtime directory, passes `--norc`, and starts in
+  `/mnt/data/langs/lisp`. Direct live probes reported Lua 5.5 and ECL 26.5.5
+  from those working directories before the menu service was restarted.
 - BusyBox `ash` attaches `/dev/null` to a non-interactive background job when
   that job has no explicit stdin redirection. The terminal launcher must keep
   fbterm in the background so it can wait for complete shutdown and restore
@@ -485,6 +498,8 @@ transitions as `deck-menu.pre-staged-present`.
 The current ZX/menu/timer deployment rollback is
 `/mnt/data/nes-deck/backups/20260714-pre-zx-spectrum-d1cd98c/`; it retains the
 pre-Spectrum menu payloads and the tested intermediate Spectrum binaries.
+The pre-REPL menu, launcher, and terminal files are retained beside their live
+counterparts with the suffix `.pre-repl-20260714`.
 
 ```sh
 # Stock UI must stay disabled
@@ -502,6 +517,8 @@ hexdump -C /mnt/data/nes-deck/state/terminal-keymap.state
 # ECL and generated catalog
 /usr/bin/ecl --norc --eval '(format t "~A~%" (lisp-implementation-version))' \
   --eval '(quit)'
+/mnt/data/nes-deck/langs/lua -e 'print(_VERSION)'
+ls -ld /mnt/data/langs/lua /mnt/data/langs/lisp
 cmp /mnt/data/nes-deck/menu/games.tsv \
   /mnt/data/nes-deck/state/games.tsv
 

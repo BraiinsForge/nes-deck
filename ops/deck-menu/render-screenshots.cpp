@@ -121,6 +121,8 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "%s\n", error.c_str());
     return 1;
   }
+  games.push_back(built_in_lua_entry("/terminal"));
+  games.push_back(built_in_lisp_entry("/terminal"));
   games.push_back(built_in_terminal_entry("/terminal"));
   games.push_back(built_in_reboot_entry("/sbin/reboot"));
   const size_t cover_count = load_game_covers(covers, &games);
@@ -169,7 +171,7 @@ int main(int argc, char **argv) {
               &menu_layout);
   if (!save_canvas(output, number++, "czech-keymap", canvas, &error))
     return 1;
-  render_menu(games, "deck", 42, "us", true, 2,
+  render_menu(games, "deck", 42, "us", true, 4,
               kRebootConfirmationText, &canvas, &menu_layout);
   if (!save_canvas(output, number++, "reboot-confirmation", canvas, &error))
     return 1;

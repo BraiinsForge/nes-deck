@@ -29,6 +29,9 @@ chmod 0700 "$FIXTURE/loadkeys"
 cat > "$FIXTURE/fbterm" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$RETRO_DECK_KEYMAP" > "$FBTERM_LOG"
+printf '%s\n' "$*" > "$FBTERM_ARGS_LOG"
+pwd > "$FBTERM_CWD_LOG"
+printf '%s\n' "${ECLDIR:-}" > "$FBTERM_ECLDIR_LOG"
 readlink /proc/$$/fd/0 > "$FBTERM_STDIN_LOG"
 exit 0
 EOF
@@ -36,9 +39,13 @@ chmod 0700 "$FIXTURE/fbterm"
 
 LOADKEYS_LOG=$FIXTURE/loadkeys.log
 FBTERM_LOG=$FIXTURE/fbterm.log
+FBTERM_ARGS_LOG=$FIXTURE/fbterm-args.log
+FBTERM_CWD_LOG=$FIXTURE/fbterm-cwd.log
+FBTERM_ECLDIR_LOG=$FIXTURE/fbterm-ecldir.log
 FBTERM_STDIN_LOG=$FIXTURE/fbterm-stdin.log
 TEST_TTY=/dev/zero
-export LOADKEYS_LOG FBTERM_LOG FBTERM_STDIN_LOG
+export LOADKEYS_LOG FBTERM_LOG FBTERM_ARGS_LOG FBTERM_CWD_LOG
+export FBTERM_ECLDIR_LOG FBTERM_STDIN_LOG
 
 RETRO_DECK_TERMINAL_BASE=$FIXTURE \
 RETRO_DECK_TERMINAL_TTY=$TEST_TTY \
@@ -57,6 +64,60 @@ RETRO_DECK_KEYMAP=cz \
   fail 'fbterm inherits the selected keymap name'
 [ "$(cat "$FBTERM_STDIN_LOG")" = "$TEST_TTY" ] ||
   fail 'background fbterm retains the explicit console on stdin'
+[ "$(cat "$FBTERM_ARGS_LOG")" = \
+    "-n DejaVu Sans Mono -s 16 -f 7 -b 0 -- /bin/ash -l" ] ||
+  fail 'default terminal mode launches the login shell'
+
+mkdir -p "$FIXTURE/ecl/lib/ecl"
+cat > "$FIXTURE/lua" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+cat > "$FIXTURE/lisp" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod 0700 "$FIXTURE/lua" "$FIXTURE/lisp"
+
+RETRO_DECK_TERMINAL_BASE=$FIXTURE \
+RETRO_DECK_TERMINAL_TTY=$TEST_TTY \
+RETRO_DECK_KEYMAP=us \
+RETRO_DECK_LANG_BASE=$FIXTURE/langs \
+RETRO_DECK_LUA=$FIXTURE/lua \
+  "$LAUNCHER" lua
+[ "$(cat "$FBTERM_ARGS_LOG")" = \
+    "-n DejaVu Sans Mono -s 16 -f 7 -b 0 -- $FIXTURE/lua" ] ||
+  fail 'Lua mode launches only the configured Lua interpreter'
+[ "$(cat "$FBTERM_CWD_LOG")" = "$FIXTURE/langs/lua" ] ||
+  fail 'Lua mode uses its persistent working directory'
+[ "$(stat -c %a "$FIXTURE/langs/lua")" = 700 ] ||
+  fail 'Lua working directory is private'
+
+RETRO_DECK_TERMINAL_BASE=$FIXTURE \
+RETRO_DECK_TERMINAL_TTY=$TEST_TTY \
+RETRO_DECK_KEYMAP=us \
+RETRO_DECK_LANG_BASE=$FIXTURE/langs \
+RETRO_DECK_LISP=$FIXTURE/lisp \
+RETRO_DECK_ECL_DIR=$FIXTURE/ecl/lib/ecl \
+  "$LAUNCHER" lisp
+[ "$(cat "$FBTERM_ARGS_LOG")" = \
+    "-n DejaVu Sans Mono -s 16 -f 7 -b 0 -- $FIXTURE/lisp --norc" ] ||
+  fail 'Lisp mode launches only the configured ECL interpreter'
+[ "$(cat "$FBTERM_CWD_LOG")" = "$FIXTURE/langs/lisp" ] ||
+  fail 'Lisp mode uses its persistent working directory'
+[ "$(cat "$FBTERM_ECLDIR_LOG")" = "$FIXTURE/ecl/lib/ecl" ] ||
+  fail 'Lisp mode exports the configured ECL runtime directory'
+[ "$(stat -c %a "$FIXTURE/langs/lisp")" = 700 ] ||
+  fail 'Lisp working directory is private'
+
+: > "$LOADKEYS_LOG"
+if RETRO_DECK_TERMINAL_BASE=$FIXTURE \
+  RETRO_DECK_TERMINAL_TTY=$TEST_TTY \
+  "$LAUNCHER" python >/dev/null 2>&1; then
+  fail 'unsupported terminal program is rejected'
+fi
+[ ! -s "$LOADKEYS_LOG" ] ||
+  fail 'unsupported terminal program does not change the console map'
 
 : > "$LOADKEYS_LOG"
 if RETRO_DECK_TERMINAL_BASE=$FIXTURE \
@@ -87,7 +148,7 @@ command -v script >/dev/null 2>&1 ||
 : > "$LOADKEYS_LOG"
 CONSOLE_LOG=$FIXTURE/console.log
 script -q -e -c \
-  "env LOADKEYS_LOG=$LOADKEYS_LOG FBTERM_LOG=$FBTERM_LOG FBTERM_STDIN_LOG=$FBTERM_STDIN_LOG RETRO_DECK_TERMINAL_BASE=$FIXTURE RETRO_DECK_TERMINAL_TTY=/dev/tty RETRO_DECK_KEYMAP=us $LAUNCHER" \
+  "env LOADKEYS_LOG=$LOADKEYS_LOG FBTERM_LOG=$FBTERM_LOG FBTERM_ARGS_LOG=$FBTERM_ARGS_LOG FBTERM_CWD_LOG=$FBTERM_CWD_LOG FBTERM_ECLDIR_LOG=$FBTERM_ECLDIR_LOG FBTERM_STDIN_LOG=$FBTERM_STDIN_LOG RETRO_DECK_TERMINAL_BASE=$FIXTURE RETRO_DECK_TERMINAL_TTY=/dev/tty RETRO_DECK_KEYMAP=us $LAUNCHER" \
   "$CONSOLE_LOG" >/dev/null
 hide_cursor=$(printf '\033[?25l')
 disable_blank=$(printf '\033[9;0]')
