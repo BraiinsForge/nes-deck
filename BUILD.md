@@ -123,8 +123,9 @@ For active development and iteration, use the Nix development environment:
 The GB/GBC package builds the GPL-2.0-only Gambatte libretro core at the exact
 revision in `flake.lock`, using Cortex-A7/NEON flags, LTO, and native RGB565
 output. The ZX package statically links the GPL-3.0 Fuse libretro core pinned
-in the same lock file, enables fast TAP autoload, and assigns Kempston and
-Sinclair 2 joysticks to the two stable controller ports. The CHIP-8 package
+in the same lock file, enables fast TAP autoload, uses the 288x216 medium-border
+frame for exact 2x scaling, and assigns Kempston and Sinclair 2 joysticks to
+the two stable controller ports. The CHIP-8 package
 statically links the pinned MIT c-octo core through `src/chip8_core.c`. They use
 the shared framebuffer/audio implementation in `src/deck_runtime.cpp` and the
 same stable two-controller discovery as InfoNES.

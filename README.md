@@ -228,7 +228,8 @@ controller 2 up/down to the right ship.
 ZX Spectrum uses Kempston joystick for Player 1 and Sinclair 2 for Player 2.
 A/X fires, B/Y also supplies joystick Up, Back opens Fuse's on-screen Spectrum
 keyboard, L is Enter, R is Space, and Start also sends Enter. TAP files load
-automatically at accelerated tape speed.
+automatically at accelerated tape speed. The medium-border 288x216 frame is
+shown at exact 2x scale inside the rounded-screen safe area.
 
 Keyboard controls apply to Player 1:
 

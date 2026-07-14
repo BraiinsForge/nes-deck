@@ -162,7 +162,7 @@ bool environment_callback(unsigned int command, void *data) {
       else if (std::strcmp(variable->key, "fuse_emulation_speed") == 0)
         variable->value = "100";
       else if (std::strcmp(variable->key, "fuse_size_border") == 0)
-        variable->value = "full";
+        variable->value = "medium";
       else if (std::strcmp(variable->key, "fuse_palette") == 0)
         variable->value = "Fuse Standard";
       else if (std::strcmp(variable->key, "fuse_auto_load") == 0 ||
