@@ -127,7 +127,15 @@ func (app *application) requestAllowed(request *http.Request) bool {
 }
 
 func (app *application) sameOrigin(request *http.Request) bool {
-	return request.Header.Get("Origin") == app.origin
+	origin := request.Header.Get("Origin")
+	if origin == "" || origin == "null" {
+		// Some browsers omit Origin, or send an opaque origin, for a regular
+		// same-page form submission. ServeHTTP has already restricted these
+		// requests to the exact service host and a WireGuard peer. Upload and
+		// logout requests additionally require an unguessable CSRF token.
+		return true
+	}
+	return origin == app.origin
 }
 
 func (app *application) currentSession(request *http.Request) (string, userSession, bool) {

@@ -236,12 +236,20 @@ func TestCrossOriginAndPaperDesignRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := requestFor(http.MethodPost, serviceOrigin+"/login", strings.NewReader("password=nope"))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response := httptest.NewRecorder()
-	app.ServeHTTP(response, request)
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("origin-less login returned %d", response.Code)
+	for _, origin := range []string{"", "null", serviceOrigin} {
+		request := requestFor(http.MethodPost, serviceOrigin+"/login", nil)
+		request.Header.Set("Origin", origin)
+		if !app.sameOrigin(request) {
+			t.Fatalf("browser-compatible origin was rejected: %q", origin)
+		}
+	}
+	foreign := requestFor(http.MethodPost, serviceOrigin+"/login", strings.NewReader("password=nope"))
+	foreign.Header.Set("Origin", "http://example.com")
+	foreign.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	foreignResponse := httptest.NewRecorder()
+	app.ServeHTTP(foreignResponse, foreign)
+	if foreignResponse.Code != http.StatusForbidden {
+		t.Fatalf("foreign-origin login returned %d", foreignResponse.Code)
 	}
 	for attempt := 0; attempt < 6; attempt++ {
 		failed := requestFor(http.MethodPost, serviceOrigin+"/login", strings.NewReader("password=wrong-password-value"))
