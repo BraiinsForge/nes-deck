@@ -21,8 +21,8 @@ static void test_published_thegamepad_mapping(void) {
   assert(gamepad_key_to_pad(BTN_TRIGGER) == PAD_B); // Y / SDL b0
   assert(gamepad_key_to_pad(BTN_BASE) == PAD_SELECT);
   assert(gamepad_key_to_pad(BTN_BASE2) == PAD_START);
-  assert(gamepad_key_to_pad(BTN_TOP2) == 0);
-  assert(gamepad_key_to_pad(BTN_PINKIE) == 0);
+  assert(gamepad_key_to_pad(BTN_TOP2) == PAD_L);
+  assert(gamepad_key_to_pad(BTN_PINKIE) == PAD_R);
 }
 
 static void test_digital_axes(void) {
@@ -53,15 +53,16 @@ static void test_two_independent_players(void) {
   second.x_value = 127;
   second.y_value = 255;
   second.raw_buttons = (1u << (BTN_THUMB - BTN_TRIGGER)) |
-                       (1u << (BTN_BASE2 - BTN_TRIGGER));
-  assert(gamepad_state(second) == (PAD_DOWN | PAD_B | PAD_START));
+                       (1u << (BTN_BASE2 - BTN_TRIGGER)) |
+                       (1u << (BTN_PINKIE - BTN_TRIGGER));
+  assert(gamepad_state(second) == (PAD_DOWN | PAD_B | PAD_START | PAD_R));
 
   keyboard_state = PAD_SELECT;
   gamepads[0].state = gamepad_state(first);
   gamepads[1].state = gamepad_state(second);
   publish_states();
   assert(GetJoypadInput(0) == (PAD_SELECT | PAD_LEFT | PAD_A));
-  assert(GetJoypadInput(1) == (PAD_DOWN | PAD_B | PAD_START));
+  assert(GetJoypadInput(1) == (PAD_DOWN | PAD_B | PAD_START | PAD_R));
 }
 
 int main(void) {

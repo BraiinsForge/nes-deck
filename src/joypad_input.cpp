@@ -41,6 +41,8 @@
 #define PAD_DOWN   (1u << 5)
 #define PAD_LEFT   (1u << 6)
 #define PAD_RIGHT  (1u << 7)
+#define PAD_L      (1u << 8)
+#define PAD_R      (1u << 9)
 
 static const unsigned short kTheGamepadVendor = 0x1c59;
 static const unsigned short kTheGamepadProduct = 0x0026;
@@ -139,7 +141,9 @@ static unsigned int gamepad_key_to_pad(unsigned short code) {
   case BTN_TRIGGER: return PAD_B; // Physical Y
   case BTN_BASE: return PAD_SELECT; // Physical Back
   case BTN_BASE2: return PAD_START; // Physical Start
-  default: return 0; // Shoulder buttons are intentionally unused.
+  case BTN_TOP2: return PAD_L;      // Physical L
+  case BTN_PINKIE: return PAD_R;    // Physical R
+  default: return 0;
   }
 }
 
@@ -673,8 +677,8 @@ extern "C" int InitJoypadInput(void) {
   for (size_t player = 0; player < kPlayerCount; ++player)
     gamepad_count += gamepads[player].fd >= 0 ? 1 : 0;
   printf("InfoNES: %zu THEGamepad controller(s) ready\n", gamepad_count);
-  printf("InfoNES: THEGamepad D-pad=move, A/X=NES A, B/Y=NES B, "
-         "Back=Select, Start=Start\n");
+  printf("InfoNES: THEGamepad D-pad=move, A/X=primary, B/Y=secondary, "
+         "L/R=shoulders, Back=Select, Start=Start\n");
   printf("InfoNES: Keyboard Arrows/WASD=move, Z/J=A, X/K=B, "
          "Space=Select, Enter=Start\n");
 

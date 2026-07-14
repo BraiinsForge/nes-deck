@@ -5,6 +5,7 @@
  *
  *   deck-menu --nes-emulator /absolute/path/to/infones \
  *             --gb-emulator /absolute/path/to/gb-deck \
+ *             --zx-emulator /absolute/path/to/zx-deck \
  *             --chip8-emulator /absolute/path/to/chip8-deck \
  *             --deck-game /absolute/path/to/ten-seconds-deck \
  *             --manifest /absolute/path/to/games.tsv \
@@ -321,7 +322,7 @@ bool parse_color(const std::string &text, RgbColor *color) {
 
 bool valid_system(const std::string &system) {
   return system == "nes" || system == "gb" || system == "gbc" ||
-         system == "chip8" || system == "deck";
+         system == "zx" || system == "chip8" || system == "deck";
 }
 
 bool read_exact_at(int fd, off_t offset, unsigned char *data, size_t size) {
@@ -409,6 +410,47 @@ bool validate_rom(const std::string &system, const std::string &path,
         if (error)
           *error = "GBC entry does not advertise color support: " + path;
         ok = false;
+      }
+    }
+  } else if (system == "zx") {
+    if (info.st_size < 4 || info.st_size > 8 * 1024 * 1024) {
+      if (error)
+        *error = "ZX Spectrum TAP must contain 4 bytes through 8 MiB: " + path;
+      ok = false;
+    } else {
+      std::vector<unsigned char> tape(static_cast<size_t>(info.st_size));
+      if (!read_exact_at(fd, 0, tape.data(), tape.size())) {
+        if (error)
+          *error = "cannot read complete ZX Spectrum TAP: " + path;
+        ok = false;
+      } else {
+        size_t offset = 0;
+        size_t block_count = 0;
+        while (ok && offset < tape.size()) {
+          if (tape.size() - offset < 2) {
+            ok = false;
+            break;
+          }
+          const size_t block_size =
+              static_cast<size_t>(tape[offset]) |
+              (static_cast<size_t>(tape[offset + 1]) << 8);
+          offset += 2;
+          if (block_size < 2 || block_size > tape.size() - offset) {
+            ok = false;
+            break;
+          }
+          unsigned char checksum = 0;
+          for (size_t byte = 0; byte < block_size; ++byte)
+            checksum ^= tape[offset + byte];
+          if (checksum != 0) {
+            ok = false;
+            break;
+          }
+          offset += block_size;
+          ++block_count;
+        }
+        if ((!ok || offset != tape.size() || block_count == 0) && error)
+          *error = "ZX Spectrum TAP has invalid blocks or checksums: " + path;
       }
     }
   } else if (info.st_size < 1 || info.st_size > 65024) {
@@ -1721,6 +1763,7 @@ const SystemDefinition kSystemDefinitions[] = {
     {"nes", "NES"},
     {"gb", "GAME BOY"},
     {"gbc", "GAME BOY COLOR"},
+    {"zx", "ZX SPECTRUM"},
     {"chip8", "CHIP-8"},
     {"deck", "DECK"},
 };
@@ -3606,6 +3649,7 @@ int geometry_test() {
 struct Options {
   std::string nes_emulator;
   std::string gb_emulator;
+  std::string zx_emulator;
   std::string chip8_emulator;
   std::string deck_game;
   std::string manifest;
@@ -3625,6 +3669,8 @@ std::string emulator_for_game(const Options &options, const GameEntry &game) {
     return options.nes_emulator;
   if (game.system == "gb" || game.system == "gbc")
     return options.gb_emulator;
+  if (game.system == "zx")
+    return options.zx_emulator;
   if (game.system == "deck")
     return options.deck_game;
   return options.chip8_emulator;
@@ -3633,7 +3679,8 @@ std::string emulator_for_game(const Options &options, const GameEntry &game) {
 void print_usage(const char *program) {
   std::cerr << "Usage:\n  " << program
             << " --nes-emulator PATH --gb-emulator PATH "
-               "--chip8-emulator PATH --deck-game PATH --manifest PATH "
+               "--zx-emulator PATH --chip8-emulator PATH "
+               "--deck-game PATH --manifest PATH "
                "--cover-directory PATH "
                "--volume-state PATH "
                "--keymap-state PATH --terminal PATH --wifi-helper PATH\n  "
@@ -3652,6 +3699,7 @@ bool parse_options(int argc, char **argv, Options *options,
       options->help = true;
     } else if (argument == "--nes-emulator" ||
                argument == "--gb-emulator" ||
+               argument == "--zx-emulator" ||
                argument == "--chip8-emulator" ||
                argument == "--deck-game" ||
                argument == "--manifest" ||
@@ -3669,6 +3717,8 @@ bool parse_options(int argc, char **argv, Options *options,
         destination = &options->nes_emulator;
       else if (argument == "--gb-emulator")
         destination = &options->gb_emulator;
+      else if (argument == "--zx-emulator")
+        destination = &options->zx_emulator;
       else if (argument == "--chip8-emulator")
         destination = &options->chip8_emulator;
       else if (argument == "--deck-game")
@@ -3709,13 +3759,15 @@ bool parse_options(int argc, char **argv, Options *options,
     return true;
   }
   if (options->nes_emulator.empty() || options->gb_emulator.empty() ||
-      options->chip8_emulator.empty() || options->deck_game.empty() ||
+      options->zx_emulator.empty() || options->chip8_emulator.empty() ||
+      options->deck_game.empty() ||
       options->manifest.empty() || options->cover_directory.empty() ||
       options->volume_state.empty() || options->keymap_state.empty() ||
       options->terminal.empty() || options->wifi_helper.empty()) {
     if (error)
-      *error = "--nes-emulator, --gb-emulator, --chip8-emulator, --deck-game, "
-               "--manifest, --cover-directory, --volume-state, "
+      *error = "--nes-emulator, --gb-emulator, --zx-emulator, "
+               "--chip8-emulator, --deck-game, --manifest, "
+               "--cover-directory, --volume-state, "
                "--keymap-state, --terminal, and --wifi-helper are required";
     return false;
   }
@@ -3726,6 +3778,7 @@ int application_main(const Options &options) {
   std::string error;
   if (!validate_executable(options.nes_emulator, "NES emulator", &error) ||
       !validate_executable(options.gb_emulator, "GB/GBC emulator", &error) ||
+      !validate_executable(options.zx_emulator, "ZX Spectrum emulator", &error) ||
       !validate_executable(options.chip8_emulator, "CHIP-8 emulator", &error) ||
       !validate_executable(options.deck_game, "Deck game", &error) ||
       !validate_executable(options.terminal, "terminal launcher", &error) ||

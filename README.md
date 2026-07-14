@@ -1,10 +1,12 @@
 # Retro Deck for Braiins Forge Deck
 
-Play NES, Game Boy, Game Boy Color, CHIP-8, and Deck-native games on a Braiins Forge Deck
-with a full-screen touch launcher. This project combines Deck-native
+Play NES, Game Boy, Game Boy Color, ZX Spectrum, CHIP-8, and Deck-native games
+on a Braiins Forge Deck with a full-screen touch launcher. This project
+combines Deck-native
 [FCEUmm](https://github.com/libretro/libretro-fceumm),
 [Gambatte](https://github.com/libretro/gambatte-libretro), and
-[c-octo](https://github.com/JohnEarnest/c-octo) frontends with a persistent
+[Fuse](https://github.com/libretro/fuse-libretro), plus the
+[c-octo](https://github.com/JohnEarnest/c-octo) frontend with a persistent
 game catalog, a Wi-Fi profile editor, and an integrated framebuffer terminal.
 
 ## What You Need
@@ -13,7 +15,7 @@ game catalog, a Wi-Fi profile editor, and an integrated framebuffer terminal.
 - **USB-C PD Power Adapter**
 - **USB-C Hub with PD Support**
 - **USB Keyboard or another mapped input for gameplay**
-- **ROM files** (`.nes`, `.gb`, `.gbc`, or `.ch8`)
+- **ROM files** (`.nes`, `.gb`, `.gbc`, `.tap`, or `.ch8`)
 
 The touchscreen operates the launcher. NES controls still use the keyboard
 bindings below.
@@ -58,12 +60,13 @@ without a keyboard, which is important for unattended boot.
 ## Touch launcher on boot
 
 Deck firmware with a `/mnt/data` partition should keep the emulator and ROM
-there instead of filling the small OpenWrt overlay. Build the six ARM
+there instead of filling the small OpenWrt overlay. Build the seven ARM
 payloads and fetch the checksum-pinned homebrew set first:
 
 ```bash
 nix build .#nes-deck -o result-nes-deck
 nix build .#gb-deck -o result-gb-deck
+nix build .#zx-deck -o result-zx-deck
 nix build .#chip8-deck -o result-chip8-deck
 nix build .#ten-seconds-deck -o result-ten-seconds
 nix build .#deck-menu -o result-menu
@@ -81,9 +84,11 @@ ssh root@<deck-ip> 'mkdir -p /mnt/data/nes-deck/menu \
   /mnt/data/nes-deck/ecl /mnt/data/nes-deck/games \
   /mnt/data/nes-deck/licenses /mnt/data/nes-deck/terminal/fonts \
   /mnt/data/nes-deck/terminal/keymaps /mnt/data/roms/nes \
-  /mnt/data/roms/gb /mnt/data/roms/gbc /mnt/data/roms/chip8'
+  /mnt/data/roms/gb /mnt/data/roms/gbc /mnt/data/roms/zx \
+  /mnt/data/roms/chip8'
 scp result-nes-deck/bin/nes-deck root@<deck-ip>:/mnt/data/nes-deck/nes-deck
 scp result-gb-deck/bin/gb-deck root@<deck-ip>:/mnt/data/nes-deck/gb-deck
+scp result-zx-deck/bin/zx-deck root@<deck-ip>:/mnt/data/nes-deck/zx-deck
 scp result-chip8-deck/bin/chip8-deck root@<deck-ip>:/mnt/data/nes-deck/chip8-deck
 scp result-ten-seconds/bin/ten-seconds-deck \
   root@<deck-ip>:/mnt/data/nes-deck/ten-seconds-deck
@@ -100,12 +105,14 @@ scp -r result-nes-deck/share/licenses/nes-deck \
   root@<deck-ip>:/mnt/data/nes-deck/licenses/
 scp -r result-gb-deck/share/licenses/gb-deck \
   root@<deck-ip>:/mnt/data/nes-deck/licenses/
+scp -r result-zx-deck/share/licenses/zx-deck \
+  root@<deck-ip>:/mnt/data/nes-deck/licenses/
 scp -r result-chip8-deck/share/licenses/chip8-deck \
   root@<deck-ip>:/mnt/data/nes-deck/licenses/
 scp -r result-ecl/bin result-ecl/lib root@<deck-ip>:/mnt/data/nes-deck/ecl/
 scp deploy/ecl root@<deck-ip>:/usr/bin/ecl
 scp -r foss-games/roms/* root@<deck-ip>:/mnt/data/roms/
-scp -r roms/nes roms/gb roms/gbc root@<deck-ip>:/mnt/data/roms/
+scp -r roms/nes roms/gb roms/gbc roms/zx root@<deck-ip>:/mnt/data/roms/
 scp foss-games/licenses/* root@<deck-ip>:/mnt/data/nes-deck/licenses/
 scp deploy/menu/{games.sexp,games.tsv,compile-catalog.lisp,deck-menu-launcher} \
   root@<deck-ip>:/mnt/data/nes-deck/menu/
@@ -117,7 +124,8 @@ scp deploy/menu/nes-deck.init root@<deck-ip>:/etc/init.d/nes-deck.new
 
 ssh root@<deck-ip> '
   chmod 755 /mnt/data/nes-deck/nes-deck /mnt/data/nes-deck/gb-deck \
-    /mnt/data/nes-deck/chip8-deck /mnt/data/nes-deck/ten-seconds-deck \
+    /mnt/data/nes-deck/zx-deck /mnt/data/nes-deck/chip8-deck \
+    /mnt/data/nes-deck/ten-seconds-deck \
     /mnt/data/nes-deck/menu/deck-menu \
     /mnt/data/nes-deck/menu/deck-menu-launcher \
     /mnt/data/nes-deck/terminal/fbterm \
@@ -134,14 +142,14 @@ ssh root@<deck-ip> '
 '
 ```
 
-Use the orange console selector to choose **NES**, **GAME BOY**,
-**GAME BOY COLOR**, **CHIP-8**, or **DECK**. Tap its Up/Down arrows, or use
-either controller's D-pad, to switch consoles. Tap the console or press A to
-open its game carousel. Left/Right selects a game, A launches it, and B returns
-to the console selector. Successful controller navigation plays a brief
-chiptune while volume is audible. The touchscreen arrows and game art remain
-fully usable without a controller. The **- / VOL / +** control and controller
-L/R buttons change the next game's PCM volume in
+Use the orange console selector to choose **NES**, **GAME BOY**, **GAME BOY
+COLOR**, **ZX SPECTRUM**, **CHIP-8**, or **DECK**. Tap its Up/Down arrows, or
+use either controller's D-pad, to switch consoles. Tap the console or press A
+to open its game carousel. Left/Right selects a game, A launches it, and B
+returns to the console selector. Successful controller navigation plays a
+brief chiptune while volume is audible. The touchscreen arrows and game art
+remain fully usable without a controller. The **- / VOL / +** control and
+controller L/R buttons change the next game's PCM volume in
 5-point steps from 0 through 100. Tap the green volume display to mute it; the
 display turns red and reads **VOL OFF**. Tap that display or **+** to restore
 the last audible level, or the configured default if the launcher started
@@ -158,8 +166,9 @@ The FCEUmm frontend writes changed NES SRAM atomically to `.srm` every ten
 seconds and on exit. It migrates the compressed `.srm` format written by the
 earlier InfoNES frontend on first load. The GB/GBC frontend does the same with
 `.sav` and, when the cartridge has a real-time clock, `.rtc`. Games without
-battery-backed storage do not create save sidecars; this is cartridge saving,
-not arbitrary emulator save states.
+battery-backed storage do not create cartridge-save sidecars. The ZX Spectrum
+frontend instead writes an atomic `.state` snapshot beside each TAP every
+twelve seconds and on exit, then resumes it on the next launch.
 
 The computer icon opens a real framebuffer shell with a 16-pixel safe area for
 the display's rounded corners. **KEYS US** and **KEYS CZ** select the terminal
@@ -216,6 +225,11 @@ GB/GBC use the same D-pad, A, B, Start, and Select mapping. CHIP-8's standard
 Octo profile maps the D-pad to WASD, A/X to E, B/Y to Q, Back to Z, and Start
 to V. Space Racer instead maps controller 1 up/down to the left ship and
 controller 2 up/down to the right ship.
+
+ZX Spectrum uses Kempston joystick for Player 1 and Sinclair 2 for Player 2.
+A/X fires, B/Y also supplies joystick Up, Back opens Fuse's on-screen Spectrum
+keyboard, L is Enter, R is Space, and Start also sends Enter. TAP files load
+automatically at accelerated tape speed.
 
 Keyboard controls apply to Player 1:
 

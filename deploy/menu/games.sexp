@@ -54,6 +54,16 @@
    :system :gbc
    :rom "/mnt/data/roms/gbc/super-mario-bros-deluxe.gbc"
    :color "#D78787")
+  (:id "elite"
+   :title "ELITE"
+   :system :zx
+   :rom "/mnt/data/roms/zx/elite-joystick-club-version.tap"
+   :color "#87AFFF")
+  (:id "knight-lore"
+   :title "KNIGHT LORE"
+   :system :zx
+   :rom "/mnt/data/roms/zx/knight-lore.tap"
+   :color "#D7AF5F")
   (:id "outlaw"
    :title "OUTLAW"
    :system :chip8

@@ -4,7 +4,7 @@
 
 - `roms/<system>/` is the canonical location for owner-supplied ROMs in this
   private repository. Supported system directories are `nes`, `gb`, `gbc`,
-  and `chip8`.
+  `zx`, and `chip8`.
 - A ROM or single-ROM ZIP placed at the repository root is unprocessed intake.
   Never commit it at the root. Validate the payload, extract it when needed,
   give it a lowercase kebab-case filename, and file it under the matching
@@ -15,5 +15,6 @@
   applications are not ROMs and remain under `/mnt/data/nes-deck/games/`.
 - Freely licensed ROMs fetched by `ops/deck-menu/fetch-foss-games.sh` are
   reproducible build output and are not duplicated in the tracked ROM library.
-- Preserve `.sav`, `.rtc`, and emulator configuration sidecars when moving a
-  Deck ROM. Keep each sidecar beside its ROM in the same system directory.
+- Preserve `.sav`, `.rtc`, `.state`, and emulator configuration sidecars when
+  moving a Deck ROM. Keep each sidecar beside its ROM in the same system
+  directory.

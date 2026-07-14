@@ -8,6 +8,8 @@ final-fantasy-legend-iii	FINAL FANTASY LEGEND III	gb	/mnt/data/roms/gb/final-fan
 kirbys-dream-land	KIRBY'S DREAM LAND	gb	/mnt/data/roms/gb/kirbys-dream-land.gb	#AFAFAF
 donkey-kong-country	DONKEY KONG COUNTRY	gbc	/mnt/data/roms/gbc/donkey-kong-country.gbc	#D7AF87
 super-mario-bros-deluxe	SUPER MARIO BROS. DELUXE	gbc	/mnt/data/roms/gbc/super-mario-bros-deluxe.gbc	#D78787
+elite	ELITE	zx	/mnt/data/roms/zx/elite-joystick-club-version.tap	#87AFFF
+knight-lore	KNIGHT LORE	zx	/mnt/data/roms/zx/knight-lore.tap	#D7AF5F
 outlaw	OUTLAW	chip8	/mnt/data/roms/chip8/outlaw.ch8	#AF875F
 space-racer	SPACE RACER	chip8	/mnt/data/roms/chip8/spaceracer.ch8	#E4E4E4
 ten-seconds	10 SECONDS	deck	/mnt/data/nes-deck/games/ten-seconds	#FFAF87

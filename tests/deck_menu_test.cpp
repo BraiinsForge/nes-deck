@@ -71,6 +71,7 @@ int main() {
   const std::string rom = directory + "/fixture.nes";
   const std::string gb_rom = directory + "/fixture.gb";
   const std::string gbc_rom = directory + "/fixture.gbc";
+  const std::string zx_rom = directory + "/fixture.tap";
   const std::string chip8_rom = directory + "/fixture.ch8";
   const std::string deck_config = directory + "/fixture.sexp";
   const std::string manifest = directory + "/games.tsv";
@@ -200,6 +201,9 @@ int main() {
   const unsigned char chip8[] = {0x00, 0xe0, 0x12, 0x00};
   expect(write_file(chip8_rom, chip8, sizeof(chip8)),
          "write CHIP-8 fixture");
+  const unsigned char tap[] = {0x02, 0x00, 0xff, 0xff};
+  expect(write_file(zx_rom, tap, sizeof(tap)),
+         "write checksummed ZX Spectrum TAP fixture");
   const std::string deck_config_text = "corrupted on purpose\n";
   expect(write_file(deck_config, deck_config_text.data(),
                     deck_config_text.size()),
@@ -298,6 +302,13 @@ int main() {
          "monochrome-only ROM is rejected as GBC");
   expect(validate_rom("chip8", chip8_rom, &error),
          "bounded CHIP-8 ROM is accepted");
+  expect(validate_rom("zx", zx_rom, &error),
+         "checksummed ZX Spectrum TAP is accepted");
+  const unsigned char bad_tap[] = {0x02, 0x00, 0xff, 0x00};
+  expect(write_file(zx_rom, bad_tap, sizeof(bad_tap)),
+         "write corrupt ZX Spectrum TAP fixture");
+  expect(!validate_rom("zx", zx_rom, &error),
+         "ZX Spectrum TAP with a bad checksum is rejected");
   expect(validate_rom("deck", deck_config, &error),
          "Deck config remains launchable when its contents are corrupt");
   expect(validate_rom("deck", directory + "/missing.sexp", &error),
@@ -460,8 +471,8 @@ int main() {
     second_nes.cover = CoverImage();
     tab_games.push_back(second_nes);
   }
-  const char *additional_systems[] = {"gb", "gbc", "chip8", "deck"};
-  for (size_t index = 0; index < 4 && !games.empty(); ++index) {
+  const char *additional_systems[] = {"gb", "gbc", "zx", "chip8", "deck"};
+  for (size_t index = 0; index < 5 && !games.empty(); ++index) {
     GameEntry entry = games[0];
     entry.id = additional_systems[index];
     entry.title = additional_systems[index];
@@ -504,7 +515,7 @@ int main() {
              menu_layout.volume_display.width == 0 &&
              menu_layout.volume_up_button.width == 0,
          "console selector hides operational controls");
-  expect(menu_layout.systems.size() == 5,
+  expect(menu_layout.systems.size() == 6,
          "selector exposes each populated console");
   expect(menu_layout.game_buttons.empty(),
          "initial selector does not expose game targets");
@@ -760,18 +771,18 @@ int main() {
          "muted volume display uses red text on black");
   expect(menu_layout.game_buttons.size() == 1 &&
              menu_layout.game_indices.size() == 1 &&
-             menu_layout.shown_game_index == 4,
+             menu_layout.shown_game_index == 5,
          "switching consoles changes the visible game mapping");
   if (!menu_layout.game_buttons.empty()) {
     expect(target_at(menu_layout, menu_layout.game_buttons[0].x + 1,
-                     menu_layout.game_buttons[0].y + 1) == 4,
+                     menu_layout.game_buttons[0].y + 1) == 5,
            "visible card launches its catalog game after filtering");
   }
 
   render_menu(tab_games, "deck", 42, "us", true, 0, std::string(), &canvas,
               &menu_layout);
   expect(menu_layout.game_indices.size() == 3 &&
-             menu_layout.shown_game_index == 5 &&
+             menu_layout.shown_game_index == 6 &&
              tab_games[menu_layout.shown_game_index].id == "ten-seconds",
          "Deck carousel exposes the Ten Seconds app entry");
   expect(canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 72) *
@@ -781,23 +792,23 @@ int main() {
              canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 80) *
                         kLogicalWidth +
                     menu_layout.game_placeholder.x + 118] ==
-                 tab_games[5].color.pixel() &&
+                 tab_games[6].color.pixel() &&
              canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 154) *
                         kLogicalWidth +
                     menu_layout.game_placeholder.x + 206] ==
-                 tab_games[5].color.pixel(),
+                 tab_games[6].color.pixel(),
          "Ten Seconds uses its own dimmed 10.00 segment logo");
 
   render_menu(tab_games, "deck", 42, "us", true, 1, std::string(), &canvas,
               &menu_layout);
   expect(menu_layout.game_indices.size() == 3 &&
-             menu_layout.shown_game_index == 6 &&
+             menu_layout.shown_game_index == 7 &&
              is_built_in_terminal(tab_games[menu_layout.shown_game_index]),
          "Deck carousel exposes the built-in terminal entry");
   expect(canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 46) *
                         kLogicalWidth +
                     menu_layout.game_placeholder.x + 76] ==
-                 tab_games[6].color.pixel() &&
+                 tab_games[7].color.pixel() &&
              rect_contains_color(
                  canvas,
                  Rect{menu_layout.game_placeholder.x + 76,
@@ -808,14 +819,14 @@ int main() {
   render_menu(tab_games, "deck", 42, "us", true, 2, std::string(), &canvas,
               &menu_layout);
   expect(menu_layout.game_indices.size() == 3 &&
-             menu_layout.shown_game_index == 7 &&
+             menu_layout.shown_game_index == 8 &&
              is_built_in_reboot(tab_games[menu_layout.shown_game_index]),
          "Deck carousel exposes the built-in reboot entry");
   expect(canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 38) *
                         kLogicalWidth +
                     menu_layout.game_placeholder.x +
                         menu_layout.game_placeholder.width / 2 - 10] ==
-                 tab_games[7].color.pixel() &&
+                 tab_games[8].color.pixel() &&
              canvas[static_cast<size_t>(menu_layout.game_placeholder.y + 150) *
                         kLogicalWidth +
                     menu_layout.game_placeholder.x +
@@ -869,8 +880,9 @@ int main() {
   Options options;
   const char *option_values[] = {
       "deck-menu",      "--nes-emulator",   "/bin/true",
-      "--gb-emulator",  "/bin/false",       "--chip8-emulator",
-      "/bin/echo",      "--deck-game",      "/bin/cat",
+      "--gb-emulator",  "/bin/false",       "--zx-emulator",
+      "/bin/printf",    "--chip8-emulator", "/bin/echo",
+      "--deck-game",    "/bin/cat",
       "--manifest",     "/tmp/games",
       "--cover-directory", "/tmp/covers",
       "--volume-state", "/tmp/volume",      "--keymap-state",
@@ -901,6 +913,9 @@ int main() {
     routed.system = "chip8";
     expect(emulator_for_game(options, routed) == "/bin/echo",
            "CHIP-8 entry selects CHIP-8 emulator");
+    routed.system = "zx";
+    expect(emulator_for_game(options, routed) == "/bin/printf",
+           "ZX entry selects ZX Spectrum emulator");
     routed.system = "deck";
     expect(emulator_for_game(options, routed) == "/bin/cat",
            "Deck entry selects native Deck game");
@@ -920,6 +935,7 @@ int main() {
   unlink(volume_state.c_str());
   unlink(manifest.c_str());
   unlink(chip8_rom.c_str());
+  unlink(zx_rom.c_str());
   unlink(deck_config.c_str());
   unlink(gbc_rom.c_str());
   unlink(gb_rom.c_str());

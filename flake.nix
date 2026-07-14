@@ -15,6 +15,10 @@
       url = "github:libretro/gambatte-libretro/dfc165599f3f1068c40a0b7ad6fe5f161283d483";
       flake = false;
     };
+    fuse-src = {
+      url = "github:libretro/fuse-libretro/bce196fb774835fe65b3e5b821887a4ccf657167";
+      flake = false;
+    };
     c-octo-src = {
       url = "github:JohnEarnest/c-octo/5f62f185c9e6ae324dcbe9e7fe35ec7c3bdebfb1";
       flake = false;
@@ -22,7 +26,7 @@
   };
 
   outputs =
-    { self, nixpkgs, infones-src, fceumm-src, gambatte-src, c-octo-src }:
+    { self, nixpkgs, infones-src, fceumm-src, gambatte-src, fuse-src, c-octo-src }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -342,6 +346,71 @@
             description = "Gambatte GB/GBC core with Deck-native framebuffer frontend";
             homepage = "https://github.com/libretro/gambatte-libretro";
             license = pkgs.lib.licenses.gpl2Only;
+            platforms = [ "armv7l-linux" ];
+          };
+        };
+
+        zx-deck = pkgsCross.stdenv.mkDerivation {
+          pname = "zx-deck";
+          version = "1.6.0-20260420-deck";
+
+          src = fuse-src;
+          nativeBuildInputs = [ pkgs.gnumake ];
+          buildInputs = [ pkgsCross.glibc.static ];
+
+          NIX_CFLAGS_COMPILE = "-static -O3";
+          NIX_LDFLAGS = "-static";
+
+          postPatch = ''
+            # The Nix source has no Git metadata. Generate the version source
+            # once from the pinned revision instead of invoking git.
+            substituteInPlace Makefile.libretro \
+              --replace-fail \
+                '$(CORE_DIR)/src/version.c: FORCE' \
+                '$(CORE_DIR)/src/version.c:'
+          '';
+
+          buildPhase = ''
+            runHook preBuild
+            sed 's/HASH/bce196fb774835fe65b3e5b821887a4ccf657167/' \
+              etc/version.c.templ > src/version.c
+            make -f Makefile.libretro -j$NIX_BUILD_CORES \
+              platform=rpi2 \
+              STATIC_LINKING=1 \
+              TARGET=fuse_libretro.a \
+              CC=$CC \
+              CXX=$CXX \
+              AR=$CC-ar
+            $CXX -std=c++11 -O3 -fomit-frame-pointer \
+              -marm -march=armv7-a -mtune=cortex-a7 \
+              -mfpu=neon-vfpv4 -mfloat-abi=hard \
+              -Wall -Wextra -Wpedantic -Werror \
+              -DRETRO_DECK_ZX=1 \
+              -Isrc -I${./src} \
+              ${./src/libretro_deck.cpp} \
+              ${./src/deck_runtime.cpp} \
+              ${./src/joypad_input.cpp} \
+              fuse_libretro.a \
+              -static -pthread -lm -o zx-deck
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/bin $out/share/licenses/zx-deck
+            install -m755 zx-deck $out/bin/zx-deck
+            install -m644 LICENSE $out/share/licenses/zx-deck/Fuse-LICENSE
+            install -m644 libspectrum/COPYING \
+              $out/share/licenses/zx-deck/libspectrum-COPYING
+            install -m644 bzip2/LICENSE \
+              $out/share/licenses/zx-deck/bzip2-LICENSE
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Fuse ZX Spectrum core with Deck-native framebuffer frontend";
+            homepage = "https://github.com/libretro/fuse-libretro";
+            license = pkgs.lib.licenses.gpl3Only;
             platforms = [ "armv7l-linux" ];
           };
         };

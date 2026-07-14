@@ -82,6 +82,9 @@ jobs:
     - name: Build GB and GBC emulator
       run: nix build -L .#gb-deck -o result-gb-deck
 
+    - name: Build ZX Spectrum emulator
+      run: nix build -L .#zx-deck -o result-zx-deck
+
     - name: Build CHIP-8 emulator
       run: nix build -L .#chip8-deck -o result-chip8-deck
 
@@ -96,6 +99,7 @@ jobs:
         file ./result/bin/infones
         file ./result-menu/bin/deck-menu
         file ./result-gb-deck/bin/gb-deck
+        file ./result-zx-deck/bin/zx-deck
         file ./result-chip8-deck/bin/chip8-deck
         file ./result-ten-seconds/bin/ten-seconds-deck
         file ./result-fbterm/bin/fbterm
@@ -105,6 +109,7 @@ jobs:
         ls -lh ./result/bin/infones
         ls -lh ./result-menu/bin/deck-menu
         ls -lh ./result-gb-deck/bin/gb-deck
+        ls -lh ./result-zx-deck/bin/zx-deck
         ls -lh ./result-chip8-deck/bin/chip8-deck
         ls -lh ./result-ten-seconds/bin/ten-seconds-deck
         ls -lh ./result-fbterm/bin/fbterm

@@ -22,6 +22,12 @@ ffl-collection.png	Final Fantasy Legend III (World) (Collection of SaGa).png
 ffl-usa.png	Final Fantasy Legend III (USA).png
 EOF
 
+cat > "$temporary/zx.tsv" <<'EOF'
+elite-alt.png	Elite (Europe) (Alt 1).png
+elite-europe.png	Elite (Europe).png
+knight-lore.png	Knight Lore (Europe).png
+EOF
+
 assert_match() {
 	title=$1
 	index=$2
@@ -39,5 +45,7 @@ assert_match() {
 assert_match 'Tetris' "$temporary/nes.tsv" 'tetris-usa.png'
 assert_match "Kirby's Adventure" "$temporary/nes.tsv" 'kirby-usa.png'
 assert_match 'Final Fantasy Legend III' "$temporary/gb.tsv" 'ffl-usa.png'
+assert_match 'Elite' "$temporary/zx.tsv" 'elite-europe.png'
+assert_match 'Knight Lore' "$temporary/zx.tsv" 'knight-lore.png'
 
 echo "fetch-covers-test: OK"

@@ -1,6 +1,6 @@
 # Private ROM library
 
-This private repository stores owner-supplied cartridge images in one
+This private repository stores owner-supplied game images in one
 canonical tree:
 
 ```text
@@ -8,6 +8,7 @@ roms/
   nes/
   gb/
   gbc/
+  zx/
   chip8/
 ```
 
@@ -21,6 +22,6 @@ the correct system directory, update `SHA256SUMS` and the menu catalog, then
 remove the root intake file.
 
 On the Deck, the corresponding runtime tree is `/mnt/data/roms/<system>/`.
-Save, RTC, and emulator configuration sidecars live beside their ROM. The
-freely licensed games documented in `FOSS_GAMES.md` are reproducibly fetched
-into the same layout and are not duplicated here.
+Save, RTC, state, and emulator configuration sidecars live beside their ROM.
+The freely licensed games documented in `FOSS_GAMES.md` are reproducibly
+fetched into the same layout and are not duplicated here.

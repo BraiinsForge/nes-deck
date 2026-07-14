@@ -16,6 +16,7 @@ system_slug() {
 		nes) printf '%s' 'Nintendo%20-%20Nintendo%20Entertainment%20System' ;;
 		gb) printf '%s' 'Nintendo%20-%20Game%20Boy' ;;
 		gbc) printf '%s' 'Nintendo%20-%20Game%20Boy%20Color' ;;
+		zx) printf '%s' 'Sinclair%20-%20ZX%20Spectrum' ;;
 		*) return 1 ;;
 	esac
 }
@@ -46,15 +47,16 @@ decode_index() {
 ensure_index() {
 	system=$1
 	slug=$2
-	html=$index_dir/$system.html
-	names=$index_dir/$system.tsv
+	kind=$3
+	html=$index_dir/$system-$kind.html
+	names=$index_dir/$system-$kind.tsv
 	if [ -s "$names" ]; then
 		return 0
 	fi
 	if [ ! -s "$html" ]; then
 		temporary=$html.tmp.$$
-		url=https://thumbnails.libretro.com/$slug/Named_Boxarts/
-		echo "cover-cache: caching $system box-art index"
+		url=https://thumbnails.libretro.com/$slug/$kind/
+		echo "cover-cache: caching $system $kind index"
 		if ! wget -q -T 30 -O "$temporary" "$url" || [ ! -s "$temporary" ]; then
 			rm -f "$temporary"
 			echo "cover-cache: cannot download $system index" >&2
@@ -166,10 +168,23 @@ while IFS="$tab" read -r id title system rom color extra; do
 		: > "$missing"
 		continue
 	fi
-	if ! ensure_index "$system" "$slug"; then
+	match=
+	matched_kind=
+	index_available=false
+	for kind in Named_Boxarts Named_Titles Named_Snaps; do
+		if ! ensure_index "$system" "$slug" "$kind"; then
+			continue
+		fi
+		index_available=true
+		match=$(best_match "$title" "$index_dir/$system-$kind.tsv")
+		if [ -n "$match" ]; then
+			matched_kind=$kind
+			break
+		fi
+	done
+	if [ "$index_available" != true ]; then
 		continue
 	fi
-	match=$(best_match "$title" "$index_dir/$system.tsv")
 	if [ -z "$match" ]; then
 		echo "cover-cache: no Libretro match for $id ($title)"
 		: > "$missing"
@@ -178,8 +193,8 @@ while IFS="$tab" read -r id title system rom color extra; do
 	href=${match%%"$tab"*}
 	matched_name=${match#*"$tab"}
 	temporary=$cover.tmp.$$
-	url=https://thumbnails.libretro.com/$slug/Named_Boxarts/$href
-	echo "cover-cache: $id <- $matched_name"
+	url=https://thumbnails.libretro.com/$slug/$matched_kind/$href
+	echo "cover-cache: $id <- $matched_kind/$matched_name"
 	if wget -q -T 30 -O "$temporary" "$url" && [ -s "$temporary" ]; then
 		size=$(wc -c < "$temporary" 2>/dev/null) || size=0
 		case $size in ''|*[!0-9]*) size=0 ;; esac

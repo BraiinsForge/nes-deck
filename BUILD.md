@@ -1,6 +1,7 @@
 # Building Retro Deck emulators for Braiins Forge Deck
 
-This guide explains how to build the NES, GB/GBC, and CHIP-8 emulators, the
+This guide explains how to build the NES, GB/GBC, ZX Spectrum, and CHIP-8
+emulators, the
 Deck-native ten-second game, and
 launcher for the Braiins Forge Deck.
 
@@ -64,6 +65,7 @@ For active development and iteration, use the Nix development environment:
    ```bash
    nix build .#deck-menu -o result-menu
    nix build .#gb-deck -o result-gb-deck
+   nix build .#zx-deck -o result-zx-deck
    nix build .#chip8-deck -o result-chip8-deck
    nix build .#ten-seconds-deck -o result-ten-seconds
    nix build .#fbterm-deck -o result-fbterm
@@ -120,8 +122,10 @@ For active development and iteration, use the Nix development environment:
 
 The GB/GBC package builds the GPL-2.0-only Gambatte libretro core at the exact
 revision in `flake.lock`, using Cortex-A7/NEON flags, LTO, and native RGB565
-output, then statically links it to `src/gb_deck.cpp`. The CHIP-8 package
-statically links the pinned MIT c-octo core through `src/chip8_core.c`. Both use
+output. The ZX package statically links the GPL-3.0 Fuse libretro core pinned
+in the same lock file, enables fast TAP autoload, and assigns Kempston and
+Sinclair 2 joysticks to the two stable controller ports. The CHIP-8 package
+statically links the pinned MIT c-octo core through `src/chip8_core.c`. They use
 the shared framebuffer/audio implementation in `src/deck_runtime.cpp` and the
 same stable two-controller discovery as InfoNES.
 
@@ -222,7 +226,7 @@ guessing.
 
 Audio uses `/dev/dsp`, backed by ALSA's OSS compatibility plugin. The physical
 I2S device is S16_LE stereo; the emulators supply S16_LE mono and the plugin
-duplicates it to the hardware channels. InfoNES and CHIP-8 use 44100 Hz.
+duplicates it to the hardware channels. InfoNES, Fuse, and CHIP-8 use 44100 Hz.
 
 InfoNES builds each rotated 512x480 image in a cacheable staging buffer and
 then publishes contiguous framebuffer rows. Set `INFONES_RUNTIME_DIAGNOSTICS=1`
@@ -248,7 +252,7 @@ deck-infones/
 ├── flake.nix              # Nix build configuration
 ├── src/
 │   ├── InfoNES_System_Deck.cpp  # Deck framebuffer/display code
-│   ├── gb_deck.cpp              # Gambatte libretro host
+│   ├── libretro_deck.cpp        # FCEUmm, Gambatte, and Fuse host
 │   ├── chip8_deck.cpp           # CHIP-8 Deck frontend
 │   ├── chip8_core.c             # c-octo adaptation boundary
 │   ├── deck_runtime.cpp         # Shared framebuffer/audio/frame clock

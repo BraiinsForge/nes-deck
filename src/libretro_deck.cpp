@@ -5,6 +5,13 @@
 
 #include <libretro.h>
 
+#ifndef RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2
+#define RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2 67
+#endif
+#ifndef RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL
+#define RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL 68
+#endif
+
 #include <cerrno>
 #include <cstdarg>
 #include <csignal>
@@ -39,6 +46,15 @@ const char *const kSaveExtension = ".sav";
 const size_t kMinimumRomBytes = 0x150;
 const unsigned int kPlayerCount = 1;
 const bool kHasRtc = true;
+#elif defined(RETRO_DECK_ZX)
+const char *const kFrontendName = "zx-deck";
+const char *const kDefaultCoreName = "Fuse";
+const char *const kRomDescription = "ZX Spectrum";
+const char *const kRomUsage = "ROM.tap";
+const char *const kSaveExtension = ".sav";
+const size_t kMinimumRomBytes = 4;
+const unsigned int kPlayerCount = 2;
+const bool kHasRtc = false;
 #else
 #error "Select exactly one libretro Deck frontend"
 #endif
@@ -51,7 +67,14 @@ const unsigned int PAD_UP = 1u << 4;
 const unsigned int PAD_DOWN = 1u << 5;
 const unsigned int PAD_LEFT = 1u << 6;
 const unsigned int PAD_RIGHT = 1u << 7;
+#if defined(RETRO_DECK_ZX)
+const unsigned int PAD_L = 1u << 8;
+const unsigned int PAD_R = 1u << 9;
+#endif
 const size_t kMaximumRomBytes = 8 * 1024 * 1024;
+#if defined(RETRO_DECK_ZX)
+const size_t kMaximumStateBytes = 8 * 1024 * 1024;
+#endif
 
 volatile sig_atomic_t shutdown_requested = 0;
 DeckFramebuffer *framebuffer = NULL;
@@ -128,6 +151,42 @@ bool environment_callback(unsigned int command, void *data) {
       else if (std::strcmp(variable->key, "fceumm_overscan_v_top") == 0 ||
                std::strcmp(variable->key, "fceumm_overscan_v_bottom") == 0)
         variable->value = "8";
+      else
+        variable->value = NULL;
+      return variable->value != NULL;
+    }
+#elif defined(RETRO_DECK_ZX)
+    if (data) {
+      struct retro_variable *variable = static_cast<struct retro_variable *>(data);
+      if (!variable->key)
+        return false;
+      if (std::strcmp(variable->key, "fuse_machine") == 0)
+        variable->value = "Spectrum 48K";
+      else if (std::strcmp(variable->key, "fuse_emulation_speed") == 0)
+        variable->value = "100";
+      else if (std::strcmp(variable->key, "fuse_size_border") == 0)
+        variable->value = "full";
+      else if (std::strcmp(variable->key, "fuse_palette") == 0)
+        variable->value = "Fuse Standard";
+      else if (std::strcmp(variable->key, "fuse_auto_load") == 0 ||
+               std::strcmp(variable->key, "fuse_fast_load") == 0)
+        variable->value = "enabled";
+      else if (std::strcmp(variable->key, "fuse_load_sound") == 0 ||
+               std::strcmp(variable->key, "fuse_display_joystick_type") == 0)
+        variable->value = "disabled";
+      else if (std::strcmp(variable->key, "fuse_speaker_type") == 0)
+        variable->value = "tv speaker";
+      else if (std::strcmp(variable->key, "fuse_ay_stereo_separation") == 0)
+        variable->value = "none";
+      else if (std::strcmp(variable->key, "fuse_key_ovrlay_transp") == 0 ||
+               std::strcmp(variable->key, "fuse_auto_size_savestate") == 0)
+        variable->value = "enabled";
+      else if (std::strcmp(variable->key, "fuse_key_hold_time") == 0)
+        variable->value = "500";
+      else if (std::strcmp(variable->key, "fuse_joypad_start") == 0)
+        variable->value = "Enter";
+      else if (std::strncmp(variable->key, "fuse_joypad_", 12) == 0)
+        variable->value = "<none>";
       else
         variable->value = NULL;
       return variable->value != NULL;
@@ -213,6 +272,12 @@ int16_t input_state_callback(unsigned int port, unsigned int device,
     result |= 1u << RETRO_DEVICE_ID_JOYPAD_LEFT;
   if (state & PAD_RIGHT)
     result |= 1u << RETRO_DEVICE_ID_JOYPAD_RIGHT;
+#if defined(RETRO_DECK_ZX)
+  if (state & PAD_L)
+    result |= 1u << RETRO_DEVICE_ID_JOYPAD_L;
+  if (state & PAD_R)
+    result |= 1u << RETRO_DEVICE_ID_JOYPAD_R;
+#endif
   if (id == RETRO_DEVICE_ID_JOYPAD_MASK)
     return static_cast<int16_t>(result);
   if (id > RETRO_DEVICE_ID_JOYPAD_R3)
@@ -381,6 +446,33 @@ void load_persistent_memory(const std::string &base) {
   if (kHasRtc)
     load_memory_file(base + ".rtc", retro_get_memory_data(RETRO_MEMORY_RTC),
                      retro_get_memory_size(RETRO_MEMORY_RTC));
+#if defined(RETRO_DECK_ZX)
+  const std::string state_path = base + ".state";
+  struct stat info;
+  if (stat(state_path.c_str(), &info) == 0) {
+    if (!S_ISREG(info.st_mode) || info.st_size <= 0 ||
+        info.st_size > static_cast<off_t>(kMaximumStateBytes)) {
+      std::fprintf(stderr, "%s: ignoring invalid state: %s\n", kFrontendName,
+                   state_path.c_str());
+    } else {
+      std::ifstream input(state_path.c_str(), std::ios::in | std::ios::binary);
+      std::vector<uint8_t> state(static_cast<size_t>(info.st_size));
+      input.read(reinterpret_cast<char *>(state.data()),
+                 static_cast<std::streamsize>(state.size()));
+      if (input.gcount() != static_cast<std::streamsize>(state.size()) ||
+          input.bad() || !retro_unserialize(state.data(), state.size())) {
+        std::fprintf(stderr, "%s: cannot load state: %s\n", kFrontendName,
+                     state_path.c_str());
+      } else {
+        std::printf("%s: resumed state: %s\n", kFrontendName,
+                    state_path.c_str());
+      }
+    }
+  } else if (errno != ENOENT) {
+    std::fprintf(stderr, "%s: cannot stat state %s: %s\n", kFrontendName,
+                 state_path.c_str(), std::strerror(errno));
+  }
+#endif
 }
 
 bool save_persistent_memory(const std::string &base) {
@@ -392,7 +484,23 @@ bool save_persistent_memory(const std::string &base) {
       !kHasRtc || save_memory_file(base + ".rtc",
                                   retro_get_memory_data(RETRO_MEMORY_RTC),
                                   retro_get_memory_size(RETRO_MEMORY_RTC));
+#if defined(RETRO_DECK_ZX)
+  const size_t state_size = retro_serialize_size();
+  if (state_size == 0 || state_size > kMaximumStateBytes) {
+    errno = EFBIG;
+    return false;
+  }
+  std::vector<uint8_t> state(state_size);
+  if (!retro_serialize(state.data(), state.size())) {
+    errno = EIO;
+    return false;
+  }
+  const bool saved_state =
+      save_memory_file(base + ".state", state.data(), state.size());
+  return ram && rtc && saved_state;
+#else
   return ram && rtc;
+#endif
 }
 
 void install_signal_handlers() {
@@ -429,6 +537,12 @@ int main(int argc, char **argv) {
   retro_set_input_poll(input_poll_callback);
   retro_set_input_state(input_state_callback);
   retro_init();
+#if defined(RETRO_DECK_ZX)
+  retro_set_controller_port_device(
+      0, RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 1));
+  retro_set_controller_port_device(
+      1, RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 3));
+#endif
 
   struct retro_system_info system_info;
   std::memset(&system_info, 0, sizeof(system_info));

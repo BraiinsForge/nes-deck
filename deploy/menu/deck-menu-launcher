@@ -17,6 +17,7 @@ TMPDIR=$TMP_DIR
 MENU=$MENU_DIR/deck-menu
 NES_EMULATOR=$BASE/nes-deck
 GB_EMULATOR=$BASE/gb-deck
+ZX_EMULATOR=$BASE/zx-deck
 CHIP8_EMULATOR=$BASE/chip8-deck
 DECK_GAME=$BASE/ten-seconds-deck
 CATALOG=$MENU_DIR/games.sexp
@@ -102,6 +103,10 @@ if [ ! -x "$NES_EMULATOR" ]; then
 fi
 if [ ! -x "$GB_EMULATOR" ]; then
 	log_message "GB/GBC emulator is missing or not executable: $GB_EMULATOR"
+	exit 1
+fi
+if [ ! -x "$ZX_EMULATOR" ]; then
+	log_message "ZX Spectrum emulator is missing or not executable: $ZX_EMULATOR"
 	exit 1
 fi
 if [ ! -x "$CHIP8_EMULATOR" ]; then
@@ -205,6 +210,7 @@ log_message "starting deck-menu with volume state $VOLUME_STATE and keymap state
 exec "$MENU" \
 	--nes-emulator "$NES_EMULATOR" \
 	--gb-emulator "$GB_EMULATOR" \
+	--zx-emulator "$ZX_EMULATOR" \
 	--chip8-emulator "$CHIP8_EMULATOR" \
 	--deck-game "$DECK_GAME" \
 	--volume-state "$VOLUME_STATE" \

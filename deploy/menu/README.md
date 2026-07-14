@@ -21,6 +21,7 @@ The launcher also expects:
 - `/mnt/data/nes-deck/menu/deck-menu`
 - `/mnt/data/nes-deck/nes-deck`
 - `/mnt/data/nes-deck/gb-deck`
+- `/mnt/data/nes-deck/zx-deck`
 - `/mnt/data/nes-deck/chip8-deck`
 - `/mnt/data/nes-deck/ten-seconds-deck`
 - `/mnt/data/nes-deck/ecl/bin/ecl.bin` (ECL 26.5.5)
@@ -28,7 +29,7 @@ The launcher also expects:
 - `/mnt/data/nes-deck/terminal/retro-terminal`
 - `/mnt/data/nes-deck/terminal/{fbterm,loadkeys,keymaps/}`
 - `/usr/sbin/deck-wifi-profile-add`
-- `/mnt/data/roms/{nes,gb,gbc,chip8}/` and the ROM paths listed in
+- `/mnt/data/roms/{nes,gb,gbc,zx,chip8}/` and the ROM paths listed in
   `games.sexp`
 
 The launcher exports the exact trailing-slash runtime path
@@ -45,13 +46,18 @@ and the native menu explicitly unblanks fb0 whenever it reopens the display.
 Every managed child return also hides the Linux console cursor and keeps
 console blanking disabled, including after the framebuffer terminal exits.
 
+At boot, `fetch-covers` fills the persistent cover cache once per game. It
+prefers Libretro box art, then falls back to a title screen and finally a
+gameplay snapshot when a system's box-art set is incomplete. Cached images,
+source URLs, system indexes, and confirmed misses are reused on later boots.
+
 At runtime, use Up/Down on the orange console selector, then tap it to open the
 active console's carousel. Either THEGamepad controller provides the same
 navigation: Up/Down switches consoles, A opens one, Left/Right selects a game,
 A launches it, B returns to the console selector, and L/R changes volume in
 5-point steps. Successful controller navigation plays a short directional,
-enter, or back chiptune while volume is audible. An isolated sound worker keeps
-input responsive, and input arriving during a cue is discarded. Each game
+enter, or back chiptune while volume is audible. An isolated sound worker
+keeps input responsive, and input arriving during a cue is discarded. Each game
 retains its original catalog index for launch routing. Descriptions and license
 labels
 stay out of the launcher; redistribution and license details remain in
@@ -90,7 +96,7 @@ five required keys:
 
 1. `:id` - lowercase stable identifier
 2. `:title` - menu title
-3. `:system` - one of `:nes`, `:gb`, `:gbc`, `:chip8`, or `:deck`
+3. `:system` - one of `:nes`, `:gb`, `:gbc`, `:zx`, `:chip8`, or `:deck`
 4. `:rom` - normalized absolute path below `/mnt/data/roms/<system>/` with the
    system's required extension; Deck applications stay below
    `/mnt/data/nes-deck/games/`

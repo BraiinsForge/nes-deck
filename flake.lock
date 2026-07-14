@@ -34,6 +34,23 @@
         "type": "github"
       }
     },
+    "fuse-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1776705983,
+        "narHash": "sha256-N66LaveZ4P66LRYpP1KwkLKT1dvG/s7JPfDyRraVkc8=",
+        "owner": "libretro",
+        "repo": "fuse-libretro",
+        "rev": "bce196fb774835fe65b3e5b821887a4ccf657167",
+        "type": "github"
+      },
+      "original": {
+        "owner": "libretro",
+        "repo": "fuse-libretro",
+        "rev": "bce196fb774835fe65b3e5b821887a4ccf657167",
+        "type": "github"
+      }
+    },
     "gambatte-src": {
       "flake": false,
       "locked": {
@@ -87,6 +104,7 @@
       "inputs": {
         "c-octo-src": "c-octo-src",
         "fceumm-src": "fceumm-src",
+        "fuse-src": "fuse-src",
         "gambatte-src": "gambatte-src",
         "infones-src": "infones-src",
         "nixpkgs": "nixpkgs"
