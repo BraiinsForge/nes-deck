@@ -92,6 +92,7 @@ static int old_kbd_mode = -1;
 static struct termios old_term;
 static bool keyboard_configured = false;
 static unsigned int keyboard_state = 0;
+static bool keyboard_key_state[128] = {};
 static GamepadDevice gamepads[kPlayerCount];
 static pthread_t input_thread;
 static volatile int input_running = 0;
@@ -106,6 +107,10 @@ static pthread_mutex_t pad_mutex = PTHREAD_MUTEX_INITIALIZER;
 /*-------------------------------------------------------------------*/
 
 static unsigned int keycode_to_pad(unsigned char keycode) {
+#if defined(RETRO_DECK_ZX)
+  (void)keycode;
+  return 0;
+#else
   switch (keycode) {
   case 0x67: return PAD_UP;    // Up arrow
   case 0x6c: return PAD_DOWN;  // Down arrow
@@ -127,6 +132,7 @@ static unsigned int keycode_to_pad(unsigned char keycode) {
   case 0x61: return PAD_SELECT; // Right Control
   default: return 0;
   }
+#endif
 }
 
 /*
@@ -185,13 +191,12 @@ static bool bit_is_set(const unsigned long *bits, unsigned int bit) {
 }
 
 static void publish_states(void) {
-  const unsigned int next_state[kPlayerCount] = {
-      keyboard_state | gamepads[0].state,
-      gamepads[1].state,
-  };
+  unsigned int next_state[kPlayerCount] = {0, 0};
   bool changed[kPlayerCount] = {false, false};
 
   pthread_mutex_lock(&pad_mutex);
+  next_state[0] = keyboard_state | gamepads[0].state;
+  next_state[1] = gamepads[1].state;
   for (size_t player = 0; player < kPlayerCount; ++player) {
     pad_state[player] = next_state[player];
     changed[player] = next_state[player] != last_diagnostic_state[player];
@@ -207,6 +212,19 @@ static void publish_states(void) {
     }
     fflush(stdout);
   }
+}
+
+static void update_keyboard_key(unsigned char keycode, bool pressed) {
+  const unsigned int button = keycode_to_pad(keycode);
+  pthread_mutex_lock(&pad_mutex);
+  keyboard_key_state[keycode] = pressed;
+  if (button) {
+    if (pressed)
+      keyboard_state |= button;
+    else
+      keyboard_state &= ~button;
+  }
+  pthread_mutex_unlock(&pad_mutex);
 }
 
 /*-------------------------------------------------------------------*/
@@ -542,13 +560,7 @@ static bool drain_keyboard(void) {
       return false;
     for (ssize_t index = 0; index < amount; ++index) {
       const bool released = (data[index] & 0x80) != 0;
-      const unsigned int button = keycode_to_pad(data[index] & 0x7f);
-      if (!button)
-        continue;
-      if (released)
-        keyboard_state &= ~button;
-      else
-        keyboard_state |= button;
+      update_keyboard_key(data[index] & 0x7f, !released);
     }
     publish_states();
   }
@@ -570,7 +582,10 @@ static void close_keyboard(void) {
   kb_old_flags = -1;
   old_kbd_mode = -1;
   keyboard_configured = false;
+  pthread_mutex_lock(&pad_mutex);
   keyboard_state = 0;
+  memset(keyboard_key_state, 0, sizeof(keyboard_key_state));
+  pthread_mutex_unlock(&pad_mutex);
   publish_states();
 }
 
@@ -681,8 +696,12 @@ extern "C" int InitJoypadInput(void) {
   printf("InfoNES: %zu THEGamepad controller(s) ready\n", gamepad_count);
   printf("InfoNES: THEGamepad D-pad=move, A/X=primary, B/Y=secondary, "
          "L/R=shoulders, Back=Select, Start=Start\n");
+#if defined(RETRO_DECK_ZX)
+  printf("InfoNES: Keyboard passed through as a ZX Spectrum keyboard\n");
+#else
   printf("InfoNES: Keyboard Arrows/WASD=move, Space=A, Shift=B, "
          "Control=Select, Enter=Start\n");
+#endif
 
   input_running = 1;
   if (pthread_create(&input_thread, NULL, input_thread_func, NULL) != 0) {
@@ -706,6 +725,15 @@ extern "C" unsigned int GetJoypadInput(unsigned int player) {
   const unsigned int state = pad_state[player];
   pthread_mutex_unlock(&pad_mutex);
   return state;
+}
+
+extern "C" int GetKeyboardInput(unsigned int keycode) {
+  if (keycode >= sizeof(keyboard_key_state) / sizeof(keyboard_key_state[0]))
+    return 0;
+  pthread_mutex_lock(&pad_mutex);
+  const bool pressed = keyboard_key_state[keycode];
+  pthread_mutex_unlock(&pad_mutex);
+  return pressed ? 1 : 0;
 }
 
 /* End of joypad_input.cpp */

@@ -107,6 +107,11 @@ terminates the emulator child and redraws the menu. Touch does not supply
 controller input; a keyboard or mapped controller is still needed to press
 Start and play.
 
+ZX keeps the two gamepad ports mapped as Kempston and Sinclair 2, while a
+physical keyboard is routed through Fuse's dedicated Spectrum-keyboard port.
+Its letters, digits, Space, Enter, Backspace, modifiers, and arrow keys remain
+keyboard keys instead of being translated to console buttons.
+
 The Deck-native **10 SECONDS** game owns touch while it runs and has its own
 BACK action. Physical A on either controller also starts and stops it. Short
 start and result chiptunes follow the dashboard volume.

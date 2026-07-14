@@ -143,9 +143,12 @@ same hub ports to preserve Player 1 and Player 2 across boots.
 NES, GB, and GBC use this mapping. CHIP-8 uses the standard Octo mapping,
 except Space Racer maps one controller to each ship. ZX Spectrum assigns
 Kempston to Player 1 and Sinclair 2 to Player 2; A/X fires, Back opens the
-Spectrum keyboard, L is Enter, and R is Space.
+Spectrum keyboard, L is Enter, and R is Space. A connected physical keyboard
+is passed through as the Spectrum keyboard, so letters, digits, Space, Enter,
+Backspace, Shift, Control, Alt, and the arrow keys retain their keyboard
+meaning instead of using the console-game mapping below.
 
-A keyboard remains a Player 1 fallback for the emulators:
+A keyboard remains a Player 1 fallback for NES, GB/GBC, and CHIP-8:
 
 | Console control | Keyboard |
 | --- | --- |

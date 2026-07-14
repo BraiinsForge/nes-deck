@@ -37,6 +37,12 @@ compile_cpp_test tests/nes_audio_test.cpp nes-audio-test -Isrc
 compile_cpp_test tests/nes_apu_noise_test.cpp nes-apu-noise-test -Isrc
 compile_cpp_test tests/nes_sram_test.cpp nes-sram-test -Isrc
 compile_cpp_test tests/joypad_input_test.cpp joypad-input-test -pthread
+compile_cpp_test tests/joypad_input_zx_test.cpp joypad-input-zx-test -pthread
+
+fuse_src=$(nix eval --raw --impure --expr \
+  '(builtins.getFlake ("path:" + toString ./.)).inputs."fuse-src".outPath')
+compile_cpp_test tests/zx_keyboard_test.cpp zx-keyboard-test \
+  -Isrc -I"$fuse_src/src"
 
 png_flags=$(pkg-config --cflags --libs libpng)
 # pkg-config output is intentionally split into compiler arguments.

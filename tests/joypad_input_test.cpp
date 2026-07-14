@@ -16,6 +16,11 @@ static void test_keyboard_mapping(void) {
   assert(keycode_to_pad(0x1d) == PAD_SELECT);
   assert(keycode_to_pad(0x61) == PAD_SELECT);
   assert(keycode_to_pad(0x1c) == PAD_START);
+
+  update_keyboard_key(KEY_SPACE, true);
+  assert(GetKeyboardInput(KEY_SPACE) == 1);
+  update_keyboard_key(KEY_SPACE, false);
+  assert(GetKeyboardInput(KEY_SPACE) == 0);
 }
 
 static void test_published_thegamepad_mapping(void) {

@@ -4,6 +4,9 @@
 #endif
 
 #include <libretro.h>
+#if defined(RETRO_DECK_ZX)
+#include "zx_keyboard.h"
+#endif
 
 #ifndef RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2
 #define RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2 67
@@ -86,6 +89,7 @@ enum retro_pixel_format video_pixel_format = RETRO_PIXEL_FORMAT_XRGB8888;
 
 extern "C" int InitJoypadInput(void);
 extern "C" unsigned int GetJoypadInput(unsigned int player);
+extern "C" int GetKeyboardInput(unsigned int keycode);
 
 void request_shutdown(int signal_number) {
   (void)signal_number;
@@ -248,6 +252,12 @@ void input_poll_callback() {}
 
 int16_t input_state_callback(unsigned int port, unsigned int device,
                              unsigned int index, unsigned int id) {
+#if defined(RETRO_DECK_ZX)
+  if (device == RETRO_DEVICE_KEYBOARD && index == 0) {
+    const unsigned int keycode = zx_linux_keycode(id);
+    return keycode != KEY_RESERVED && GetKeyboardInput(keycode) ? 1 : 0;
+  }
+#endif
   if (port >= kPlayerCount || device != RETRO_DEVICE_JOYPAD || index != 0)
     return 0;
   const unsigned int state = GetJoypadInput(port);
