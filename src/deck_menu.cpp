@@ -97,6 +97,7 @@ const int kGameTitleScale = 2;
 const int kPixelStroke = 4;
 const char kRebootExecutable[] = "/sbin/reboot";
 const char kRebootConfirmationText[] = "PRESS A OR TAP AGAIN TO REBOOT";
+const char kTerminalLoginShell[] = "/BIN/ASH";
 
 const unsigned int kMenuPadConfirm = 1u << 0;
 const unsigned int kMenuPadBack = 1u << 1;
@@ -2070,12 +2071,14 @@ std::string system_label(const std::string &system) {
 }
 
 void draw_terminal_icon(Canvas *canvas, const Rect &button, uint16_t color) {
-  const Rect screen{button.x + (button.width - 46) / 2, button.y + 10, 46,
-                    34};
+  const int icon_height = 44;
+  const int icon_top = button.y + (button.height - icon_height) / 2;
+  const Rect screen{button.x + (button.width - 46) / 2, icon_top, 46, 34};
   stroke_rect(canvas, screen, 3, color);
-  fill_rect(canvas, Rect{button.x + button.width / 2 - 3, button.y + 44, 6, 7},
+  fill_rect(canvas, Rect{button.x + button.width / 2 - 3, icon_top + 34, 6, 7},
             color);
-  fill_rect(canvas, Rect{button.x + 24, button.y + 51, button.width - 48, 3},
+  fill_rect(canvas,
+            Rect{button.x + 24, icon_top + 41, button.width - 48, 3},
             color);
   draw_text(canvas, screen.x + 7, screen.y + 9, ">_", 2, color);
 }
@@ -2467,7 +2470,7 @@ void render_settings(unsigned int volume, unsigned int brightness,
                      kInterfaceMuted.pixel());
   draw_centered_text(canvas, Rect{750, 328, 196, 34}, "TERMINAL", 3,
                      xterm_pixel(kColorText));
-  draw_centered_text(canvas, Rect{750, 366, 196, 28}, "SHELL", 2,
+  draw_centered_text(canvas, Rect{750, 366, 196, 28}, kTerminalLoginShell, 2,
                      kInterfaceMuted.pixel());
   draw_centered_text(canvas, Rect{994, 328, 196, 34}, "KEYS", 3,
                      xterm_pixel(kColorText));

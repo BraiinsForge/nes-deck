@@ -182,10 +182,11 @@ battery-backed storage do not create cartridge-save sidecars. ZX Spectrum TAP
 images are read-only tape media and do not create automatic save sidecars.
 
 The settings computer icon and the DECK terminal entry open a real framebuffer
-shell with a 16-pixel safe area for the display's rounded corners. **EN** and
-**CZ** select the terminal layout; the launcher applies it only for that
-terminal session and restores US ANSI afterward. Type `exit` or use the same
-two-second touch hold to return.
+shell with a 16-pixel safe area for the display's rounded corners. The settings
+subtitle identifies its `/bin/ash` login shell. **EN** and **CZ** select the
+terminal layout; the launcher applies it only for that terminal session and
+restores US ANSI afterward. Type `exit` or use the same two-second touch hold
+to return.
 The Deck carousel also includes a red power-on icon for rebooting the device.
 Its first tap or A press arms the action for four seconds; select it again
 during that window to reboot. Any other action or an expired window cancels

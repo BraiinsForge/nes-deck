@@ -764,6 +764,30 @@ int main() {
                  tab_games[10].color.pixel()),
          "Reboot keeps the broken-ring power-on icon");
 
+  Canvas terminal_icon_canvas(
+      static_cast<size_t>(kLogicalWidth * kLogicalHeight),
+      xterm_pixel(kColorBackground));
+  const Rect terminal_icon_bounds{100, 100, 112, 104};
+  draw_terminal_icon(&terminal_icon_canvas, terminal_icon_bounds,
+                     xterm_pixel(kColorText));
+  int terminal_icon_top = kLogicalHeight;
+  int terminal_icon_bottom = -1;
+  for (int y = terminal_icon_bounds.y;
+       y < terminal_icon_bounds.y + terminal_icon_bounds.height; ++y) {
+    for (int x = terminal_icon_bounds.x;
+         x < terminal_icon_bounds.x + terminal_icon_bounds.width; ++x) {
+      if (terminal_icon_canvas[static_cast<size_t>(y) * kLogicalWidth + x] ==
+          xterm_pixel(kColorText)) {
+        terminal_icon_top = std::min(terminal_icon_top, y);
+        terminal_icon_bottom = std::max(terminal_icon_bottom, y);
+      }
+    }
+  }
+  expect(terminal_icon_top + terminal_icon_bottom + 1 ==
+                 terminal_icon_bounds.y * 2 + terminal_icon_bounds.height &&
+             std::string(kTerminalLoginShell) == "/BIN/ASH",
+         "terminal icon is vertically centered and names its login shell");
+
   SettingsLayout settings_layout;
   render_settings(42, 60, "us", SettingsTargetVolumeDown, std::string(),
                   &canvas, &settings_layout);

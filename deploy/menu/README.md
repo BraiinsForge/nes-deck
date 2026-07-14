@@ -86,13 +86,14 @@ BACK action. Physical A on either controller also starts and stops it. Short
 start and result chiptunes follow the dashboard volume.
 
 The settings computer icon and DECK terminal entry launch
-`/mnt/data/nes-deck/terminal/retro-terminal`. The adjacent keymap action toggles
-between US ANSI and Czech QWERTZ. The terminal
-launcher applies that map for fbterm and restores US when its child exits or
-the menu terminates it. The DECK carousel also routes exact `lua` and `lisp`
-modes to Lua 5.5.0 and ECL 26.5.5. They start in private persistent working
-directories at `/mnt/data/langs/lua` and `/mnt/data/langs/lisp`; no catalog or
-user text is evaluated as a command. The Deck carousel adds a built-in red
+`/mnt/data/nes-deck/terminal/retro-terminal`; the control subtitle identifies
+the fixed `/bin/ash` login shell. The adjacent keymap action toggles between US
+ANSI and Czech QWERTZ. The terminal launcher applies that map for fbterm and
+restores US when its child exits or the menu terminates it. The DECK carousel
+also routes exact `lua` and `lisp` modes to Lua 5.5.0 and ECL 26.5.5. They start
+in private persistent working directories at `/mnt/data/langs/lua` and
+`/mnt/data/langs/lisp`; no catalog or user text is evaluated as a command. The
+Deck carousel adds a built-in red
 power-on entry for `/sbin/reboot`; two selections within four seconds are
 required, and any other action cancels the armed request. The WIFI button opens the on-screen
 keyboard and passes credentials to

@@ -253,7 +253,7 @@ passphrases, WireGuard private keys, or ROM data.
   `/mnt/data/langs/lisp`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `e3b1b6f87176a475218b4d73188fa1936b9a2090496333801c1e4cdff676ef89`.
+  `0ff03ce54664ea3443ae90f78cfe456b1cd3eb088db2077860b090d7800de403`.
   It validates the manifest and system-specific NES/GB/GBC/ZX/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
@@ -511,6 +511,9 @@ retained in
 `/mnt/data/nes-deck/backups/20260714-pre-three-card-ui/`. The replacement
 adopted the live 12-of-20 backlight as persistent 60 percent without changing
 the panel level or any network configuration.
+The dashboard binary immediately preceding the centered terminal icon and
+explicit `/BIN/ASH` subtitle is retained in
+`/mnt/data/nes-deck/backups/20260714-pre-terminal-icon-center/`.
 
 ```sh
 # Stock UI must stay disabled
