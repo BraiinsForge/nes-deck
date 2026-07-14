@@ -51,6 +51,7 @@ nix build --no-link --print-out-paths .#lua-deck
 nix build --no-link --print-out-paths .#python-deck
 nix build --no-link --print-out-paths .#chibi-deck
 nix build --no-link --print-out-paths .#chiptune-deck
+nix build --no-link --print-out-paths .#rom-uploader
 nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 ```
 
@@ -67,6 +68,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `python-deck` | `bin/python` |
 | `chibi-deck` | `bin/chibi-scheme` plus Scheme modules |
 | `chiptune-deck` | `bin/chiptune-deck` |
+| `rom-uploader` | `bin/rom-uploader` |
 | ECL expression | `bin/ecl.bin` plus the ECL runtime library |
 
 Check that a package has no Nix runtime references before deploying it:
@@ -102,6 +104,9 @@ It covers the NES mixer, APU noise, SRAM codec, two-controller ordering,
 dashboard geometry and behavior, ROM catalog, cover cache, Wi-Fi profile
 helper, terminal lifecycle, shared framebuffer/audio runtime, timer
 configuration, and CHIP-8 core.
+
+The suite also runs the uploader's Go tests for authentication, request
+boundaries, ROM validation, atomic storage, and the Paper UI contract.
 
 Run shell checks on deployment code with:
 

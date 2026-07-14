@@ -742,6 +742,31 @@
           };
         });
 
+        rom-uploader = pkgsCross.buildGoModule {
+          pname = "rom-uploader";
+          version = "1.0.0";
+
+          src = ./uploader;
+          vendorHash = null;
+          env.CGO_ENABLED = 0;
+          nativeBuildInputs = [ pkgs.nukeReferences ];
+          allowedReferences = [ ];
+          ldflags = [ "-s" "-w" ];
+
+          postInstall = ''
+            mv $out/bin/uploader $out/bin/rom-uploader
+          '';
+
+          postFixup = ''
+            nuke-refs $out/bin/rom-uploader
+          '';
+
+          meta = {
+            description = "WireGuard-only ROM intake service for Retro Deck";
+            platforms = [ "armv7l-linux" ];
+          };
+        };
+
         default = self.packages.${system}.nes-deck;
       };
 

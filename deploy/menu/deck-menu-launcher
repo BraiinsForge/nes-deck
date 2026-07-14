@@ -26,6 +26,9 @@ CHIPTUNE_DIRECTORY=/mnt/data/chiptunes
 CATALOG=$MENU_DIR/games.sexp
 FALLBACK_MANIFEST=$MENU_DIR/games.tsv
 GENERATED_MANIFEST=$STATE_DIR/games.tsv
+UPLOAD_DIR=$BASE/uploads
+UPLOAD_MANIFEST=$UPLOAD_DIR/games.tsv
+COMBINED_MANIFEST=$STATE_DIR/combined-games.tsv
 COVER_DIR=$BASE/covers
 COVER_FETCHER=$MENU_DIR/fetch-covers
 VOLUME_STATE=$STATE_DIR/menu-volume.state
@@ -52,13 +55,13 @@ export RETRO_DECK_VOLUME_PERCENT=$VOLUME_ON
 
 umask 077
 
-if ! mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" \
+if ! mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" "$UPLOAD_DIR" \
 	"$LANG_ROOT/lua" "$LANG_ROOT/lisp" "$LANG_ROOT/python" \
 	"$LANG_ROOT/scheme" "$CHIPTUNE_DIRECTORY"; then
 	logger -t nes-deck-menu "cannot create persistent state and language directories"
 	exit 1
 fi
-chmod 0700 "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" \
+chmod 0700 "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" "$UPLOAD_DIR" \
 	"$LANG_ROOT/lua" "$LANG_ROOT/lisp" "$LANG_ROOT/python" \
 	"$LANG_ROOT/scheme" "$CHIPTUNE_DIRECTORY" 2>/dev/null || :
 
@@ -235,6 +238,20 @@ if [ -x "$ECL" ] && [ -r "$COMPILER" ] && [ -r "$CATALOG" ]; then
 	fi
 else
 	log_message "ECL catalog compiler unavailable; using checked-in manifest: $FALLBACK_MANIFEST"
+fi
+
+if [ -s "$UPLOAD_MANIFEST" ] && [ ! -L "$UPLOAD_MANIFEST" ]; then
+	combined_temporary=$COMBINED_MANIFEST.tmp.$$
+	if cat "$manifest" "$UPLOAD_MANIFEST" > "$combined_temporary" &&
+		"$MENU" --validate-manifest "$combined_temporary" \
+			>> "$LOG_FILE" 2>&1 &&
+		mv -f "$combined_temporary" "$COMBINED_MANIFEST"; then
+		manifest=$COMBINED_MANIFEST
+		log_message "using validated ROM upload catalog: $manifest"
+	else
+		rm -f "$combined_temporary"
+		log_message "ROM upload catalog is invalid; ignoring uploaded entries"
+	fi
 fi
 
 if [ -x "$COVER_FETCHER" ]; then

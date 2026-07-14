@@ -4105,6 +4105,7 @@ struct Options {
   std::string keymap_state;
   std::string terminal;
   std::string wifi_helper;
+  std::string validate_manifest;
   bool geometry_test;
   bool help;
 
@@ -4136,6 +4137,7 @@ void print_usage(const char *program) {
                "--brightness-state PATH "
                "--keymap-state PATH --terminal PATH --wifi-helper PATH\n  "
             << program << " --geometry-test\n";
+  std::cerr << "  " << program << " --validate-manifest PATH\n";
 }
 
 bool parse_options(int argc, char **argv, Options *options,
@@ -4146,6 +4148,18 @@ bool parse_options(int argc, char **argv, Options *options,
     const std::string argument(argv[i]);
     if (argument == "--geometry-test") {
       options->geometry_test = true;
+    } else if (argument == "--validate-manifest") {
+      if (++i >= argc) {
+        if (error)
+          *error = "missing value for --validate-manifest";
+        return false;
+      }
+      if (!options->validate_manifest.empty()) {
+        if (error)
+          *error = "duplicate option --validate-manifest";
+        return false;
+      }
+      options->validate_manifest = argv[i];
     } else if (argument == "--help" || argument == "-h") {
       options->help = true;
     } else if (argument == "--nes-emulator" ||
@@ -4220,6 +4234,14 @@ bool parse_options(int argc, char **argv, Options *options,
     if (argc != 2) {
       if (error)
         *error = "--geometry-test must be used alone";
+      return false;
+    }
+    return true;
+  }
+  if (!options->validate_manifest.empty()) {
+    if (argc != 3) {
+      if (error)
+        *error = "--validate-manifest must be used alone";
       return false;
     }
     return true;
@@ -4923,6 +4945,16 @@ int main(int argc, char **argv) {
   }
   if (options.geometry_test)
     return geometry_test();
+  if (!options.validate_manifest.empty()) {
+    std::vector<GameEntry> games;
+    if (!load_manifest(options.validate_manifest, &games, &error)) {
+      std::cerr << "deck-menu: " << error << std::endl;
+      return 1;
+    }
+    std::cout << "deck-menu: manifest contains " << games.size()
+              << " valid games" << std::endl;
+    return 0;
+  }
 
   struct sigaction action;
   std::memset(&action, 0, sizeof(action));

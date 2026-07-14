@@ -16,6 +16,10 @@ Copy these files to the Deck without changing their basenames:
 | `deck-menu-launcher` | `/mnt/data/nes-deck/menu/deck-menu-launcher` |
 | `nes-deck.init` | `/etc/init.d/nes-deck` |
 
+The separate uploader bundle installs `nes-deck-uploader.init` as
+`/etc/init.d/nes-deck-uploader` and the static service as
+`/mnt/data/nes-deck/uploader/rom-uploader`.
+
 The launcher also expects:
 
 - `/mnt/data/nes-deck/menu/deck-menu`
@@ -38,6 +42,7 @@ The launcher also expects:
   `games.sexp`
 - `/mnt/data/langs/{lua,lisp,python,scheme}/` for persistent REPL files
 - `/mnt/data/chiptunes/` for user and tracked music files
+- `/mnt/data/nes-deck/uploads/games.tsv` for validated web uploads
 
 The launcher exports the exact trailing-slash runtime path
 `ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/`. It initializes persistent volume at
@@ -55,6 +60,11 @@ The launcher disables the Linux console's ten-minute blank timer at each boot,
 and the native menu explicitly unblanks fb0 whenever it reopens the display.
 Every managed child return also hides the Linux console cursor and keeps
 console blanking disabled, including after the framebuffer terminal exits.
+When the uploader catalog is present, the launcher combines it with the
+generated repository catalog and asks `deck-menu --validate-manifest` to
+validate the complete file and every ROM before using it. An invalid upload
+catalog is logged and ignored rather than preventing the dashboard from
+starting.
 
 At boot, `fetch-covers` fills the persistent cover cache once per game. It
 prefers Libretro box art, then falls back to a title screen and finally a

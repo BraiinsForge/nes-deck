@@ -27,8 +27,10 @@ cd nes-deck
 The first build downloads the pinned ARM toolchain and can take several
 minutes. The script builds every static runtime, verifies the staged payload,
 uploads it below `/mnt/data`, briefly stops the dashboard, activates the new
-files, and waits for `deck-menu` to be ready. If activation fails after the
-menu is stopped, it attempts to restart the service before exiting.
+files, and waits for `deck-menu` and the WireGuard ROM uploader to be ready.
+The first deployment prints the uploader's generated password once. If
+activation fails after a service is stopped, the script attempts to restart
+it before exiting.
 
 The deployment script does not edit, reload, or disconnect Wi-Fi. It merges
 the tracked ROMs and CC0 chiptunes into persistent storage without deleting
@@ -38,6 +40,7 @@ Verify the result:
 
 ```sh
 ssh root@10.0.0.10 '/etc/init.d/nes-deck status; \
+  /etc/init.d/nes-deck-uploader status; \
   tail -n 40 /mnt/data/nes-deck/log/deck-menu.log'
 ```
 
@@ -70,8 +73,22 @@ The Deck section contains:
 REPL files persist under `/mnt/data/langs/{lua,lisp,python,scheme}`. The music
 player scans `/mnt/data/chiptunes` for `ay`, `gbs`, `gym`, `hes`, `kss`, `nsf`,
 `nsfe`, `ogg`, `sap`, `spc`, `vgm`, and `vgz` files. Ogg files must be 44.1 kHz
-mono or stereo. Three CC0 tracks are included with provenance and checksums in
+mono or stereo. Ten CC0 tracks are included with provenance and checksums in
 [chiptunes/README.md](chiptunes/README.md).
+
+## Upload ROMs over WireGuard
+
+Open `http://10.0.0.10:8080` while connected to the Deck's WireGuard network
+and sign in with the password printed by the first deployment. The Paper-style
+intake page accepts a raw NES, GB, GBC, ZX Spectrum, or CHIP-8 ROM, or a ZIP
+containing exactly one matching ROM. It validates the payload, refuses to
+replace an existing file, files it below `/mnt/data/roms/<system>/`, updates a
+private supplemental catalog, and restarts the dashboard so the game appears.
+
+The service binds to both the `10.0.0.10` address and the `wg0` device. It does
+not listen on Wi-Fi, and it never changes Wi-Fi, WireGuard, routes, or firewall
+state. Authentication, CSRF, upload limits, and password rotation are
+documented in [deploy/uploader/README.md](deploy/uploader/README.md).
 
 ## Using the dashboard
 

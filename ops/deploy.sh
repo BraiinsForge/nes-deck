@@ -46,6 +46,7 @@ lua=$(build_flake .#lua-deck)
 python=$(build_flake .#python-deck)
 chibi=$(build_flake .#chibi-deck)
 chiptune=$(build_flake .#chiptune-deck)
+uploader=$(build_flake .#rom-uploader)
 ecl=$(nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix | tail -n 1)
 
 ops/deck-menu/fetch-foss-games.sh "$foss"
@@ -57,6 +58,7 @@ mkdir -p \
   "$payload/nes-deck/licenses" \
   "$payload/nes-deck/terminal/fonts" \
   "$payload/nes-deck/terminal/keymaps" \
+  "$payload/nes-deck/uploader" \
   "$payload/nes-deck/ecl" \
   "$payload/chiptunes" \
   "$payload/roms" \
@@ -71,6 +73,8 @@ cp "$chip8/bin/chip8-deck" "$payload/nes-deck/chip8-deck"
 cp "$timer/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
 cp "$menu/bin/deck-menu" "$payload/nes-deck/menu/deck-menu"
 cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
+cp "$uploader/bin/rom-uploader" \
+  "$payload/nes-deck/uploader/rom-uploader"
 cp "$lua/bin/lua" "$payload/nes-deck/langs/lua"
 cp "$python/bin/python" "$payload/nes-deck/langs/python"
 cp "$chibi/bin/chibi-scheme" \
@@ -94,6 +98,8 @@ cp deploy/ecl "$payload/usr/bin/ecl"
 cp ops/deck-wifi/deck-wifi-profile-add \
   "$payload/usr/sbin/deck-wifi-profile-add"
 cp deploy/menu/nes-deck.init "$payload/etc/init.d/nes-deck"
+cp deploy/uploader/nes-deck-uploader.init \
+  "$payload/etc/init.d/nes-deck-uploader"
 
 for result in "$nes" "$gb" "$zx" "$chip8" "$fbterm" "$lua" \
               "$python" "$chibi" "$chiptune"; do
@@ -128,9 +134,11 @@ find "$payload/nes-deck" -type f \( \
   -name 'retro-terminal' -o -name 'fbterm' -o -name 'loadkeys' -o \
   -name 'lua' -o -name 'python' -o -name 'chibi-scheme' -o \
   -name 'ecl.bin' \) -exec chmod 0700 {} +
+chmod 0700 "$payload/nes-deck/uploader/rom-uploader"
 chmod 0700 "$payload/usr/bin/ecl" \
   "$payload/usr/sbin/deck-wifi-profile-add" \
-  "$payload/etc/init.d/nes-deck"
+  "$payload/etc/init.d/nes-deck" \
+  "$payload/etc/init.d/nes-deck-uploader"
 
 remote_stage=/mnt/data/.nes-deck-deploy-$$
 echo "Uploading staged payload to $target..."
@@ -164,12 +172,18 @@ grep -q ' /mnt/data ' /proc/mounts || {
 }
 
 service_needs_restart=0
+uploader_needs_restart=0
 restore_service_after_failure() {
   result=$?
   trap - EXIT
   if [ "$result" -ne 0 ] && [ "$service_needs_restart" -eq 1 ]; then
     echo "Activation failed; restarting Retro Deck" >&2
     /etc/init.d/nes-deck start >/dev/null 2>&1 || :
+  fi
+  if [ "$result" -ne 0 ] && [ "$uploader_needs_restart" -eq 1 ] && \
+     [ -x /etc/init.d/nes-deck-uploader ]; then
+    echo "Activation failed; restarting ROM uploader" >&2
+    /etc/init.d/nes-deck-uploader start >/dev/null 2>&1 || :
   fi
   exit "$result"
 }
@@ -185,7 +199,8 @@ done
 for executable in \
   menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
   terminal/fbterm terminal/loadkeys terminal/retro-terminal \
-  langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin; do
+  langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin \
+  uploader/rom-uploader; do
   [ -x "$stage/nes-deck/$executable" ] || {
     echo "Staged runtime is missing: $executable" >&2
     exit 1
@@ -216,9 +231,21 @@ scheme_result=$(
   exit 1
 }
 "$stage/nes-deck/menu/deck-menu" --help >/dev/null
+uploader_test_config=$stage/nes-deck/uploader/password.test.conf
+"$stage/nes-deck/uploader/rom-uploader" --init-password \
+  "$uploader_test_config" >/dev/null
+"$stage/nes-deck/uploader/rom-uploader" --init-password \
+  "$uploader_test_config" >/dev/null
+rm -f "$uploader_test_config"
 
 mkdir -p "$base" /mnt/data/roms /mnt/data/langs \
-  /mnt/data/chiptunes "$base/langs" "$base/licenses"
+  /mnt/data/chiptunes "$base/langs" "$base/licenses" \
+  "$base/uploader" "$base/uploads"
+
+if [ -x /etc/init.d/nes-deck-uploader ]; then
+  /etc/init.d/nes-deck-uploader stop 2>/dev/null || :
+fi
+uploader_needs_restart=1
 
 /etc/init.d/nes-deck stop 2>/dev/null || :
 service_needs_restart=1
@@ -229,6 +256,12 @@ cp -p "$stage/nes-deck/zx-deck" "$base/zx-deck"
 cp -p "$stage/nes-deck/chip8-deck" "$base/chip8-deck"
 cp -p "$stage/nes-deck/ten-seconds-deck" "$base/ten-seconds-deck"
 cp -p "$stage/nes-deck/chiptune-deck" "$base/chiptune-deck"
+cp -p "$stage/nes-deck/uploader/rom-uploader" \
+  "$base/uploader/rom-uploader"
+chmod 0700 "$base/uploader" "$base/uploads" \
+  "$base/uploader/rom-uploader"
+"$base/uploader/rom-uploader" --init-password \
+  "$base/uploader/password.conf"
 
 mkdir -p "$base/menu" "$base/games" "$base/terminal" "$base/licenses"
 cp -p "$stage/nes-deck/menu/"* "$base/menu/"
@@ -259,8 +292,10 @@ cp -p "$stage/usr/bin/ecl" /usr/bin/ecl
 cp -p "$stage/usr/sbin/deck-wifi-profile-add" \
   /usr/sbin/deck-wifi-profile-add
 cp -p "$stage/etc/init.d/nes-deck" /etc/init.d/nes-deck
+cp -p "$stage/etc/init.d/nes-deck-uploader" \
+  /etc/init.d/nes-deck-uploader
 chmod 0700 /usr/bin/ecl /usr/sbin/deck-wifi-profile-add \
-  /etc/init.d/nes-deck
+  /etc/init.d/nes-deck /etc/init.d/nes-deck-uploader
 
 if [ -x /etc/init.d/bmc ]; then
   /etc/init.d/bmc stop 2>/dev/null || :
@@ -268,11 +303,15 @@ if [ -x /etc/init.d/bmc ]; then
 fi
 /etc/init.d/nes-deck enable
 /etc/init.d/nes-deck start
+/etc/init.d/nes-deck-uploader enable
+/etc/init.d/nes-deck-uploader start
 
 attempt=0
 while [ "$attempt" -lt 30 ]; do
   if /etc/init.d/nes-deck status >/dev/null 2>&1 && \
-     pidof deck-menu >/dev/null 2>&1; then
+     pidof deck-menu >/dev/null 2>&1 && \
+     /etc/init.d/nes-deck-uploader status >/dev/null 2>&1 && \
+     pidof rom-uploader >/dev/null 2>&1; then
     break
   fi
   attempt=$((attempt + 1))
@@ -288,13 +327,22 @@ pidof deck-menu >/dev/null 2>&1 || {
   tail -n 80 "$base/log/deck-menu.log" >&2 || :
   exit 1
 }
+/etc/init.d/nes-deck-uploader status >/dev/null 2>&1 || {
+  echo "ROM uploader service did not start" >&2
+  exit 1
+}
+pidof rom-uploader >/dev/null 2>&1 || {
+  echo "ROM uploader did not reach its ready state" >&2
+  exit 1
+}
 
 service_needs_restart=0
+uploader_needs_restart=0
 rm -rf "$stage"
-echo "Retro Deck is running."
+echo "Retro Deck and its WireGuard ROM uploader are running."
 tail -n 12 "$base/log/deck-menu.log" || :
 REMOTE
 
 echo
 echo "Deployment complete. Verify with:"
-echo "  ssh $target '/etc/init.d/nes-deck status; tail -n 40 /mnt/data/nes-deck/log/deck-menu.log'"
+echo "  ssh $target '/etc/init.d/nes-deck status; /etc/init.d/nes-deck-uploader status; tail -n 40 /mnt/data/nes-deck/log/deck-menu.log'"

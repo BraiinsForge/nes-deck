@@ -964,6 +964,17 @@ int main() {
              options.brightness_state == "/tmp/brightness-state" &&
              options.keymap_state == "/tmp/keymap",
          "new executable options round-trip");
+  Options validation_options;
+  const char *validation_values[] = {"deck-menu", "--validate-manifest",
+                                     manifest.c_str()};
+  char *validation_argv[] = {
+      const_cast<char *>(validation_values[0]),
+      const_cast<char *>(validation_values[1]),
+      const_cast<char *>(validation_values[2])};
+  error.clear();
+  expect(parse_options(3, validation_argv, &validation_options, &error) &&
+             validation_options.validate_manifest == manifest,
+         "standalone manifest validation option parses");
   if (!games.empty()) {
     expect(emulator_for_game(options, games[0]) == "/bin/true",
            "NES entry selects NES emulator");

@@ -75,6 +75,7 @@ verify_package lua-deck bin/lua
 verify_package python-deck bin/python
 verify_package chibi-deck bin/chibi-scheme
 verify_package chiptune-deck bin/chiptune-deck
+verify_package rom-uploader bin/rom-uploader
 
 ecl=$(nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix |
   tail -n 1)

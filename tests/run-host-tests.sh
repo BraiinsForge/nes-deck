@@ -62,4 +62,6 @@ octo_src=$(nix eval --raw --impure --expr \
   tests/chip8_core_test.c src/chip8_core.c -o "$work/chip8-core-test"
 "$work/chip8-core-test"
 
+(cd uploader && nix shell nixpkgs#go -c go test ./...)
+
 echo "All host tests passed."
