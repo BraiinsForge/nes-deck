@@ -12,9 +12,10 @@ passphrases, WireGuard private keys, or ROM data.
 - The writable OpenWrt overlay is only about 116 MiB. Persistent application
   data belongs on the 2.8 GiB ext4 partition mounted at `/mnt/data` by
   `/etc/init.d/pre-exec-mount` (START=90).
-- This deployment uses `/mnt/data/nes-deck` for the emulator, ECL runtime,
-  touchscreen menu, ROMs, licenses, catalog, logs, and persistent state. The
-  small procd launcher remains in `/etc/init.d/nes-deck`.
+- This deployment uses `/mnt/data/nes-deck` for the emulators, ECL runtime,
+  touchscreen menu, licenses, catalog, logs, and persistent state. Canonical
+  ROMs live under `/mnt/data/roms`. The small procd launcher remains in
+  `/etc/init.d/nes-deck`.
 
 ## Display
 
@@ -80,7 +81,9 @@ passphrases, WireGuard private keys, or ROM data.
 - Retro Games' published mapping is used: D-pad axes are NES directions, A/X
   are NES A, B/Y are NES B, Back is Select, and Start is Start. Disconnects,
   reconnects, hotplug, dropped-event resynchronization, and independent P1/P2
-  state are covered by the host test. Setting `INFONES_INPUT_DIAGNOSTICS=1`
+  state are covered by the host test. Physical L/R are also exposed to the
+  Spectrum frontend and change dashboard volume. Setting
+  `INFONES_INPUT_DIAGNOSTICS=1`
   prints state changes for an explicit hardware audit without enabling routine
   input logging.
 - On 2026-07-13 the current path-sorted build assigned
@@ -97,7 +100,7 @@ passphrases, WireGuard private keys, or ROM data.
 
 - Cartridge saving is automatic and uses sidecars beside each canonical ROM.
   The current InfoNES build has SHA-256
-  `91e7e844b34ebdbc862717832342b3bcb94ade2fb05256b8b3516145f9482a24`.
+  `c75d6d96994faa977953bcba18b4913a6f284d645c3d8bdd3d283dabdd94f27c`.
   For an NES cartridge with the iNES battery flag, it loads `.srm`, checks for
   changed SRAM every 600 frames, and writes through a synced temporary file
   plus atomic rename. It also performs a final save during graceful shutdown.
@@ -110,13 +113,15 @@ passphrases, WireGuard private keys, or ROM data.
 - The menu sends SIGTERM and gives an emulator four seconds to flush its save
   before escalating. Existing live Pokémon Red, Donkey Kong Country, and Super
   Mario Bros. Deluxe saves were preserved during the ROM layout migration.
-  CHIP-8 titles in this catalog do not expose cartridge save memory.
+  ZX Spectrum TAP images and CHIP-8 titles in this catalog do not expose
+  cartridge save memory. Automatic Fuse state restoration was tested and
+  removed because a state captured during Elite loading could wedge the core.
 
 ## Audio
 
 - `/mnt/data/nes-deck/nes-deck` is the statically linked, Cortex-A7/NEON-tuned
   FCEUmm frontend. The deployed performance build has SHA-256
-  `659804faa388c069f640276613ce71262d7ad4caaf8dfd72b9134c5892de3faf`.
+  `c75d6d96994faa977953bcba18b4913a6f284d645c3d8bdd3d283dabdd94f27c`.
 - ALSA card 0 is `BMC100-MAX98357A-Audio`: STM32 I2S driving a MAX98357A.
 - Native playback is stereo S16_LE/S32_LE at 8-96 kHz. `/dev/dsp` is ALSA's
   OSS compatibility layer and accepts S16_LE mono at exactly 44.1 kHz,
@@ -180,7 +185,7 @@ passphrases, WireGuard private keys, or ROM data.
   XRUN noise, and the user confirmed Adjustris no longer produced distorted
   audio.
 - The deployed staged-video/S16/two-gamepad build has SHA-256
-  `9d2bed939d8a8e44219f7d61c2be9f8a493e23169aa8abe61ec004d3f83907f3`.
+  `c75d6d96994faa977953bcba18b4913a6f284d645c3d8bdd3d283dabdd94f27c`.
   Its live ALSA stream was verified as RUNNING at exact 44100 Hz with 512-frame
   hardware periods and a 4096-frame hardware buffer. The OSS ring is filled
   while its trigger is paused and playback begins on the first callback. During
@@ -237,15 +242,17 @@ passphrases, WireGuard private keys, or ROM data.
   `f80d7c10da0e0a09bde089c8e9ad650701befa14a76f1fc740ddae036dacd536`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `bd77344a6506acd5806a3e93c15b1dc14b7119cdb7af86f619b0d9bdc6c184b9`.
-  It validates the manifest and system-specific NES/GB/GBC/CHIP-8 game data
+  `5e449b43e76889f04ed39785e33b0381692054b5dba1ee126406bbe595983aa7`.
+  It validates the manifest and system-specific NES/GB/GBC/ZX/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
   This build includes the full-screen two-second return hold, persistent
   volume controls, a persistent US/Czech terminal keymap toggle, the Wi-Fi
   editor, and a supervised framebuffer-terminal action. The installed launcher
   SHA-256 is
-  `276b7a1d3094722b6cd401402f5932d23caf3de1395892ec2194197eeb44d3f3`.
+  `935fbedbe07f4c58fd393bbb7859661aa879254ef70f4028b0aebf28676ce25f`.
+  Successful controller and touchscreen navigation uses the same short
+  chiptune cues while volume is audible.
 - The renderer uses only canonical xterm-256 colors. Its initial screen is a
   large xterm-202 orange console selector with aligned Up/Down arrows. Opening
   it reveals one horizontal game carousel with orange Left/Right arrows,
@@ -255,7 +262,9 @@ passphrases, WireGuard private keys, or ROM data.
   license text remains in the launcher. Reproducible 1280x480 captures of every
   console, every game position, mute, keymap, reboot confirmation, and all four
   Wi-Fi keyboard states are in `/root/retro-deck-screens` on the deployment
-  host, together with a contact sheet and the timer result screen.
+  host, together with a contact sheet and the reproducibly rendered timer
+  result screen. The current set has six console selectors, all fifteen
+  catalog positions, operational variants, and the timer.
 - Menu transitions build the complete rotated frame in cacheable memory before
   publishing finished rows to live scanout. This removes the visible black
   clear between screens and reduces live framebuffer writes per transition
@@ -267,39 +276,56 @@ passphrases, WireGuard private keys, or ROM data.
   the ECL compiler atomically generates
   `/mnt/data/nes-deck/state/games.tsv`; the checked-in TSV is a known-good
   fallback. The actual Deck ECL output was verified byte-for-byte against that
-  fallback for all thirteen entries. The deployed `games.sexp` SHA-256 is
-  `fb5f2c2058be7a0da926606880f3892b2a6695c106d6492888a406688febe63e`;
+  fallback for all fifteen entries. The deployed `games.sexp` SHA-256 is
+  `bb28f1de3630df3704336b5d6a89979b6f2d8cfe0e18a725dac7862e14582541`;
   the generated and fallback TSV SHA-256 is
-  `a14c5c824cb93bf2ef934614c312fc14991ab787fd1d134ad00bc73455a2e99c`.
+  `e52c2ff6a3b1fb9fc18b822ceef4da9e067855c8b88d24b932d8c1905985245c`.
   The installed compiler SHA-256 is
-  `eeb68d83d8fddf0b9e2996f8c6005d4b91e816a9fb57b75b7cbb8253c4d4d44e`;
+  `95461e8e93bc82fc7476257babc051fbcd4d50200f50ba583bb0f30548d20f0c`;
   both it and the native loader reject off-palette colors.
 - The only freely licensed games retained in the menu are the CHIP-8 titles
   Outlaw and Space Racer. Their provenance, license, and ROM hashes are in
-  [FOSS_GAMES.md](FOSS_GAMES.md). The NES, GB, and GBC menus use the owner's
-  locally supplied library without claiming redistribution rights. Canonical
-  repository paths and hashes are recorded under [`roms/`](roms/README.md).
+  [FOSS_GAMES.md](FOSS_GAMES.md). The NES, GB, GBC, and ZX menus use the
+  owner's locally supplied library without claiming redistribution rights.
+  Canonical repository paths and hashes are recorded under
+  [`roms/`](roms/README.md).
 
-## GB, GBC, and CHIP-8 emulators
+## GB, GBC, ZX Spectrum, and CHIP-8 emulators
 
 - `/mnt/data/nes-deck/gb-deck` statically hosts the pinned Gambatte libretro
   core at `dfc165599f3f1068c40a0b7ad6fe5f161283d483` for both GB and GBC. It is
   GPL-2.0-only, built with Cortex-A7/NEON tuning and LTO, and emits native
   RGB565 frames. Its deployed SHA-256 is
-  `87920cd7f4dc37c63f345bcdf9c481d152486d5d18c47ed2ea87af2aa840eb1c`.
+  `1b81dfa37afe3cbb861c9be742ef7a9e6d097f54a3e844b0719a3768665c09a3`.
   SRAM and RTC data are saved beside the ROM as `.sav` and `.rtc` files.
+- `/mnt/data/nes-deck/zx-deck` statically hosts Fuse 1.6.0 at pinned revision
+  `bce196fb774835fe65b3e5b821887a4ccf657167`. Its deployed SHA-256 is
+  `f541d68fb6c671e3205df37458645863ec43d88c8ccbbaee79987069f9e9436e`.
+  It emulates a 48K Spectrum, automatically loads TAP media, maps Player 1 to
+  Kempston and Player 2 to Sinclair 2, and renders the medium-border 288x216
+  frame at exact 2x scale inside the rounded-screen safe area.
 - `/mnt/data/nes-deck/chip8-deck` statically hosts the pinned c-octo core for
   CHIP-8, SCHIP, and XO-CHIP. Its deployed SHA-256 is
   `c4cbdc26f09eb565b3aebaf4068a10c8cdb9274be966b2b6ddcea5cb09d34104`.
   ROM sidecars hold tickrate, palette, quirk, and controller-profile settings.
-- Both frontends share exact framebuffer validation, nearest-neighbor integer
-  scaling inside a 16-pixel rounded-panel safe area, OSS S16 mono audio,
+- The GB/GBC, ZX, and CHIP-8 frontends share exact framebuffer validation,
+  nearest-neighbor integer scaling inside a 16-pixel rounded-panel safe area,
+  OSS S16 mono audio,
   volume inheritance, frame pacing, and the stable two-controller discovery
   code. Completed frames are built in cacheable RAM and only the active
   rotated rectangle is published to the live scanout, preventing the moving
   black triangle caused by partial framebuffer writes. The RGB565 path writes
-  one complete physical row at a time. GB's 160x144 image renders at 3x;
-  64x32 CHIP-8 renders at 14x, and 128x64 high-resolution modes render at 7x.
+  one complete physical row at a time. GB's 160x144 image renders at 3x, ZX's
+  288x216 medium-border image at 2x, 64x32 CHIP-8 at 14x, and 128x64
+  high-resolution modes at 7x.
+- Live Elite and Knight Lore runs detected the two stable controller paths,
+  opened 44.1 kHz audio, rendered distinct framebuffer captures, and exited
+  cleanly on TERM. Elite's initial accelerated tape load took 16.656 seconds;
+  every following 60-frame window held 50 FPS at 1.199 to 1.201 seconds.
+  Knight Lore held the same 50 FPS after switching to exact 2x output, with
+  52,851 audio frames per 60 callbacks and no dropped samples. Logs and raw
+  captures are retained under
+  `/mnt/data/nes-deck/log/live-smoke-20260714-zx-spectrum/`.
 - The first hardware smoke run exposed a frontend-only ROM-read bug: a C++
   stream-buffer iterator does not set `ifstream::eof()`, so complete ROMs were
   rejected. The loaders now perform exact-size reads and reject only short or
@@ -436,10 +462,10 @@ passphrases, WireGuard private keys, or ROM data.
 
 ## Useful checks
 
-As of 2026-07-13 the supervised tabbed menu is running with one `deck-menu`
-process and no unmanaged emulator process. The live generated fourteen-game catalog matches
-the fallback, `net1` remains associated with its IPv4 default route, all 32
-saved PSK profiles remain present, and WireGuard is reachable. No wireless
+As of 2026-07-14 the supervised menu is running with one `deck-menu` process
+and no unmanaged emulator process. The live generated fifteen-game catalog
+matches the fallback, `net1` remains associated with its IPv4 default route,
+all 32 saved PSK profiles remain present, and WireGuard is reachable. No wireless
 reload or UCI edit was used during deployment. The rollback copy for this
 multi-system deployment is
 `/mnt/data/nes-deck/backups/20260713-115636-pre-multisystem/`; the immediately
@@ -456,6 +482,9 @@ immediately preceding the simplified header is retained there as
 menu binary immediately preceding unified title sizing as
 `deck-menu.pre-unified-titles` and the binary immediately preceding staged menu
 transitions as `deck-menu.pre-staged-present`.
+The current ZX/menu/timer deployment rollback is
+`/mnt/data/nes-deck/backups/20260714-pre-zx-spectrum-d1cd98c/`; it retains the
+pre-Spectrum menu payloads and the tested intermediate Spectrum binaries.
 
 ```sh
 # Stock UI must stay disabled
