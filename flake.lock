@@ -84,6 +84,19 @@
         "type": "github"
       }
     },
+    "lua-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1765832628,
+        "narHash": "sha256-0hEjDzvMqWZaLLeDjjTH7SP8XDdObgZ+UydGr6/d46o=",
+        "type": "tarball",
+        "url": "https://www.lua.org/ftp/lua-5.5.0.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://www.lua.org/ftp/lua-5.5.0.tar.gz"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1767313136,
@@ -107,6 +120,7 @@
         "fuse-src": "fuse-src",
         "gambatte-src": "gambatte-src",
         "infones-src": "infones-src",
+        "lua-src": "lua-src",
         "nixpkgs": "nixpkgs"
       }
     }

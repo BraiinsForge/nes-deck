@@ -23,10 +23,14 @@
       url = "github:JohnEarnest/c-octo/5f62f185c9e6ae324dcbe9e7fe35ec7c3bdebfb1";
       flake = false;
     };
+    lua-src = {
+      url = "https://www.lua.org/ftp/lua-5.5.0.tar.gz";
+      flake = false;
+    };
   };
 
   outputs =
-    { self, nixpkgs, infones-src, fceumm-src, gambatte-src, fuse-src, c-octo-src }:
+    { self, nixpkgs, infones-src, fceumm-src, gambatte-src, fuse-src, c-octo-src, lua-src }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -451,6 +455,47 @@
           meta = {
             description = "c-octo CHIP-8/SCHIP/XO-CHIP core with Deck-native frontend";
             homepage = "https://github.com/JohnEarnest/c-octo";
+            license = pkgs.lib.licenses.mit;
+            platforms = [ "armv7l-linux" ];
+          };
+        };
+
+        lua-deck = pkgsCross.stdenv.mkDerivation {
+          pname = "lua-deck";
+          version = "5.5.0";
+
+          src = lua-src;
+          nativeBuildInputs = [ pkgs.gnumake pkgs.nukeReferences ];
+          buildInputs = [ pkgsCross.glibc.static ];
+          allowedReferences = [ ];
+
+          NIX_CFLAGS_COMPILE = "-Os";
+          NIX_LDFLAGS = "-static";
+
+          buildPhase = ''
+            runHook preBuild
+            make -C src -j$NIX_BUILD_CORES posix \
+              CC="$CC -std=gnu99" \
+              AR="${pkgsCross.stdenv.cc.targetPrefix}ar rcu" \
+              RANLIB=${pkgsCross.stdenv.cc.targetPrefix}ranlib \
+              MYCFLAGS="-Os -ffunction-sections -fdata-sections" \
+              MYLDFLAGS="-static -Wl,--gc-sections -Wl,-s"
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/bin $out/share/licenses/lua-deck
+            install -m755 src/lua $out/bin/lua
+            install -m644 doc/readme.html \
+              $out/share/licenses/lua-deck/LICENSE.html
+            nuke-refs $out/bin/lua
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Static Lua interpreter for the Braiins Forge Deck";
+            homepage = "https://www.lua.org/";
             license = pkgs.lib.licenses.mit;
             platforms = [ "armv7l-linux" ];
           };
