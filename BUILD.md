@@ -96,7 +96,8 @@ For active development and iteration, use the Nix development environment:
    tests/retro_terminal_test.sh
 
    g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-     tests/deck_runtime_test.cpp src/deck_runtime.cpp -o deck-runtime-test
+     tests/deck_runtime_test.cpp src/deck_runtime.cpp -pthread \
+     -o deck-runtime-test
    ./deck-runtime-test
 
    octo_src=$(nix eval --raw --impure --expr \
@@ -105,6 +106,17 @@ For active development and iteration, use the Nix development environment:
      tests/chip8_core_test.c src/chip8_core.c -o chip8-core-test
    ./chip8-core-test
    ```
+
+5. Render a designer-facing dashboard screenshot set from the checked-in
+   catalog and the Deck's persistent cover cache:
+   ```bash
+   scp -r root@10.0.0.10:/mnt/data/nes-deck/covers /tmp/deck-covers
+   ops/deck-menu/render-screenshots.sh deploy/menu/games.tsv \
+     /tmp/deck-covers "$HOME/retro-deck-screens"
+   ```
+   The renderer calls the native menu drawing code directly, emits every
+   console and game-carousel state at 1280x480, includes control and Wi-Fi
+   variants, and builds `00-overview.png` as a contact sheet.
 
 The GB/GBC package builds the GPL-2.0-only Gambatte libretro core at the exact
 revision in `flake.lock`, using Cortex-A7/NEON flags, LTO, and native RGB565

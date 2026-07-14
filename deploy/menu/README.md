@@ -45,13 +45,14 @@ and the native menu explicitly unblanks fb0 whenever it reopens the display.
 Every managed child return also hides the Linux console cursor and keeps
 console blanking disabled, including after the framebuffer terminal exits.
 
-At runtime, select the NES, Game Boy, Game Boy Color, CHIP-8, or Deck tab, then
-tap a flat game tile to launch it. Only the active system's tiles are shown,
-and each tile retains its original catalog index for launch routing. Tiles
-display only the game title in one compact fixed font size;
-descriptions and license labels stay out of the launcher. Redistribution and
-license details remain in `FOSS_GAMES.md` and the installed license files. The
-top-right minus and plus buttons atomically persist volume in 5-point steps.
+At runtime, use Up/Down on the orange console selector, then tap it to open the
+active console's carousel. Either THEGamepad controller provides the same
+navigation: Up/Down switches consoles, A opens one, Left/Right selects a game,
+A launches it, and B returns to the console selector. Each game retains its
+original catalog index for launch routing. Descriptions and license labels
+stay out of the launcher; redistribution and license details remain in
+`FOSS_GAMES.md` and the installed license files. The top-right minus and plus
+buttons atomically persist volume in 5-point steps.
 The green volume display is also a button: tapping it mutes, turns it red, and
 labels it `VOL OFF`. Tapping the display or plus while muted restores the last
 audible level, or the configured default if the launcher started muted. Every
@@ -70,9 +71,9 @@ The computer icon launches `/mnt/data/nes-deck/terminal/retro-terminal`. The
 adjacent keymap action toggles between US ANSI and Czech QWERTZ. The terminal
 launcher applies that map for fbterm and restores US when the shell exits or
 the menu terminates it. The Deck carousel adds a built-in red power-on entry
-for `/sbin/reboot`; two taps within four seconds are required, and any other
-touch cancels the armed action. The WIFI button opens the on-screen keyboard
-and passes credentials to
+for `/sbin/reboot`; two selections within four seconds are required, and any
+other action cancels the armed request. The WIFI button opens the on-screen
+keyboard and passes credentials to
 `deck-wifi-profile-add` over stdin, never argv. The helper only writes a
 root-only profile; it does not scan, reload, roam, or alter the active network.
 Saving an existing SSID commits the canonical replacement first and then

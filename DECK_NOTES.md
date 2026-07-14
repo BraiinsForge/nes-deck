@@ -71,6 +71,12 @@ passphrases, WireGuard private keys, or ROM data.
   path so leaving them in the same Deck or hub ports keeps Player 1 and Player 2
   assignments stable across game launches; keyboard input remains a Player 1
   fallback.
+- The dashboard discovers the same two controllers without relying on event
+  node numbers. Either D-pad uses Up/Down on the console selector and
+  Left/Right in the game carousel; A opens or launches and B returns to the
+  console selector. Dashboard descriptors close before a child starts and are
+  rediscovered afterward, so gameplay events never accumulate in the menu and
+  controller ownership starts cleanly for each emulator.
 - Retro Games' published mapping is used: D-pad axes are NES directions, A/X
   are NES A, B/Y are NES B, Back is Select, and Start is Start. Disconnects,
   reconnects, hotplug, dropped-event resynchronization, and independent P1/P2
@@ -108,6 +114,9 @@ passphrases, WireGuard private keys, or ROM data.
 
 ## Audio
 
+- `/mnt/data/nes-deck/nes-deck` is the statically linked, Cortex-A7/NEON-tuned
+  FCEUmm frontend. The deployed performance build has SHA-256
+  `659804faa388c069f640276613ce71262d7ad4caaf8dfd72b9134c5892de3faf`.
 - ALSA card 0 is `BMC100-MAX98357A-Audio`: STM32 I2S driving a MAX98357A.
 - Native playback is stereo S16_LE/S32_LE at 8-96 kHz. `/dev/dsp` is ALSA's
   OSS compatibility layer and accepts S16_LE mono at exactly 44.1 kHz,
@@ -116,6 +125,15 @@ passphrases, WireGuard private keys, or ROM data.
   bytes total) while writing one frame of audio at a time. The deployed stream
   requests eight 1024-byte S16 periods (8192 bytes total, about 93 ms), leaving
   scheduling cushion for framebuffer updates.
+- FCEUmm produces 48 kHz audio, but the Deck's OSS bridge consumes about
+  47,328 mono application frames per second even while both OSS and ALSA report
+  a nominal 48 kHz stream. Synchronous writes therefore slowed 60 emulated
+  frames from the required 0.998 seconds to a measured 1.012 seconds. The
+  shared runtime now resamples to that measured application clock and sends
+  blocking writes from a bounded audio worker. A 45-second Kirby probe averaged
+  0.998306 seconds per 60 frames with audio enabled, held its software queue at
+  786 to 788 frames, and dropped no samples. Follow-up GB and CHIP-8 probes held
+  their native 59.728 and 60.000 FPS clocks with zero dropped samples.
 - The pinned InfoNES code also indexed a 24-byte `APU_Reg` array with the full
   address `0x4015`, corrupting memory from the core and mapper-0 IRQ paths.
   The repository patches use the correct register offset `0x15`, repair the
@@ -215,7 +233,7 @@ passphrases, WireGuard private keys, or ROM data.
   `f80d7c10da0e0a09bde089c8e9ad650701befa14a76f1fc740ddae036dacd536`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `73df69b960c9b93f7ee87b821ec87cdd8aa57c0689935da2f4a5797f06e7a2e7`.
+  `bd77344a6506acd5806a3e93c15b1dc14b7119cdb7af86f619b0d9bdc6c184b9`.
   It validates the manifest and system-specific NES/GB/GBC/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
@@ -223,17 +241,17 @@ passphrases, WireGuard private keys, or ROM data.
   volume controls, a persistent US/Czech terminal keymap toggle, the Wi-Fi
   editor, and a supervised framebuffer-terminal action. The installed launcher
   SHA-256 is
-  `b210fcff0c3be84fa6845f18653bfe5457c16ae83b090c3b38641888758db0e9`.
-- The renderer uses only canonical xterm-256 colors. Five flat tabs labeled
-  `NES`, `GAME BOY`, `GAME BOY COLOR`, `CHIP-8`, and `DECK` filter the catalog;
-  the selected tab is cool xterm blue-green 109, distinct from warm title 229.
-  Every game name is centered at the same compact bitmap-font scale. The
-  oversized title is `RETRO DECK`; the redundant play instruction, old blue
-  divider, and tile, tab, and top-control outer outlines are gone. No
-  description or license text remains in the launcher. Full 1280x480 captures
-  of all five tabs, mute and keymap states, four Wi-Fi editor states, and the
-  live timer result screen are in `/root/retro-deck-screens` on the deployment
-  host.
+  `276b7a1d3094722b6cd401402f5932d23caf3de1395892ec2194197eeb44d3f3`.
+- The renderer uses only canonical xterm-256 colors. Its initial screen is a
+  large xterm-202 orange console selector with aligned Up/Down arrows. Opening
+  it reveals one horizontal game carousel with orange Left/Right arrows,
+  cached cover art when available, compact position markers, and the terminal,
+  timer, and reboot app marks drawn natively. Operational controls appear only
+  in game view and have no panel background. No product label, description, or
+  license text remains in the launcher. Reproducible 1280x480 captures of every
+  console, every game position, mute, keymap, reboot confirmation, and all four
+  Wi-Fi keyboard states are in `/root/retro-deck-screens` on the deployment
+  host, together with a contact sheet and the timer result screen.
 - Menu transitions build the complete rotated frame in cacheable memory before
   publishing finished rows to live scanout. This removes the visible black
   clear between screens and reduces live framebuffer writes per transition
@@ -245,10 +263,10 @@ passphrases, WireGuard private keys, or ROM data.
   the ECL compiler atomically generates
   `/mnt/data/nes-deck/state/games.tsv`; the checked-in TSV is a known-good
   fallback. The actual Deck ECL output was verified byte-for-byte against that
-  fallback for all fourteen entries. The deployed `games.sexp` SHA-256 is
-  `f40e93cd78fde396d31bb79f5e9b8074814f54b9386a3d62abb70d4100adbc4d`;
+  fallback for all thirteen entries. The deployed `games.sexp` SHA-256 is
+  `fb5f2c2058be7a0da926606880f3892b2a6695c106d6492888a406688febe63e`;
   the generated and fallback TSV SHA-256 is
-  `6eef36e8687231cf86425f6a0e6d3d9115543ae41e956f2527badb3a1603a4f6`.
+  `a14c5c824cb93bf2ef934614c312fc14991ab787fd1d134ad00bc73455a2e99c`.
   The installed compiler SHA-256 is
   `eeb68d83d8fddf0b9e2996f8c6005d4b91e816a9fb57b75b7cbb8253c4d4d44e`;
   both it and the native loader reject off-palette colors.
@@ -264,11 +282,11 @@ passphrases, WireGuard private keys, or ROM data.
   core at `dfc165599f3f1068c40a0b7ad6fe5f161283d483` for both GB and GBC. It is
   GPL-2.0-only, built with Cortex-A7/NEON tuning and LTO, and emits native
   RGB565 frames. Its deployed SHA-256 is
-  `21cdda99e34d8d6747bdcb11e15f71d7a9658582bc3c85705e2b0ea7c2f9bfd8`.
+  `87920cd7f4dc37c63f345bcdf9c481d152486d5d18c47ed2ea87af2aa840eb1c`.
   SRAM and RTC data are saved beside the ROM as `.sav` and `.rtc` files.
 - `/mnt/data/nes-deck/chip8-deck` statically hosts the pinned c-octo core for
   CHIP-8, SCHIP, and XO-CHIP. Its deployed SHA-256 is
-  `8fa537720f4f496479cf7c8ca98353ac126bc8a26e4bee19d47709c2c830df9b`.
+  `c4cbdc26f09eb565b3aebaf4068a10c8cdb9274be966b2b6ddcea5cb09d34104`.
   ROM sidecars hold tickrate, palette, quirk, and controller-profile settings.
 - Both frontends share exact framebuffer validation, nearest-neighbor integer
   scaling inside a 16-pixel rounded-panel safe area, OSS S16 mono audio,

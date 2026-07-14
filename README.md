@@ -134,22 +134,23 @@ ssh root@<deck-ip> '
 '
 ```
 
-Use the **NES**, **GAME BOY**, **GAME BOY COLOR**, **CHIP-8**, and **DECK** tabs to
-filter the title-only game cards, then tap a card to start it. The selected
-tab is highlighted and cards retain stable catalog-to-launch mappings after
-filtering. Every game name uses the same compact font size. The **- / VOL / +**
-control changes the next game's PCM volume in
+Use the orange console selector to choose **NES**, **GAME BOY**,
+**GAME BOY COLOR**, **CHIP-8**, or **DECK**. Tap its Up/Down arrows, or use
+either controller's D-pad, to switch consoles. Tap the console or press A to
+open its game carousel. Left/Right selects a game, A launches it, and B returns
+to the console selector. The touchscreen arrows and game art remain fully
+usable without a controller. The **- / VOL / +** control changes the next
+game's PCM volume in
 5-point steps from 0 through 100. Tap the green volume display to mute it; the
 display turns red and reads **VOL OFF**. Tap that display or **+** to restore
 the last audible level, or the configured default if the launcher started
 muted. Each nonzero adjustment plays a short two-note confirmation at the
 selected level. The value is saved under `/mnt/data` and survives reboot. While
 a game is running, hold anywhere on the touchscreen for two seconds to return
-to the menu. Touch does not emulate a game controller. The emulators support
-two Retro Games
-THEGamepad USB controllers (`1c59:0026`) with stable player ordering, while
-the keyboard remains a Player 1 fallback. Space Racer uses both controllers
-simultaneously.
+to the menu. Touch does not emulate a game controller. Both Retro Games
+THEGamepad USB controllers (`1c59:0026`) navigate the dashboard, then retain
+stable Player 1 and Player 2 ordering inside games. The keyboard remains a
+Player 1 fallback. Space Racer uses both controllers simultaneously.
 
 Battery-backed cartridge saves are automatic and live beside their ROMs.
 The FCEUmm frontend writes changed NES SRAM atomically to `.srm` every ten
@@ -164,8 +165,9 @@ the display's rounded corners. **KEYS US** and **KEYS CZ** select the terminal
 layout; the launcher applies it only for that terminal session and restores US
 ANSI afterward. Type `exit` or use the same two-second touch hold to return.
 The Deck carousel also includes a red power-on icon for rebooting the device.
-Its first tap arms the action for four seconds; tap it again during that window
-to reboot. Any other action or an expired window cancels the request.
+Its first tap or A press arms the action for four seconds; select it again
+during that window to reboot. Any other action or an expired window cancels
+the request.
 The **WIFI** action opens a touch keyboard for adding PSK
 networks. Saving a network never reloads or changes the live Wi-Fi connection.
 A profile with the same SSID atomically replaces all older records and becomes
