@@ -1321,6 +1321,16 @@ bool menu_input_quarantined(int64_t quarantine_until, int64_t now) {
   return quarantine_until > now;
 }
 
+enum MenuInputKind {
+  MenuInputTouch,
+  MenuInputController,
+  MenuInputKeyboard
+};
+
+bool menu_sound_blocks_input(bool sound_active, MenuInputKind input_kind) {
+  return sound_active && input_kind != MenuInputKeyboard;
+}
+
 bool play_chiptune_blocking(const std::vector<ChiptuneNote> &notes,
                             unsigned int volume_percent,
                             std::string *error) {
@@ -4799,9 +4809,15 @@ int application_main(const Options &options) {
         }
       }
     }
-    if (menu_sound_player.quarantines_input(input_time)) {
+    const bool sound_active =
+        menu_sound_player.quarantines_input(input_time);
+    if (menu_sound_blocks_input(sound_active, MenuInputController)) {
       controller_pressed = 0;
+    }
+    if (menu_sound_blocks_input(sound_active, MenuInputKeyboard)) {
       keyboard_pressed = 0;
+    }
+    if (menu_sound_blocks_input(sound_active, MenuInputTouch)) {
       reports.clear();
       pressed_target = MenuTargetNone;
     }
