@@ -249,6 +249,50 @@
           };
         };
 
+        chiptune-deck = pkgsCross.stdenv.mkDerivation {
+          pname = "chiptune-deck";
+          version = pkgs.game-music-emu.version;
+
+          src = pkgs.game-music-emu.src;
+          nativeBuildInputs = [ pkgs.cmake pkgs.nukeReferences ];
+          buildInputs = [ pkgsCross.glibc.static staticCross.zlib ];
+          allowedReferences = [ ];
+
+          cmakeFlags = [
+            "-DBUILD_SHARED_LIBS=OFF"
+            "-DENABLE_UBSAN=OFF"
+          ];
+
+          buildPhase = ''
+            runHook preBuild
+            cmake --build . --parallel $NIX_BUILD_CORES
+            $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
+              -I${./src} -I.. \
+              ${./src/chiptune_deck.cpp} \
+              ${./src/deck_runtime.cpp} \
+              gme/libgme.a \
+              -static -Wl,-s -pthread -lm -lz -o chiptune-deck
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/bin $out/share/licenses/chiptune-deck
+            install -m755 chiptune-deck $out/bin/chiptune-deck
+            install -m644 ../license.txt \
+              $out/share/licenses/chiptune-deck/license.txt
+            nuke-refs $out/bin/chiptune-deck
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Native chiptune music player for the Braiins Forge Deck";
+            homepage = "https://github.com/libgme/game-music-emu";
+            license = pkgs.lib.licenses.lgpl21Plus;
+            platforms = [ "armv7l-linux" ];
+          };
+        };
+
         ten-seconds-deck = pkgsCross.stdenv.mkDerivation {
           pname = "ten-seconds-deck";
           version = "1.0.0";
@@ -497,6 +541,109 @@
             description = "Static Lua interpreter for the Braiins Forge Deck";
             homepage = "https://www.lua.org/";
             license = pkgs.lib.licenses.mit;
+            platforms = [ "armv7l-linux" ];
+          };
+        };
+
+        python-deck = pkgsCross.stdenv.mkDerivation {
+          pname = "python-deck";
+          version = pkgs.micropython.version;
+
+          src = pkgs.micropython.src;
+          nativeBuildInputs = [ pkgs.gnumake pkgs.python3 pkgs.nukeReferences ];
+          buildInputs = [ pkgsCross.glibc.static ];
+          allowedReferences = [ ];
+
+          NIX_CFLAGS_COMPILE = "-Os";
+          NIX_LDFLAGS = "-static";
+
+          buildPhase = ''
+            runHook preBuild
+            make -C ports/unix -j$NIX_BUILD_CORES \
+              VARIANT=minimal \
+              CROSS_COMPILE=${pkgsCross.stdenv.cc.targetPrefix} \
+              CC=$CC \
+              STRIP=${pkgsCross.stdenv.cc.targetPrefix}strip \
+              CFLAGS_EXTRA="-Os -ffunction-sections -fdata-sections" \
+              LDFLAGS_EXTRA="-static -Wl,--gc-sections"
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/bin $out/share/licenses/python-deck
+            install -m755 ports/unix/build-minimal/micropython \
+              $out/bin/python
+            install -m644 LICENSE \
+              $out/share/licenses/python-deck/LICENSE
+            nuke-refs $out/bin/python
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Static MicroPython REPL for the Braiins Forge Deck";
+            homepage = "https://micropython.org/";
+            license = pkgs.lib.licenses.mit;
+            platforms = [ "armv7l-linux" ];
+          };
+        };
+
+        chibi-deck = pkgsCross.stdenv.mkDerivation {
+          pname = "chibi-deck";
+          version = pkgs.chibi.version;
+
+          src = pkgs.chibi.src;
+          patches = [ ./patches/chibi-static-module-path.patch ];
+          nativeBuildInputs = [ pkgs.gnumake pkgs.chibi pkgs.nukeReferences ];
+          buildInputs = [ pkgsCross.glibc.static ];
+          allowedReferences = [ ];
+
+          NIX_CFLAGS_COMPILE = "-Os";
+          NIX_LDFLAGS = "-static";
+
+          buildPhase = ''
+            runHook preBuild
+            make -j$NIX_BUILD_CORES clibs.c \
+              PLATFORM=linux \
+              CHIBI_DEPENDENCIES= \
+              CHIBI="${pkgs.chibi}/bin/chibi-scheme -I ./lib" \
+              CHIBI_FFI="${pkgs.chibi}/bin/chibi-scheme -I ./lib -q tools/chibi-ffi"
+            make -j$NIX_BUILD_CORES chibi-scheme-static \
+              PLATFORM=linux \
+              ARCH=armv7l \
+              CC=$CC \
+              AR=${pkgsCross.stdenv.cc.targetPrefix}ar \
+              CPPFLAGS="-DSEXP_USE_DL=0 -DSEXP_USE_STATIC_LIBS=1 -DSEXP_USE_STATIC_LIBS_NO_INCLUDE=0" \
+              CFLAGS="-Os -ffunction-sections -fdata-sections" \
+              LDFLAGS="-static -Wl,--gc-sections -Wl,-s"
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/bin $out/share/chibi \
+              $out/share/licenses/chibi-deck
+            install -m755 chibi-scheme-static $out/bin/chibi-scheme
+            cp -R ${pkgs.chibi}/share/chibi/. $out/share/chibi/
+            chmod -R u+w $out/share/chibi
+            find $out/share/chibi -type f \
+              \( -name '*.so' -o -name '*.img' \) -delete
+            cd ${pkgs.chibi}/lib/chibi
+            find . -type f -name '*.so' -print | while read module; do
+              mkdir -p "$out/share/chibi/$(dirname "$module")"
+              install -m444 /dev/null "$out/share/chibi/$module"
+            done
+            cd - >/dev/null
+            install -m644 COPYING \
+              $out/share/licenses/chibi-deck/COPYING
+            nuke-refs $out/bin/chibi-scheme
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Static Chibi Scheme REPL for the Braiins Forge Deck";
+            homepage = "https://github.com/ashinn/chibi-scheme";
+            license = pkgs.lib.licenses.bsd3;
             platforms = [ "armv7l-linux" ];
           };
         };

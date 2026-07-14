@@ -8,6 +8,8 @@
  *             --zx-emulator /absolute/path/to/zx-deck \
  *             --chip8-emulator /absolute/path/to/chip8-deck \
  *             --deck-game /absolute/path/to/ten-seconds-deck \
+ *             --chiptune-player /absolute/path/to/chiptune-deck \
+ *             --chiptune-directory /absolute/path/to/chiptunes \
  *             --manifest /absolute/path/to/games.tsv \
  *             --cover-directory /absolute/path/to/covers \
  *             --volume-state /absolute/path/to/volume.state \
@@ -541,6 +543,48 @@ bool is_built_in_lisp(const GameEntry &game) {
   return game.id == "lisp-repl" && game.system == "deck";
 }
 
+GameEntry built_in_python_entry(const std::string &launcher) {
+  GameEntry entry;
+  entry.id = "python-repl";
+  entry.title = "PYTHON REPL";
+  entry.system = "deck";
+  entry.rom = launcher;
+  entry.color = xterm_color(220);
+  return entry;
+}
+
+bool is_built_in_python(const GameEntry &game) {
+  return game.id == "python-repl" && game.system == "deck";
+}
+
+GameEntry built_in_scheme_entry(const std::string &launcher) {
+  GameEntry entry;
+  entry.id = "scheme-repl";
+  entry.title = "SCHEME REPL";
+  entry.system = "deck";
+  entry.rom = launcher;
+  entry.color = xterm_color(114);
+  return entry;
+}
+
+bool is_built_in_scheme(const GameEntry &game) {
+  return game.id == "scheme-repl" && game.system == "deck";
+}
+
+GameEntry built_in_chiptune_entry(const std::string &directory) {
+  GameEntry entry;
+  entry.id = "chiptunes";
+  entry.title = "CHIPTUNES";
+  entry.system = "deck";
+  entry.rom = directory;
+  entry.color = xterm_color(208);
+  return entry;
+}
+
+bool is_built_in_chiptune(const GameEntry &game) {
+  return game.id == "chiptunes" && game.system == "deck";
+}
+
 std::string terminal_mode_for_game(const GameEntry &game) {
   if (is_built_in_terminal(game))
     return "shell";
@@ -548,6 +592,10 @@ std::string terminal_mode_for_game(const GameEntry &game) {
     return "lua";
   if (is_built_in_lisp(game))
     return "lisp";
+  if (is_built_in_python(game))
+    return "python";
+  if (is_built_in_scheme(game))
+    return "scheme";
   return std::string();
 }
 
@@ -556,6 +604,10 @@ std::string terminal_program_title(const std::string &mode) {
     return "LUA REPL";
   if (mode == "lisp")
     return "LISP REPL";
+  if (mode == "python")
+    return "PYTHON REPL";
+  if (mode == "scheme")
+    return "SCHEME REPL";
   return "TERMINAL";
 }
 
@@ -2215,6 +2267,28 @@ bool draw_compact_deck_logo(Canvas *canvas, const Rect &bounds,
     draw_centered_text(canvas, bounds, "LUA>", 4, accent);
   } else if (is_built_in_lisp(game)) {
     draw_centered_text(canvas, bounds, "(LISP)", 4, accent);
+  } else if (is_built_in_python(game)) {
+    draw_centered_text(canvas, bounds, ">>>", 6, accent);
+    fill_rect(canvas,
+              Rect{bounds.x + bounds.width / 2 - 54,
+                   bounds.y + bounds.height / 2 + 34, 108, 6},
+              accent);
+  } else if (is_built_in_scheme(game)) {
+    draw_centered_text(canvas, bounds, "(SCHEME)", 3, accent);
+    fill_rect(canvas,
+              Rect{bounds.x + bounds.width / 2 - 34,
+                   bounds.y + bounds.height / 2 + 30, 68, 5},
+              accent);
+  } else if (is_built_in_chiptune(game)) {
+    const int center_x = bounds.x + bounds.width / 2;
+    const int center_y = bounds.y + bounds.height / 2;
+    const int heights[9] = {34, 62, 92, 48, 112, 74, 42, 86, 56};
+    for (int index = 0; index < 9; ++index) {
+      fill_rect(canvas,
+                Rect{center_x - 86 + index * 20,
+                     center_y - heights[index] / 2, 10, heights[index]},
+                accent);
+    }
   } else if (is_built_in_terminal(game)) {
     const Rect screen{bounds.x + 30, bounds.y + 44, bounds.width - 60, 96};
     stroke_rect(canvas, screen, 4, accent);
@@ -4016,6 +4090,8 @@ struct Options {
   std::string zx_emulator;
   std::string chip8_emulator;
   std::string deck_game;
+  std::string chiptune_player;
+  std::string chiptune_directory;
   std::string manifest;
   std::string cover_directory;
   std::string volume_state;
@@ -4039,7 +4115,8 @@ std::string emulator_for_game(const Options &options, const GameEntry &game) {
   if (game.system == "zx")
     return options.zx_emulator;
   if (game.system == "deck")
-    return options.deck_game;
+    return is_built_in_chiptune(game) ? options.chiptune_player
+                                      : options.deck_game;
   return options.chip8_emulator;
 }
 
@@ -4047,7 +4124,8 @@ void print_usage(const char *program) {
   std::cerr << "Usage:\n  " << program
             << " --nes-emulator PATH --gb-emulator PATH "
                "--zx-emulator PATH --chip8-emulator PATH "
-               "--deck-game PATH --manifest PATH "
+               "--deck-game PATH --chiptune-player PATH "
+               "--chiptune-directory PATH --manifest PATH "
                "--cover-directory PATH "
                "--volume-state PATH "
                "--brightness PATH --brightness-max PATH "
@@ -4071,6 +4149,8 @@ bool parse_options(int argc, char **argv, Options *options,
                argument == "--zx-emulator" ||
                argument == "--chip8-emulator" ||
                argument == "--deck-game" ||
+               argument == "--chiptune-player" ||
+               argument == "--chiptune-directory" ||
                argument == "--manifest" ||
                argument == "--cover-directory" ||
                argument == "--volume-state" ||
@@ -4095,6 +4175,10 @@ bool parse_options(int argc, char **argv, Options *options,
         destination = &options->chip8_emulator;
       else if (argument == "--deck-game")
         destination = &options->deck_game;
+      else if (argument == "--chiptune-player")
+        destination = &options->chiptune_player;
+      else if (argument == "--chiptune-directory")
+        destination = &options->chiptune_directory;
       else if (argument == "--manifest")
         destination = &options->manifest;
       else if (argument == "--cover-directory")
@@ -4139,6 +4223,7 @@ bool parse_options(int argc, char **argv, Options *options,
   if (options->nes_emulator.empty() || options->gb_emulator.empty() ||
       options->zx_emulator.empty() || options->chip8_emulator.empty() ||
       options->deck_game.empty() ||
+      options->chiptune_player.empty() || options->chiptune_directory.empty() ||
       options->manifest.empty() || options->cover_directory.empty() ||
       options->volume_state.empty() || options->brightness.empty() ||
       options->brightness_max.empty() || options->brightness_state.empty() ||
@@ -4146,7 +4231,8 @@ bool parse_options(int argc, char **argv, Options *options,
       options->terminal.empty() || options->wifi_helper.empty()) {
     if (error)
       *error = "--nes-emulator, --gb-emulator, --zx-emulator, "
-               "--chip8-emulator, --deck-game, --manifest, "
+               "--chip8-emulator, --deck-game, --chiptune-player, "
+               "--chiptune-directory, --manifest, "
                "--cover-directory, --volume-state, --brightness, "
                "--brightness-max, --brightness-state, "
                "--keymap-state, --terminal, and --wifi-helper are required";
@@ -4162,6 +4248,7 @@ int application_main(const Options &options) {
       !validate_executable(options.zx_emulator, "ZX Spectrum emulator", &error) ||
       !validate_executable(options.chip8_emulator, "CHIP-8 emulator", &error) ||
       !validate_executable(options.deck_game, "Deck game", &error) ||
+      !validate_executable(options.chiptune_player, "chiptune player", &error) ||
       !validate_executable(options.terminal, "terminal launcher", &error) ||
       !validate_executable(kRebootExecutable, "reboot command", &error) ||
       !validate_executable(options.wifi_helper, "wifi helper", &error)) {
@@ -4180,8 +4267,16 @@ int application_main(const Options &options) {
     std::cerr << "deck-menu: " << error << std::endl;
     return 1;
   }
+  if (!is_absolute_path(options.chiptune_directory)) {
+    std::cerr << "deck-menu: chiptune directory must be an absolute path"
+              << std::endl;
+    return 1;
+  }
   games.push_back(built_in_lua_entry(options.terminal));
   games.push_back(built_in_lisp_entry(options.terminal));
+  games.push_back(built_in_python_entry(options.terminal));
+  games.push_back(built_in_scheme_entry(options.terminal));
+  games.push_back(built_in_chiptune_entry(options.chiptune_directory));
   games.push_back(built_in_terminal_entry(options.terminal));
   games.push_back(built_in_reboot_entry(kRebootExecutable));
   if (!is_absolute_path(options.cover_directory)) {

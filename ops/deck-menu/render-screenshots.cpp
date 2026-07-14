@@ -123,6 +123,9 @@ int main(int argc, char **argv) {
   }
   games.push_back(built_in_lua_entry("/terminal"));
   games.push_back(built_in_lisp_entry("/terminal"));
+  games.push_back(built_in_python_entry("/terminal"));
+  games.push_back(built_in_scheme_entry("/terminal"));
+  games.push_back(built_in_chiptune_entry("/mnt/data/chiptunes"));
   games.push_back(built_in_terminal_entry("/terminal"));
   games.push_back(built_in_reboot_entry("/sbin/reboot"));
   const size_t cover_count = load_game_covers(covers, &games);
@@ -166,7 +169,7 @@ int main(int argc, char **argv) {
                   &settings_layout);
   if (!save_canvas(output, number++, "czech-keymap", canvas, &error))
     return 1;
-  render_menu(games, "deck", 4, kRebootConfirmationText, &canvas,
+  render_menu(games, "deck", 7, kRebootConfirmationText, &canvas,
               &menu_layout);
   if (!save_canvas(output, number++, "reboot-confirmation", canvas, &error))
     return 1;

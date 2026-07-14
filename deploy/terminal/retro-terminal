@@ -8,6 +8,9 @@ LANG_BASE=${RETRO_DECK_LANG_BASE:-/mnt/data/langs}
 LUA=${RETRO_DECK_LUA:-/mnt/data/nes-deck/langs/lua}
 LISP=${RETRO_DECK_LISP:-/mnt/data/nes-deck/ecl/bin/ecl.bin}
 ECLDIR=${RETRO_DECK_ECL_DIR:-/mnt/data/nes-deck/ecl/lib/ecl/}
+PYTHON=${RETRO_DECK_PYTHON:-/mnt/data/nes-deck/langs/python}
+SCHEME=${RETRO_DECK_SCHEME:-/mnt/data/nes-deck/langs/chibi/chibi-scheme}
+CHIBI_MODULE_PATH=${RETRO_DECK_CHIBI_MODULE_PATH:-/mnt/data/nes-deck/langs/chibi/lib}
 FBTERM=$BASE/fbterm
 LOADKEYS=$BASE/loadkeys
 KEYMAP_DIR=$BASE/keymaps
@@ -20,7 +23,7 @@ TERM=fbterm
 SHELL=/bin/ash
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
-export FONTCONFIG_FILE FONTCONFIG_PATH HOME TERM SHELL PATH
+export FONTCONFIG_FILE FONTCONFIG_PATH HOME TERM SHELL PATH CHIBI_MODULE_PATH
 unset FONTCONFIG_SYSROOT
 
 umask 077
@@ -38,7 +41,7 @@ fail() {
 [ -r "$US_KEYMAP" ] || fail "US keymap is unreadable: $US_KEYMAP"
 [ -r "$CZ_KEYMAP" ] || fail "Czech keymap is unreadable: $CZ_KEYMAP"
 
-[ "$#" -le 1 ] || fail "usage: retro-terminal [shell|lua|lisp]"
+[ "$#" -le 1 ] || fail "usage: retro-terminal [shell|lua|lisp|python|scheme]"
 mode=${1:-shell}
 case $mode in
   shell)
@@ -60,8 +63,24 @@ case $mode in
     export ECLDIR
     set -- "$LISP" --norc
     ;;
+  python)
+    [ -x "$PYTHON" ] || fail "Python interpreter is missing or not executable: $PYTHON"
+    workdir=$LANG_BASE/python
+    mkdir -p "$workdir" || fail "cannot create Python working directory: $workdir"
+    cd "$workdir" || fail "cannot enter Python working directory: $workdir"
+    set -- "$PYTHON"
+    ;;
+  scheme)
+    [ -x "$SCHEME" ] || fail "Scheme interpreter is missing or not executable: $SCHEME"
+    [ -r "$CHIBI_MODULE_PATH/init-7.scm" ] ||
+      fail "Chibi Scheme module library is unavailable: $CHIBI_MODULE_PATH"
+    workdir=$LANG_BASE/scheme
+    mkdir -p "$workdir" || fail "cannot create Scheme working directory: $workdir"
+    cd "$workdir" || fail "cannot enter Scheme working directory: $workdir"
+    set -- "$SCHEME"
+    ;;
   *)
-    fail "mode must be 'shell', 'lua', or 'lisp'"
+    fail "mode must be 'shell', 'lua', 'lisp', 'python', or 'scheme'"
     ;;
 esac
 

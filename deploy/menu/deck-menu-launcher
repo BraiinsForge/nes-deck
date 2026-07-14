@@ -21,6 +21,8 @@ GB_EMULATOR=$BASE/gb-deck
 ZX_EMULATOR=$BASE/zx-deck
 CHIP8_EMULATOR=$BASE/chip8-deck
 DECK_GAME=$BASE/ten-seconds-deck
+CHIPTUNE_PLAYER=$BASE/chiptune-deck
+CHIPTUNE_DIRECTORY=/mnt/data/chiptunes
 CATALOG=$MENU_DIR/games.sexp
 FALLBACK_MANIFEST=$MENU_DIR/games.tsv
 GENERATED_MANIFEST=$STATE_DIR/games.tsv
@@ -34,6 +36,9 @@ LEGACY_SOUND_STATE=$STATE_DIR/menu-sound.state
 KEYMAP_STATE=$STATE_DIR/terminal-keymap.state
 TERMINAL=$BASE/terminal/retro-terminal
 LUA=$BASE/langs/lua
+PYTHON=$BASE/langs/python
+SCHEME=$BASE/langs/chibi/chibi-scheme
+CHIBI_MODULE_PATH=$BASE/langs/chibi/lib
 WIFI_HELPER=/usr/sbin/deck-wifi-profile-add
 COMPILER=$MENU_DIR/compile-catalog.lisp
 ECL=$BASE/ecl/bin/ecl.bin
@@ -48,12 +53,14 @@ export RETRO_DECK_VOLUME_PERCENT=$VOLUME_ON
 umask 077
 
 if ! mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" \
-	"$LANG_ROOT/lua" "$LANG_ROOT/lisp"; then
+	"$LANG_ROOT/lua" "$LANG_ROOT/lisp" "$LANG_ROOT/python" \
+	"$LANG_ROOT/scheme" "$CHIPTUNE_DIRECTORY"; then
 	logger -t nes-deck-menu "cannot create persistent state and language directories"
 	exit 1
 fi
 chmod 0700 "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" \
-	"$LANG_ROOT/lua" "$LANG_ROOT/lisp" 2>/dev/null || :
+	"$LANG_ROOT/lua" "$LANG_ROOT/lisp" "$LANG_ROOT/python" \
+	"$LANG_ROOT/scheme" "$CHIPTUNE_DIRECTORY" 2>/dev/null || :
 
 rotate_log() {
 	log_size=0
@@ -124,6 +131,10 @@ if [ ! -x "$DECK_GAME" ]; then
 	log_message "Deck game is missing or not executable: $DECK_GAME"
 	exit 1
 fi
+if [ ! -x "$CHIPTUNE_PLAYER" ]; then
+	log_message "chiptune player is missing or not executable: $CHIPTUNE_PLAYER"
+	exit 1
+fi
 if [ ! -x "$TERMINAL" ]; then
 	log_message "terminal launcher is missing or not executable: $TERMINAL"
 	exit 1
@@ -134,6 +145,14 @@ if [ ! -w "$BRIGHTNESS" ] || [ ! -r "$BRIGHTNESS_MAX" ]; then
 fi
 if [ ! -x "$LUA" ]; then
 	log_message "Lua interpreter is missing or not executable: $LUA"
+	exit 1
+fi
+if [ ! -x "$PYTHON" ]; then
+	log_message "Python interpreter is missing or not executable: $PYTHON"
+	exit 1
+fi
+if [ ! -x "$SCHEME" ] || [ ! -r "$CHIBI_MODULE_PATH/init-7.scm" ]; then
+	log_message "Chibi Scheme runtime is unavailable under $BASE/langs/chibi"
 	exit 1
 fi
 if [ ! -x "$ECL" ] || [ ! -d "$ECLDIR" ]; then
@@ -232,6 +251,8 @@ exec "$MENU" \
 	--zx-emulator "$ZX_EMULATOR" \
 	--chip8-emulator "$CHIP8_EMULATOR" \
 	--deck-game "$DECK_GAME" \
+	--chiptune-player "$CHIPTUNE_PLAYER" \
+	--chiptune-directory "$CHIPTUNE_DIRECTORY" \
 	--volume-state "$VOLUME_STATE" \
 	--brightness "$BRIGHTNESS" \
 	--brightness-max "$BRIGHTNESS_MAX" \

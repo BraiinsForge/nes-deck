@@ -1,0 +1,32 @@
+diff --git a/eval.c b/eval.c
+index 64718e3..c164f88 100644
+--- a/eval.c
++++ b/eval.c
+@@ -1409,7 +1409,7 @@ void sexp_add_static_libraries(struct sexp_library_entry_t* libraries)
+ 
+ static struct sexp_library_entry_t *sexp_find_static_library(const char *file)
+ {
+-  size_t base_len;
++  size_t base_len, entry_len;
+   struct sexp_library_entry_t *entry, *table;
+ 
+   if(!sexp_static_libraries)
+@@ -1423,9 +1423,16 @@ static struct sexp_library_entry_t *sexp_find_static_library(const char *file)
+   for (table = sexp_static_libraries;
+        table;
+        table = (struct sexp_library_entry_t*)entry->init) {
+-    for (entry = &table[0]; entry->name; entry++)
+-      if (! strncmp(file, entry->name, base_len))
++    for (entry = &table[0]; entry->name; entry++) {
++      const char *entry_name = entry->name;
++      if (!strncmp(entry_name, "lib/", 4))
++        entry_name += 4;
++      entry_len = strlen(entry_name);
++      if ((entry_len == base_len && !strncmp(file, entry_name, base_len)) ||
++          (base_len > entry_len && file[base_len-entry_len-1] == '/' &&
++           !strncmp(file+base_len-entry_len, entry_name, entry_len)))
+         return entry;
++    }
+   }
+   return NULL;
+ }

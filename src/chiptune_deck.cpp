@@ -1,0 +1,951 @@
+#include "deck_runtime.h"
+
+#include <gme/gme.h>
+
+#include <algorithm>
+#include <cerrno>
+#include <climits>
+#include <csignal>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <dirent.h>
+#include <fcntl.h>
+#include <linux/input.h>
+#include <string>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <vector>
+
+namespace {
+
+const int kLogicalWidth = 1280;
+const int kLogicalHeight = 480;
+const int kCanvasWidth = 624;
+const int kCanvasHeight = 224;
+const int kCanvasOffset = 16;
+const int kCanvasScale = 2;
+const unsigned int kSampleRate = 44100;
+const size_t kFramesPerTick = 735;
+const size_t kMaximumFiles = 1024;
+const off_t kMaximumFileSize = 16 * 1024 * 1024;
+const unsigned short kTheGamepadVendor = 0x1c59;
+const unsigned short kTheGamepadProduct = 0x0026;
+
+volatile sig_atomic_t shutdown_requested = 0;
+
+struct Rect {
+  int x;
+  int y;
+  int width;
+  int height;
+};
+
+typedef std::vector<uint16_t> Canvas;
+
+enum ControlCommand {
+  ControlNone = 0,
+  ControlBack = 1 << 0,
+  ControlPreviousFile = 1 << 1,
+  ControlNextFile = 1 << 2,
+  ControlTogglePause = 1 << 3,
+  ControlPreviousTrack = 1 << 4,
+  ControlNextTrack = 1 << 5
+};
+
+void request_shutdown(int signal_number) {
+  (void)signal_number;
+  shutdown_requested = 1;
+}
+
+void install_signal_handlers() {
+  struct sigaction action;
+  std::memset(&action, 0, sizeof(action));
+  action.sa_handler = request_shutdown;
+  sigemptyset(&action.sa_mask);
+  sigaction(SIGINT, &action, NULL);
+  sigaction(SIGTERM, &action, NULL);
+}
+
+bool bit_is_set(const unsigned long *bits, unsigned int bit) {
+  const unsigned int bits_per_word = sizeof(unsigned long) * CHAR_BIT;
+  return (bits[bit / bits_per_word] & (1UL << (bit % bits_per_word))) != 0;
+}
+
+bool contains(const Rect &rect, int x, int y) {
+  return x >= rect.x && x < rect.x + rect.width && y >= rect.y &&
+         y < rect.y + rect.height;
+}
+
+void fill_rect(Canvas *canvas, const Rect &rect, uint16_t color) {
+  if (!canvas || canvas->size() !=
+                     static_cast<size_t>(kCanvasWidth * kCanvasHeight))
+    return;
+  const int left = std::max(0, rect.x);
+  const int top = std::max(0, rect.y);
+  const int right = std::min(kCanvasWidth, rect.x + rect.width);
+  const int bottom = std::min(kCanvasHeight, rect.y + rect.height);
+  for (int y = top; y < bottom; ++y) {
+    std::fill(canvas->begin() + y * kCanvasWidth + left,
+              canvas->begin() + y * kCanvasWidth + right, color);
+  }
+}
+
+const uint8_t *glyph_rows(char input) {
+  static const uint8_t space[7] = {0, 0, 0, 0, 0, 0, 0};
+  static const uint8_t digits[10][7] = {
+      {14, 17, 19, 21, 25, 17, 14}, {4, 12, 4, 4, 4, 4, 14},
+      {14, 17, 1, 2, 4, 8, 31},     {30, 1, 1, 14, 1, 1, 30},
+      {2, 6, 10, 18, 31, 2, 2},     {31, 16, 16, 30, 1, 1, 30},
+      {14, 16, 16, 30, 17, 17, 14}, {31, 1, 2, 4, 8, 8, 8},
+      {14, 17, 17, 14, 17, 17, 14}, {14, 17, 17, 15, 1, 1, 14}};
+  static const uint8_t letters[26][7] = {
+      {14, 17, 17, 31, 17, 17, 17}, {30, 17, 17, 30, 17, 17, 30},
+      {14, 17, 16, 16, 16, 17, 14}, {30, 17, 17, 17, 17, 17, 30},
+      {31, 16, 16, 30, 16, 16, 31}, {31, 16, 16, 30, 16, 16, 16},
+      {14, 17, 16, 23, 17, 17, 15}, {17, 17, 17, 31, 17, 17, 17},
+      {14, 4, 4, 4, 4, 4, 14},      {7, 2, 2, 2, 18, 18, 12},
+      {17, 18, 20, 24, 20, 18, 17}, {16, 16, 16, 16, 16, 16, 31},
+      {17, 27, 21, 21, 17, 17, 17}, {17, 25, 21, 19, 17, 17, 17},
+      {14, 17, 17, 17, 17, 17, 14}, {30, 17, 17, 30, 16, 16, 16},
+      {14, 17, 17, 17, 21, 18, 13}, {30, 17, 17, 30, 20, 18, 17},
+      {15, 16, 16, 14, 1, 1, 30},   {31, 4, 4, 4, 4, 4, 4},
+      {17, 17, 17, 17, 17, 17, 14}, {17, 17, 17, 17, 17, 10, 4},
+      {17, 17, 17, 17, 21, 21, 10}, {17, 17, 10, 4, 10, 17, 17},
+      {17, 17, 10, 4, 4, 4, 4},     {31, 1, 2, 4, 8, 16, 31}};
+  static const uint8_t period[7] = {0, 0, 0, 0, 0, 6, 6};
+  static const uint8_t colon[7] = {0, 6, 6, 0, 6, 6, 0};
+  static const uint8_t hyphen[7] = {0, 0, 0, 31, 0, 0, 0};
+  static const uint8_t slash[7] = {1, 2, 2, 4, 8, 8, 16};
+  static const uint8_t unknown[7] = {14, 17, 1, 2, 4, 0, 4};
+  unsigned char character = static_cast<unsigned char>(input);
+  if (character >= 'a' && character <= 'z')
+    character = static_cast<unsigned char>(character - 'a' + 'A');
+  if (character >= 'A' && character <= 'Z')
+    return letters[character - 'A'];
+  if (character >= '0' && character <= '9')
+    return digits[character - '0'];
+  if (character == ' ')
+    return space;
+  if (character == '.')
+    return period;
+  if (character == ':')
+    return colon;
+  if (character == '-')
+    return hyphen;
+  if (character == '/')
+    return slash;
+  return unknown;
+}
+
+void draw_text(Canvas *canvas, int x, int y, const std::string &text,
+               int scale, uint16_t color) {
+  for (size_t index = 0; index < text.size(); ++index) {
+    const uint8_t *rows = glyph_rows(text[index]);
+    for (int row = 0; row < 7; ++row) {
+      for (int column = 0; column < 5; ++column) {
+        if (rows[row] & (1u << (4 - column))) {
+          fill_rect(canvas,
+                    Rect{x + static_cast<int>(index) * 6 * scale +
+                             column * scale,
+                         y + row * scale, scale, scale},
+                    color);
+        }
+      }
+    }
+  }
+}
+
+void draw_centered_text(Canvas *canvas, int y, const std::string &text,
+                        int scale, uint16_t color) {
+  const int width = text.empty()
+                        ? 0
+                        : static_cast<int>(text.size() * 6 - 1) * scale;
+  draw_text(canvas, std::max(0, (kCanvasWidth - width) / 2), y, text, scale,
+            color);
+}
+
+std::string uppercase_ascii(const std::string &input) {
+  std::string result;
+  for (size_t index = 0; index < input.size(); ++index) {
+    unsigned char character = static_cast<unsigned char>(input[index]);
+    if (character >= 'a' && character <= 'z')
+      character = static_cast<unsigned char>(character - 'a' + 'A');
+    if ((character >= 'A' && character <= 'Z') ||
+        (character >= '0' && character <= '9') || character == ' ' ||
+        character == '.' || character == ':' || character == '-' ||
+        character == '/') {
+      result.push_back(static_cast<char>(character));
+    } else if (character == '_' || character == '\t') {
+      result.push_back(' ');
+    }
+  }
+  return result;
+}
+
+std::string clipped(const std::string &input, size_t maximum) {
+  const std::string clean = uppercase_ascii(input);
+  if (clean.size() <= maximum)
+    return clean;
+  if (maximum <= 3)
+    return clean.substr(0, maximum);
+  return clean.substr(0, maximum - 3) + "...";
+}
+
+std::string base_name(const std::string &path) {
+  const size_t slash = path.find_last_of('/');
+  std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+  const size_t dot = name.find_last_of('.');
+  if (dot != std::string::npos)
+    name.erase(dot);
+  std::replace(name.begin(), name.end(), '-', ' ');
+  std::replace(name.begin(), name.end(), '_', ' ');
+  return name;
+}
+
+std::string lower_extension(const std::string &path) {
+  const size_t dot = path.find_last_of('.');
+  if (dot == std::string::npos)
+    return std::string();
+  std::string extension = path.substr(dot);
+  for (size_t index = 0; index < extension.size(); ++index) {
+    if (extension[index] >= 'A' && extension[index] <= 'Z')
+      extension[index] = static_cast<char>(extension[index] - 'A' + 'a');
+  }
+  return extension;
+}
+
+bool supported_extension(const std::string &path) {
+  static const char *extensions[] = {".ay",  ".gbs", ".gym", ".hes",
+                                     ".kss", ".nsf", ".nsfe", ".sap",
+                                     ".spc", ".vgm", ".vgz"};
+  const std::string extension = lower_extension(path);
+  for (size_t index = 0; index < sizeof(extensions) / sizeof(extensions[0]);
+       ++index) {
+    if (extension == extensions[index])
+      return true;
+  }
+  return false;
+}
+
+void scan_chiptunes(const std::string &directory, unsigned int depth,
+                    std::vector<std::string> *files) {
+  if (!files || depth > 4 || files->size() >= kMaximumFiles)
+    return;
+  DIR *handle = opendir(directory.c_str());
+  if (!handle)
+    return;
+  std::vector<std::string> names;
+  for (struct dirent *entry = readdir(handle); entry; entry = readdir(handle)) {
+    const std::string name(entry->d_name);
+    if (name.empty() || name[0] == '.')
+      continue;
+    names.push_back(name);
+  }
+  closedir(handle);
+  std::sort(names.begin(), names.end());
+  for (size_t index = 0;
+       index < names.size() && files->size() < kMaximumFiles; ++index) {
+    const std::string path = directory + "/" + names[index];
+    struct stat info;
+    if (lstat(path.c_str(), &info) != 0)
+      continue;
+    if (S_ISDIR(info.st_mode)) {
+      scan_chiptunes(path, depth + 1, files);
+    } else if (S_ISREG(info.st_mode) && info.st_size > 0 &&
+               info.st_size <= kMaximumFileSize && supported_extension(path)) {
+      files->push_back(path);
+    }
+  }
+}
+
+bool read_chiptune(const std::string &path, std::vector<unsigned char> *bytes,
+                   std::string *error) {
+  if (!bytes)
+    return false;
+  bytes->clear();
+  const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) {
+    if (error)
+      *error = std::string("cannot open file: ") + std::strerror(errno);
+    return false;
+  }
+  struct stat info;
+  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size <= 0 ||
+      info.st_size > kMaximumFileSize) {
+    if (error)
+      *error = "file is empty, oversized, or not regular";
+    close(fd);
+    return false;
+  }
+  bytes->resize(static_cast<size_t>(info.st_size));
+  size_t offset = 0;
+  while (offset < bytes->size()) {
+    const ssize_t amount =
+        read(fd, &(*bytes)[offset], bytes->size() - offset);
+    if (amount > 0) {
+      offset += static_cast<size_t>(amount);
+    } else if (amount < 0 && errno == EINTR) {
+      continue;
+    } else {
+      if (error)
+        *error = amount == 0 ? "file ended during read"
+                             : std::string("cannot read file: ") +
+                                   std::strerror(errno);
+      close(fd);
+      bytes->clear();
+      return false;
+    }
+  }
+  if (close(fd) != 0) {
+    if (error)
+      *error = std::string("cannot close file: ") + std::strerror(errno);
+    bytes->clear();
+    return false;
+  }
+  return true;
+}
+
+unsigned int axis_buttons(int value, const struct input_absinfo &info,
+                          unsigned int negative, unsigned int positive) {
+  if (info.maximum <= info.minimum)
+    return 0;
+  const int64_t span = static_cast<int64_t>(info.maximum) - info.minimum;
+  if (value <= info.minimum + span / 3)
+    return negative;
+  if (value >= info.maximum - span / 3)
+    return positive;
+  return 0;
+}
+
+unsigned int gamepad_key(unsigned short code) {
+  switch (code) {
+  case BTN_THUMB2:
+  case BTN_TOP:
+    return ControlTogglePause;
+  case BTN_THUMB:
+  case BTN_TRIGGER:
+    return ControlBack;
+  case BTN_TOP2:
+    return ControlPreviousTrack;
+  case BTN_PINKIE:
+    return ControlNextTrack;
+  default:
+    return 0;
+  }
+}
+
+struct GamepadDevice {
+  int fd;
+  struct input_absinfo x_info;
+  struct input_absinfo y_info;
+  int x_value;
+  int y_value;
+  uint32_t raw_buttons;
+  unsigned int state;
+  bool dropping;
+
+  GamepadDevice()
+      : fd(-1), x_value(0), y_value(0), raw_buttons(0), state(0),
+        dropping(false) {
+    std::memset(&x_info, 0, sizeof(x_info));
+    std::memset(&y_info, 0, sizeof(y_info));
+  }
+};
+
+unsigned int gamepad_state(const GamepadDevice &device) {
+  unsigned int state = 0;
+  for (unsigned int index = 0; index < 8; ++index) {
+    if (device.raw_buttons & (1u << index))
+      state |= gamepad_key(static_cast<unsigned short>(BTN_TRIGGER + index));
+  }
+  state |= axis_buttons(device.x_value, device.x_info, ControlPreviousFile,
+                        ControlNextFile);
+  state |= axis_buttons(device.y_value, device.y_info, ControlPreviousTrack,
+                        ControlNextTrack);
+  return state;
+}
+
+class PlayerInput {
+public:
+  PlayerInput()
+      : touch_fd_(-1), touch_x_(0), touch_y_(0), touch_down_(false),
+        touch_reported_(false), touch_dropping_(false), touch_grabbed_(false) {}
+  ~PlayerInput() { close_devices(); }
+
+  void discover() {
+    close_devices();
+    DIR *directory = opendir("/dev/input");
+    if (!directory)
+      return;
+    std::vector<std::string> paths;
+    for (struct dirent *entry = readdir(directory); entry;
+         entry = readdir(directory)) {
+      const std::string name(entry->d_name);
+      if (name.size() > 5 && name.compare(0, 5, "event") == 0)
+        paths.push_back("/dev/input/" + name);
+    }
+    closedir(directory);
+    std::sort(paths.begin(), paths.end());
+    for (size_t index = 0; index < paths.size(); ++index) {
+      const int fd = open(paths[index].c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+      if (fd < 0)
+        continue;
+      char name[256] = {};
+      struct input_id identity;
+      std::memset(&identity, 0, sizeof(identity));
+      ioctl(fd, EVIOCGNAME(sizeof(name)), name);
+      ioctl(fd, EVIOCGID, &identity);
+      if (touch_fd_ < 0 &&
+          std::string(name).find("Goodix Capacitive TouchScreen") !=
+              std::string::npos) {
+        struct input_absinfo x_info;
+        struct input_absinfo y_info;
+        if (ioctl(fd, EVIOCGABS(ABS_X), &x_info) == 0 &&
+            ioctl(fd, EVIOCGABS(ABS_Y), &y_info) == 0) {
+          touch_fd_ = fd;
+          touch_x_ = x_info.value;
+          touch_y_ = y_info.value;
+          touch_grabbed_ = ioctl(fd, EVIOCGRAB, 1) == 0;
+          continue;
+        }
+      }
+      if (identity.vendor == kTheGamepadVendor &&
+          identity.product == kTheGamepadProduct && gamepads_.size() < 2) {
+        GamepadDevice device;
+        device.fd = fd;
+        if (ioctl(fd, EVIOCGABS(ABS_X), &device.x_info) == 0 &&
+            ioctl(fd, EVIOCGABS(ABS_Y), &device.y_info) == 0 &&
+            resynchronize(&device)) {
+          gamepads_.push_back(device);
+          continue;
+        }
+      }
+      close(fd);
+    }
+  }
+
+  unsigned int read_commands() {
+    unsigned int commands = 0;
+    if (touch_fd_ >= 0)
+      drain_touch(&commands);
+    for (size_t index = 0; index < gamepads_.size(); ++index)
+      drain_gamepad(&gamepads_[index], &commands);
+    return commands;
+  }
+
+private:
+  static bool resynchronize(GamepadDevice *device) {
+    if (!device || device->fd < 0)
+      return false;
+    const size_t words = (KEY_MAX + sizeof(unsigned long) * CHAR_BIT) /
+                         (sizeof(unsigned long) * CHAR_BIT);
+    std::vector<unsigned long> keys(words, 0);
+    if (ioctl(device->fd, EVIOCGABS(ABS_X), &device->x_info) != 0 ||
+        ioctl(device->fd, EVIOCGABS(ABS_Y), &device->y_info) != 0 ||
+        ioctl(device->fd,
+              EVIOCGKEY(keys.size() * sizeof(unsigned long)), &keys[0]) < 0)
+      return false;
+    device->x_value = device->x_info.value;
+    device->y_value = device->y_info.value;
+    device->raw_buttons = 0;
+    for (unsigned int index = 0; index < 8; ++index) {
+      if (bit_is_set(&keys[0], BTN_TRIGGER + index))
+        device->raw_buttons |= 1u << index;
+    }
+    device->state = gamepad_state(*device);
+    device->dropping = false;
+    return true;
+  }
+
+  static void drain_gamepad(GamepadDevice *device, unsigned int *commands) {
+    if (!device || device->fd < 0 || !commands)
+      return;
+    while (true) {
+      struct input_event events[32];
+      const ssize_t amount = read(device->fd, events, sizeof(events));
+      if (amount < 0) {
+        if (errno == EINTR)
+          continue;
+        return;
+      }
+      if (amount == 0 ||
+          amount % static_cast<ssize_t>(sizeof(struct input_event)) != 0)
+        return;
+      const size_t count = static_cast<size_t>(amount) / sizeof(events[0]);
+      for (size_t index = 0; index < count; ++index) {
+        const struct input_event &event = events[index];
+        if (device->dropping) {
+          if (event.type == EV_SYN && event.code == SYN_REPORT)
+            resynchronize(device);
+          continue;
+        }
+        if (event.type == EV_SYN && event.code == SYN_DROPPED) {
+          device->dropping = true;
+        } else if (event.type == EV_KEY && event.code >= BTN_TRIGGER &&
+                   event.code <= BTN_BASE2) {
+          const uint32_t bit = 1u << (event.code - BTN_TRIGGER);
+          if (event.value)
+            device->raw_buttons |= bit;
+          else
+            device->raw_buttons &= ~bit;
+        } else if (event.type == EV_ABS && event.code == ABS_X) {
+          device->x_value = event.value;
+        } else if (event.type == EV_ABS && event.code == ABS_Y) {
+          device->y_value = event.value;
+        } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
+          const unsigned int state = gamepad_state(*device);
+          *commands |= state & ~device->state;
+          device->state = state;
+        }
+      }
+    }
+  }
+
+  static unsigned int touch_command(int logical_x, int logical_y) {
+    const int x = (logical_x - kCanvasOffset) / kCanvasScale;
+    const int y = (logical_y - kCanvasOffset) / kCanvasScale;
+    if (contains(Rect{6, 5, 70, 25}, x, y))
+      return ControlBack;
+    if (contains(Rect{170, 174, 70, 36}, x, y))
+      return ControlPreviousFile;
+    if (contains(Rect{250, 174, 124, 36}, x, y))
+      return ControlTogglePause;
+    if (contains(Rect{384, 174, 70, 36}, x, y))
+      return ControlNextFile;
+    if (contains(Rect{472, 174, 60, 36}, x, y))
+      return ControlPreviousTrack;
+    if (contains(Rect{544, 174, 60, 36}, x, y))
+      return ControlNextTrack;
+    return ControlNone;
+  }
+
+  void drain_touch(unsigned int *commands) {
+    while (true) {
+      struct input_event events[32];
+      const ssize_t amount = read(touch_fd_, events, sizeof(events));
+      if (amount < 0) {
+        if (errno == EINTR)
+          continue;
+        return;
+      }
+      if (amount == 0 ||
+          amount % static_cast<ssize_t>(sizeof(struct input_event)) != 0)
+        return;
+      const size_t count = static_cast<size_t>(amount) / sizeof(events[0]);
+      for (size_t index = 0; index < count; ++index) {
+        const struct input_event &event = events[index];
+        if (event.type == EV_SYN && event.code == SYN_DROPPED) {
+          touch_dropping_ = true;
+        } else if (touch_dropping_) {
+          if (event.type == EV_SYN && event.code == SYN_REPORT) {
+            touch_dropping_ = false;
+            touch_reported_ = touch_down_;
+          }
+        } else if (event.type == EV_ABS && event.code == ABS_X) {
+          touch_x_ = std::max(0, std::min(kLogicalWidth - 1, event.value));
+        } else if (event.type == EV_ABS && event.code == ABS_Y) {
+          touch_y_ = std::max(0, std::min(kLogicalHeight - 1, event.value));
+        } else if (event.type == EV_KEY && event.code == BTN_TOUCH) {
+          touch_down_ = event.value != 0;
+        } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
+          if (touch_down_ && !touch_reported_)
+            *commands |= touch_command(touch_x_, touch_y_);
+          touch_reported_ = touch_down_;
+        }
+      }
+    }
+  }
+
+  void close_devices() {
+    if (touch_fd_ >= 0) {
+      if (touch_grabbed_)
+        ioctl(touch_fd_, EVIOCGRAB, 0);
+      close(touch_fd_);
+    }
+    touch_fd_ = -1;
+    touch_grabbed_ = false;
+    for (size_t index = 0; index < gamepads_.size(); ++index) {
+      if (gamepads_[index].fd >= 0)
+        close(gamepads_[index].fd);
+    }
+    gamepads_.clear();
+  }
+
+  int touch_fd_;
+  int touch_x_;
+  int touch_y_;
+  bool touch_down_;
+  bool touch_reported_;
+  bool touch_dropping_;
+  bool touch_grabbed_;
+  std::vector<GamepadDevice> gamepads_;
+};
+
+class ChiptunePlayer {
+public:
+  explicit ChiptunePlayer(const std::vector<std::string> &files)
+      : files_(files), file_index_(0), emulator_(NULL), info_(NULL),
+        track_index_(0), track_count_(0), paused_(false), length_ms_(-1) {}
+  ~ChiptunePlayer() { close_track(); }
+
+  bool open_first(std::string *error) {
+    if (files_.empty())
+      return false;
+    for (size_t attempts = 0; attempts < files_.size(); ++attempts) {
+      if (open_file(file_index_, 0, error))
+        return true;
+      file_index_ = (file_index_ + 1) % files_.size();
+    }
+    return false;
+  }
+
+  bool change_file(int direction, std::string *error) {
+    if (files_.empty())
+      return false;
+    const size_t count = files_.size();
+    file_index_ = direction < 0 ? (file_index_ + count - 1) % count
+                                : (file_index_ + 1) % count;
+    return open_file(file_index_, 0, error);
+  }
+
+  bool change_track(int direction, std::string *error) {
+    if (!emulator_ || track_count_ <= 0)
+      return false;
+    const int next = direction < 0
+                         ? (track_index_ + track_count_ - 1) % track_count_
+                         : (track_index_ + 1) % track_count_;
+    return start_track(next, error);
+  }
+
+  bool generate(DeckAudio *audio, std::string *error) {
+    if (!emulator_ || paused_)
+      return true;
+    samples_.assign(kFramesPerTick * 2, 0);
+    const gme_err_t result =
+        gme_play(emulator_, static_cast<int>(samples_.size()), &samples_[0]);
+    if (result) {
+      if (error)
+        *error = result;
+      return false;
+    }
+    visual_ = samples_;
+    if (audio && audio->available())
+      audio->write_stereo(&samples_[0], kFramesPerTick);
+    if (gme_track_ended(emulator_)) {
+      if (track_index_ + 1 < track_count_)
+        return start_track(track_index_ + 1, error);
+      return change_file(1, error);
+    }
+    return true;
+  }
+
+  void toggle_pause() { paused_ = !paused_; }
+  bool ready() const { return emulator_ != NULL; }
+  bool paused() const { return paused_; }
+  int position_ms() const { return emulator_ ? gme_tell(emulator_) : 0; }
+  int length_ms() const { return length_ms_; }
+  int track_index() const { return track_index_; }
+  int track_count() const { return track_count_; }
+  size_t file_index() const { return file_index_; }
+  size_t file_count() const { return files_.size(); }
+  const std::vector<int16_t> &visual() const { return visual_; }
+
+  std::string title() const {
+    if (info_ && info_->song && info_->song[0])
+      return info_->song;
+    return files_.empty() ? std::string() : base_name(files_[file_index_]);
+  }
+  std::string subtitle() const {
+    std::string result;
+    if (info_ && info_->game && info_->game[0])
+      result = info_->game;
+    if (info_ && info_->author && info_->author[0]) {
+      if (!result.empty())
+        result += " - ";
+      result += info_->author;
+    }
+    return result;
+  }
+  std::string system() const {
+    return info_ && info_->system ? info_->system : std::string();
+  }
+
+private:
+  bool open_file(size_t index, int track, std::string *error) {
+    close_track();
+    if (index >= files_.size())
+      return false;
+    std::vector<unsigned char> bytes;
+    if (!read_chiptune(files_[index], &bytes, error))
+      return false;
+    Music_Emu *candidate = NULL;
+    const gme_err_t result = gme_open_data(
+        &bytes[0], static_cast<long>(bytes.size()), &candidate, kSampleRate);
+    if (result || !candidate) {
+      if (error)
+        *error = result ? result : "cannot create emulator";
+      return false;
+    }
+    emulator_ = candidate;
+    file_index_ = index;
+    track_count_ = std::max(1, gme_track_count(emulator_));
+    return start_track(std::max(0, std::min(track_count_ - 1, track)), error);
+  }
+
+  bool start_track(int track, std::string *error) {
+    if (!emulator_ || track < 0 || track >= track_count_)
+      return false;
+    const gme_err_t result = gme_start_track(emulator_, track);
+    if (result) {
+      if (error)
+        *error = result;
+      return false;
+    }
+    if (info_)
+      gme_free_info(info_);
+    info_ = NULL;
+    const gme_err_t info_result = gme_track_info(emulator_, &info_, track);
+    if (info_result)
+      info_ = NULL;
+    track_index_ = track;
+    length_ms_ = info_ ? info_->play_length : -1;
+    paused_ = false;
+    visual_.clear();
+    return true;
+  }
+
+  void close_track() {
+    if (info_)
+      gme_free_info(info_);
+    info_ = NULL;
+    if (emulator_)
+      gme_delete(emulator_);
+    emulator_ = NULL;
+    track_count_ = 0;
+    track_index_ = 0;
+    length_ms_ = -1;
+    visual_.clear();
+  }
+
+  std::vector<std::string> files_;
+  size_t file_index_;
+  Music_Emu *emulator_;
+  gme_info_t *info_;
+  int track_index_;
+  int track_count_;
+  bool paused_;
+  int length_ms_;
+  std::vector<int16_t> samples_;
+  std::vector<int16_t> visual_;
+};
+
+std::string format_time(int milliseconds) {
+  const int seconds = std::max(0, milliseconds / 1000);
+  char text[32];
+  std::snprintf(text, sizeof(text), "%d:%02d", seconds / 60, seconds % 60);
+  return text;
+}
+
+void draw_button(Canvas *canvas, const Rect &rect, const std::string &label,
+                 uint16_t fill, uint16_t text) {
+  fill_rect(canvas, rect, fill);
+  const int width = label.empty() ? 0 : static_cast<int>(label.size() * 12 - 2);
+  draw_text(canvas, rect.x + std::max(0, (rect.width - width) / 2),
+            rect.y + 11, label, 2, text);
+}
+
+void render_player(Canvas *canvas, const ChiptunePlayer &player,
+                   const std::string &status, unsigned int volume_percent) {
+  const uint16_t background = DeckRgb888To565(0x000000);
+  const uint16_t orange = DeckRgb888To565(0xff5f00);
+  const uint16_t cream = DeckRgb888To565(0xffffd7);
+  const uint16_t green = DeckRgb888To565(0x5fff87);
+  const uint16_t muted = DeckRgb888To565(0x9e9e9e);
+  const uint16_t panel = DeckRgb888To565(0x1c1c1c);
+  canvas->assign(static_cast<size_t>(kCanvasWidth * kCanvasHeight), background);
+
+  draw_button(canvas, Rect{6, 5, 70, 25}, "BACK", panel, cream);
+  draw_centered_text(canvas, 8, "CHIPTUNE PLAYER", 2, orange);
+  char volume[24];
+  std::snprintf(volume, sizeof(volume), "VOL %u", volume_percent);
+  draw_text(canvas, 540, 10, volume, 1, volume_percent ? green : muted);
+
+  if (!player.ready()) {
+    draw_centered_text(canvas, 74, "NO CHIPTUNES FOUND", 3, orange);
+    draw_centered_text(canvas, 112, clipped(status, 76), 1, muted);
+    draw_centered_text(canvas, 136, "AY GBS GYM HES KSS NSF NSFE SAP SPC VGM VGZ",
+                       1, cream);
+  } else {
+    draw_centered_text(canvas, 38, clipped(player.title(), 45), 2, cream);
+    draw_centered_text(canvas, 58, clipped(player.subtitle(), 72), 1, muted);
+
+    const std::vector<int16_t> &samples = player.visual();
+    fill_rect(canvas, Rect{30, 76, 564, 68}, panel);
+    fill_rect(canvas, Rect{30, 109, 564, 1}, muted);
+    if (!samples.empty()) {
+      for (int x = 0; x < 564; ++x) {
+        const size_t frame = static_cast<size_t>(x) * kFramesPerTick / 564;
+        const int mixed = (static_cast<int>(samples[frame * 2]) +
+                           static_cast<int>(samples[frame * 2 + 1])) /
+                          2;
+        const int height = std::min(31, std::abs(mixed) / 700);
+        fill_rect(canvas, Rect{30 + x, mixed < 0 ? 110 : 109 - height, 1,
+                               std::max(1, height)},
+                  orange);
+      }
+    }
+
+    const int position = player.position_ms();
+    const int length = player.length_ms();
+    const int progress =
+        length > 0 ? std::max(0, std::min(560, position * 560 / length)) : 0;
+    fill_rect(canvas, Rect{32, 151, 560, 5}, panel);
+    if (progress > 0)
+      fill_rect(canvas, Rect{32, 151, progress, 5}, green);
+    draw_text(canvas, 32, 160, format_time(position), 1, cream);
+    draw_text(canvas, 548, 160, length > 0 ? format_time(length) : "--:--", 1,
+              cream);
+
+    char details[128];
+    std::snprintf(details, sizeof(details), "%s  FILE %zu/%zu  TRACK %d/%d",
+                  clipped(player.system(), 18).c_str(), player.file_index() + 1,
+                  player.file_count(), player.track_index() + 1,
+                  player.track_count());
+    draw_centered_text(canvas, 160, clipped(details, 74), 1, muted);
+  }
+
+  draw_button(canvas, Rect{170, 174, 70, 36}, "PREV", panel, cream);
+  draw_button(canvas, Rect{250, 174, 124, 36},
+              player.paused() ? "PLAY" : "PAUSE", orange, background);
+  draw_button(canvas, Rect{384, 174, 70, 36}, "NEXT", panel, cream);
+  draw_button(canvas, Rect{472, 174, 60, 36}, "TRK-", panel, cream);
+  draw_button(canvas, Rect{544, 174, 60, 36}, "TRK+", panel, cream);
+}
+
+int probe_file(const char *path) {
+  std::vector<unsigned char> bytes;
+  std::string read_error;
+  if (!read_chiptune(path, &bytes, &read_error)) {
+    std::fprintf(stderr, "chiptune-deck: probe read failed: %s\n",
+                 read_error.c_str());
+    return 1;
+  }
+  Music_Emu *emulator = NULL;
+  const gme_err_t open_error = gme_open_data(
+      &bytes[0], static_cast<long>(bytes.size()), &emulator, kSampleRate);
+  if (open_error || !emulator) {
+    std::fprintf(stderr, "chiptune-deck: probe open failed: %s\n",
+                 open_error ? open_error : "cannot create emulator");
+    return 1;
+  }
+  const int tracks = gme_track_count(emulator);
+  const gme_err_t track_error = gme_start_track(emulator, 0);
+  std::vector<int16_t> samples(kSampleRate * 2, 0);
+  const gme_err_t play_error =
+      track_error ? track_error
+                  : gme_play(emulator, static_cast<int>(samples.size()),
+                             &samples[0]);
+  int peak = 0;
+  for (size_t index = 0; index < samples.size(); ++index)
+    peak = std::max(peak, std::abs(static_cast<int>(samples[index])));
+  gme_delete(emulator);
+  if (play_error) {
+    std::fprintf(stderr, "chiptune-deck: probe playback failed: %s\n",
+                 play_error);
+    return 1;
+  }
+  std::printf("tracks=%d samples=%zu peak=%d\n", tracks, samples.size(), peak);
+  return tracks > 0 ? 0 : 1;
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+  std::setvbuf(stdout, NULL, _IOLBF, 0);
+  std::setvbuf(stderr, NULL, _IOLBF, 0);
+  if (argc == 3 && std::string(argv[1]) == "--probe")
+    return probe_file(argv[2]);
+  if (argc != 2) {
+    std::fprintf(stderr,
+                 "Usage: %s CHIPTUNE_DIRECTORY\n"
+                 "       %s --probe CHIPTUNE_FILE\n",
+                 argv[0], argv[0]);
+    return 2;
+  }
+  install_signal_handlers();
+
+  std::vector<std::string> files;
+  scan_chiptunes(argv[1], 0, &files);
+  std::sort(files.begin(), files.end());
+  std::fprintf(stderr, "chiptune-deck: found %zu supported file(s) in %s\n",
+               files.size(), argv[1]);
+
+  std::string error;
+  DeckFramebuffer framebuffer;
+  if (!framebuffer.open_device(&error)) {
+    std::fprintf(stderr, "chiptune-deck: %s\n", error.c_str());
+    return 1;
+  }
+  PlayerInput input;
+  input.discover();
+
+  unsigned int volume_percent = 0;
+  if (!DeckReadVolumePercent(&volume_percent, &error)) {
+    std::fprintf(stderr, "chiptune-deck: %s; audio muted\n", error.c_str());
+    volume_percent = 0;
+  }
+  DeckAudio audio;
+  if (!audio.open_device(kSampleRate, volume_percent, &error)) {
+    std::fprintf(stderr, "chiptune-deck: %s; continuing muted\n",
+                 error.c_str());
+  }
+
+  ChiptunePlayer player(files);
+  std::string status = std::string("ADD MUSIC TO ") + argv[1];
+  if (!files.empty() && !player.open_first(&error)) {
+    status = std::string("CANNOT PLAY FILES: ") + error;
+    std::fprintf(stderr, "chiptune-deck: %s\n", status.c_str());
+  }
+
+  Canvas canvas;
+  DeckFrameClock clock(60.0);
+  unsigned int frame_number = 0;
+  bool dirty = true;
+  while (!shutdown_requested) {
+    const unsigned int commands = input.read_commands();
+    if (commands & ControlBack)
+      break;
+    if ((commands & ControlPreviousFile) && player.change_file(-1, &error))
+      dirty = true;
+    if ((commands & ControlNextFile) && player.change_file(1, &error))
+      dirty = true;
+    if ((commands & ControlPreviousTrack) && player.change_track(-1, &error))
+      dirty = true;
+    if ((commands & ControlNextTrack) && player.change_track(1, &error))
+      dirty = true;
+    if (commands & ControlTogglePause) {
+      player.toggle_pause();
+      dirty = true;
+    }
+
+    if (!player.generate(&audio, &error)) {
+      status = std::string("PLAYBACK ERROR: ") + error;
+      std::fprintf(stderr, "chiptune-deck: %s\n", status.c_str());
+    }
+    if (dirty || frame_number % 2 == 0) {
+      render_player(&canvas, player, status, volume_percent);
+      if (!framebuffer.present_rgb565(&canvas[0], kCanvasWidth, kCanvasHeight,
+                                      kCanvasWidth * sizeof(canvas[0]),
+                                      &error)) {
+        std::fprintf(stderr, "chiptune-deck: %s\n", error.c_str());
+        return 1;
+      }
+      dirty = false;
+    }
+    ++frame_number;
+    clock.wait_for_next_frame();
+  }
+  return 0;
+}

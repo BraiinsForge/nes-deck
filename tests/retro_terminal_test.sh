@@ -32,6 +32,7 @@ printf '%s\n' "$RETRO_DECK_KEYMAP" > "$FBTERM_LOG"
 printf '%s\n' "$*" > "$FBTERM_ARGS_LOG"
 pwd > "$FBTERM_CWD_LOG"
 printf '%s\n' "${ECLDIR:-}" > "$FBTERM_ECLDIR_LOG"
+printf '%s\n' "${CHIBI_MODULE_PATH:-}" > "$FBTERM_CHIBI_LOG"
 readlink /proc/$$/fd/0 > "$FBTERM_STDIN_LOG"
 exit 0
 EOF
@@ -42,10 +43,11 @@ FBTERM_LOG=$FIXTURE/fbterm.log
 FBTERM_ARGS_LOG=$FIXTURE/fbterm-args.log
 FBTERM_CWD_LOG=$FIXTURE/fbterm-cwd.log
 FBTERM_ECLDIR_LOG=$FIXTURE/fbterm-ecldir.log
+FBTERM_CHIBI_LOG=$FIXTURE/fbterm-chibi.log
 FBTERM_STDIN_LOG=$FIXTURE/fbterm-stdin.log
 TEST_TTY=/dev/zero
 export LOADKEYS_LOG FBTERM_LOG FBTERM_ARGS_LOG FBTERM_CWD_LOG
-export FBTERM_ECLDIR_LOG FBTERM_STDIN_LOG
+export FBTERM_ECLDIR_LOG FBTERM_CHIBI_LOG FBTERM_STDIN_LOG
 
 RETRO_DECK_TERMINAL_BASE=$FIXTURE \
 RETRO_DECK_TERMINAL_TTY=$TEST_TTY \
@@ -77,7 +79,18 @@ cat > "$FIXTURE/lisp" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
-chmod 0700 "$FIXTURE/lua" "$FIXTURE/lisp"
+cat > "$FIXTURE/python" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+cat > "$FIXTURE/scheme" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+mkdir -p "$FIXTURE/chibi"
+: > "$FIXTURE/chibi/init-7.scm"
+chmod 0700 "$FIXTURE/lua" "$FIXTURE/lisp" "$FIXTURE/python" \
+  "$FIXTURE/scheme"
 
 RETRO_DECK_TERMINAL_BASE=$FIXTURE \
 RETRO_DECK_TERMINAL_TTY=$TEST_TTY \
@@ -110,10 +123,41 @@ RETRO_DECK_ECL_DIR=$FIXTURE/ecl/lib/ecl \
 [ "$(stat -c %a "$FIXTURE/langs/lisp")" = 700 ] ||
   fail 'Lisp working directory is private'
 
+RETRO_DECK_TERMINAL_BASE=$FIXTURE \
+RETRO_DECK_TERMINAL_TTY=$TEST_TTY \
+RETRO_DECK_KEYMAP=us \
+RETRO_DECK_LANG_BASE=$FIXTURE/langs \
+RETRO_DECK_PYTHON=$FIXTURE/python \
+  "$LAUNCHER" python
+[ "$(cat "$FBTERM_ARGS_LOG")" = \
+    "-n DejaVu Sans Mono -s 16 -f 7 -b 0 -- $FIXTURE/python" ] ||
+  fail 'Python mode launches only the configured MicroPython interpreter'
+[ "$(cat "$FBTERM_CWD_LOG")" = "$FIXTURE/langs/python" ] ||
+  fail 'Python mode uses its persistent working directory'
+[ "$(stat -c %a "$FIXTURE/langs/python")" = 700 ] ||
+  fail 'Python working directory is private'
+
+RETRO_DECK_TERMINAL_BASE=$FIXTURE \
+RETRO_DECK_TERMINAL_TTY=$TEST_TTY \
+RETRO_DECK_KEYMAP=us \
+RETRO_DECK_LANG_BASE=$FIXTURE/langs \
+RETRO_DECK_SCHEME=$FIXTURE/scheme \
+RETRO_DECK_CHIBI_MODULE_PATH=$FIXTURE/chibi \
+  "$LAUNCHER" scheme
+[ "$(cat "$FBTERM_ARGS_LOG")" = \
+    "-n DejaVu Sans Mono -s 16 -f 7 -b 0 -- $FIXTURE/scheme" ] ||
+  fail 'Scheme mode launches only the configured Chibi interpreter'
+[ "$(cat "$FBTERM_CWD_LOG")" = "$FIXTURE/langs/scheme" ] ||
+  fail 'Scheme mode uses its persistent working directory'
+[ "$(cat "$FBTERM_CHIBI_LOG")" = "$FIXTURE/chibi" ] ||
+  fail 'Scheme mode exports the configured Chibi module library'
+[ "$(stat -c %a "$FIXTURE/langs/scheme")" = 700 ] ||
+  fail 'Scheme working directory is private'
+
 : > "$LOADKEYS_LOG"
 if RETRO_DECK_TERMINAL_BASE=$FIXTURE \
   RETRO_DECK_TERMINAL_TTY=$TEST_TTY \
-  "$LAUNCHER" python >/dev/null 2>&1; then
+  "$LAUNCHER" ruby >/dev/null 2>&1; then
   fail 'unsupported terminal program is rejected'
 fi
 [ ! -s "$LOADKEYS_LOG" ] ||
@@ -148,7 +192,7 @@ command -v script >/dev/null 2>&1 ||
 : > "$LOADKEYS_LOG"
 CONSOLE_LOG=$FIXTURE/console.log
 script -q -e -c \
-  "env LOADKEYS_LOG=$LOADKEYS_LOG FBTERM_LOG=$FBTERM_LOG FBTERM_ARGS_LOG=$FBTERM_ARGS_LOG FBTERM_CWD_LOG=$FBTERM_CWD_LOG FBTERM_ECLDIR_LOG=$FBTERM_ECLDIR_LOG FBTERM_STDIN_LOG=$FBTERM_STDIN_LOG RETRO_DECK_TERMINAL_BASE=$FIXTURE RETRO_DECK_TERMINAL_TTY=/dev/tty RETRO_DECK_KEYMAP=us $LAUNCHER" \
+  "env LOADKEYS_LOG=$LOADKEYS_LOG FBTERM_LOG=$FBTERM_LOG FBTERM_ARGS_LOG=$FBTERM_ARGS_LOG FBTERM_CWD_LOG=$FBTERM_CWD_LOG FBTERM_ECLDIR_LOG=$FBTERM_ECLDIR_LOG FBTERM_CHIBI_LOG=$FBTERM_CHIBI_LOG FBTERM_STDIN_LOG=$FBTERM_STDIN_LOG RETRO_DECK_TERMINAL_BASE=$FIXTURE RETRO_DECK_TERMINAL_TTY=/dev/tty RETRO_DECK_KEYMAP=us $LAUNCHER" \
   "$CONSOLE_LOG" >/dev/null
 hide_cursor=$(printf '\033[?25l')
 disable_blank=$(printf '\033[9;0]')

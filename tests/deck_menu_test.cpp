@@ -548,10 +548,34 @@ int main() {
              terminal_mode_for_game(lisp_entry) == "lisp",
          "built-in Lisp REPL is a routed Deck entry");
   tab_games.push_back(lisp_entry);
+  const GameEntry python_entry = built_in_python_entry(terminal);
+  expect(python_entry.title == "PYTHON REPL" &&
+             python_entry.system == "deck" && python_entry.rom == terminal &&
+             is_built_in_python(python_entry) &&
+             terminal_mode_for_game(python_entry) == "python",
+         "built-in Python REPL is a routed Deck entry");
+  tab_games.push_back(python_entry);
+  const GameEntry scheme_entry = built_in_scheme_entry(terminal);
+  expect(scheme_entry.title == "SCHEME REPL" &&
+             scheme_entry.system == "deck" && scheme_entry.rom == terminal &&
+             is_built_in_scheme(scheme_entry) &&
+             terminal_mode_for_game(scheme_entry) == "scheme",
+         "built-in Scheme REPL is a routed Deck entry");
+  tab_games.push_back(scheme_entry);
+  const GameEntry chiptune_entry =
+      built_in_chiptune_entry("/mnt/data/chiptunes");
+  expect(chiptune_entry.title == "CHIPTUNES" &&
+             chiptune_entry.system == "deck" &&
+             chiptune_entry.rom == "/mnt/data/chiptunes" &&
+             is_built_in_chiptune(chiptune_entry),
+         "built-in chiptune player owns its persistent music directory");
+  tab_games.push_back(chiptune_entry);
   expect(terminal_mode_for_game(terminal_entry) == "shell" &&
              terminal_program_title("shell") == "TERMINAL" &&
              terminal_program_title("lua") == "LUA REPL" &&
-             terminal_program_title("lisp") == "LISP REPL",
+             terminal_program_title("lisp") == "LISP REPL" &&
+             terminal_program_title("python") == "PYTHON REPL" &&
+             terminal_program_title("scheme") == "SCHEME REPL",
          "terminal program modes have stable launcher labels");
   tab_games.push_back(terminal_entry);
   const GameEntry reboot_entry = built_in_reboot_entry("/bin/true");
@@ -612,7 +636,7 @@ int main() {
              menu_layout.visible_game_indices.size() == 3 &&
              menu_layout.visible_game_indices[0] == 0 &&
              menu_layout.visible_game_indices[1] == 1 &&
-             menu_layout.visible_game_indices[2] == 11 &&
+             menu_layout.visible_game_indices[2] == 14 &&
              menu_layout.shown_game_index == 0,
          "carousel shows at most three games while preserving the catalog");
   const Rect &selected_card = menu_layout.game_buttons[0];
@@ -680,10 +704,10 @@ int main() {
          "carousel arrows have independent touch targets");
 
   render_menu(tab_games, "nes", 2, std::string(), &canvas, &menu_layout);
-  expect(menu_layout.shown_game_index == 11 &&
+  expect(menu_layout.shown_game_index == 14 &&
              menu_layout.visible_game_indices[0] == 1 &&
-             menu_layout.visible_game_indices[1] == 11 &&
-             menu_layout.visible_game_indices[2] == 12 &&
+             menu_layout.visible_game_indices[1] == 14 &&
+             menu_layout.visible_game_indices[2] == 15 &&
              canvas[static_cast<size_t>(menu_layout.game_buttons[1].y + 12) *
                         kLogicalWidth +
                     menu_layout.game_buttons[1].x + 6] ==
@@ -736,7 +760,7 @@ int main() {
          "square covers use a centered crop instead of distortion");
 
   render_menu(tab_games, "deck", 0, std::string(), &canvas, &menu_layout);
-  expect(menu_layout.game_indices.size() == 5 &&
+  expect(menu_layout.game_indices.size() == 8 &&
              menu_layout.shown_game_index == 6 &&
              tab_games[menu_layout.shown_game_index].id == "ten-seconds",
          "Deck carousel exposes the Ten Seconds app entry");
@@ -749,19 +773,19 @@ int main() {
              tab_games[6].color.pixel()),
          "Ten Seconds keeps its distinct compact app logo");
 
-  render_menu(tab_games, "deck", 4, std::string(), &canvas, &menu_layout);
-  expect(menu_layout.game_indices.size() == 5 &&
-             menu_layout.shown_game_index == 10 &&
+  render_menu(tab_games, "deck", 7, std::string(), &canvas, &menu_layout);
+  expect(menu_layout.game_indices.size() == 8 &&
+             menu_layout.shown_game_index == 13 &&
              is_built_in_reboot(tab_games[menu_layout.shown_game_index]),
          "Deck carousel exposes the built-in reboot entry");
-  expect(menu_layout.visible_game_indices[2] == 10 &&
+  expect(menu_layout.visible_game_indices[2] == 13 &&
              rect_contains_color(
                  canvas,
                  Rect{menu_layout.game_buttons[2].x + 8,
                       menu_layout.game_buttons[2].y + 8,
                       menu_layout.game_buttons[2].width - 16,
                       menu_layout.game_buttons[2].width - 16},
-                 tab_games[10].color.pixel()),
+                 tab_games[13].color.pixel()),
          "Reboot keeps the broken-ring power-on icon");
 
   Canvas terminal_icon_canvas(
@@ -896,6 +920,8 @@ int main() {
       "--gb-emulator",  "/bin/false",       "--zx-emulator",
       "/bin/printf",    "--chip8-emulator", "/bin/echo",
       "--deck-game",    "/bin/cat",
+      "--chiptune-player", "/bin/sleep", "--chiptune-directory",
+      "/tmp/chiptunes",
       "--manifest",     "/tmp/games",
       "--cover-directory", "/tmp/covers",
       "--volume-state", "/tmp/volume",      "--brightness",
@@ -914,6 +940,8 @@ int main() {
          "terminal and wifi helper options parse");
   expect(options.terminal == "/bin/false" &&
              options.wifi_helper == "/bin/echo" &&
+             options.chiptune_player == "/bin/sleep" &&
+             options.chiptune_directory == "/tmp/chiptunes" &&
              options.cover_directory == "/tmp/covers" &&
              options.volume_state == "/tmp/volume" &&
              options.brightness == "/tmp/brightness" &&
@@ -937,6 +965,9 @@ int main() {
     routed.system = "deck";
     expect(emulator_for_game(options, routed) == "/bin/cat",
            "Deck entry selects native Deck game");
+    routed = built_in_chiptune_entry("/tmp/chiptunes");
+    expect(emulator_for_game(options, routed) == "/bin/sleep",
+           "chiptune entry selects the dedicated native player");
   }
 
   expect(geometry_test() == 0, "framebuffer transform geometry");
