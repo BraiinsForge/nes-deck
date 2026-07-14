@@ -16,21 +16,27 @@ You need:
 - this private repository, including the owner-supplied `roms/` library
 - stable power during activation
 
-Clone the repository and run the deployment script with the Deck's address:
+Clone the repository, create its private setup configuration, and deploy:
 
 ```sh
 git clone git@github.com:BraiinsForge/nes-deck.git
 cd nes-deck
-./ops/deploy.sh root@10.0.0.10
+./ops/configure-deck.sh
+./ops/deploy.sh
 ```
+
+The setup command asks for the Deck's current SSH address and the ROM uploader
+password. It writes `deck.conf` with mode `0600`; the file is ignored by Git.
+Use `--config PATH` with both commands to keep separate configurations for
+multiple Decks. A positional `root@DECK-IP` passed to `deploy.sh` temporarily
+overrides the configured SSH target.
 
 The first build downloads the pinned ARM toolchain and can take several
 minutes. The script builds every static runtime, verifies the staged payload,
 uploads it below `/mnt/data`, briefly stops the dashboard, activates the new
-files, and waits for `deck-menu` and the WireGuard ROM uploader to be ready.
-The first deployment prints the uploader's generated password once. If
-activation fails after a service is stopped, the script attempts to restart
-it before exiting.
+files, installs the configured uploader credential, and waits for `deck-menu`
+and the WireGuard ROM uploader to be ready. If activation fails after a
+service is stopped, the script attempts to restart it before exiting.
 
 The deployment script does not edit, reload, or disconnect Wi-Fi. It merges
 the tracked ROMs and CC0 chiptunes into persistent storage without deleting
@@ -80,11 +86,12 @@ mono or stereo. Ten CC0 tracks are included with provenance and checksums in
 ## Upload ROMs over WireGuard
 
 Open `http://10.0.0.10:8080` while connected to the Deck's WireGuard network
-and sign in with the password printed by the first deployment. The Paper-style
-intake page accepts a raw NES, GB, GBC, ZX Spectrum, or CHIP-8 ROM, or a ZIP
-containing exactly one matching ROM. It validates the payload, refuses to
-replace an existing file, files it below `/mnt/data/roms/<system>/`, updates a
-private supplemental catalog, and restarts the dashboard so the game appears.
+and sign in with the password from your private deployment configuration. The
+Paper-style intake page accepts a raw NES, GB, GBC, ZX Spectrum, or CHIP-8 ROM,
+or a ZIP containing exactly one matching ROM. It validates the payload,
+refuses to replace an existing file, files it below
+`/mnt/data/roms/<system>/`, updates a private supplemental catalog, and
+restarts the dashboard so the game appears.
 
 The service binds to both the `10.0.0.10` address and the `wg0` device. It does
 not listen on Wi-Fi, and it never changes Wi-Fi, WireGuard, routes, or firewall

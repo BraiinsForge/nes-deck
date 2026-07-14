@@ -4,11 +4,12 @@ Retro Deck uses Nix for reproducible ARMv7 hard-float builds. The generated
 executables are static and run on the Deck's OpenWrt userspace without copying
 a Nix store closure to the device.
 
-For ordinary installation, use the complete deployment command in
-[README.md](README.md):
+For ordinary installation, create the private setup configuration and use the
+complete deployment command in [README.md](README.md):
 
 ```sh
-./ops/deploy.sh root@10.0.0.10
+./ops/configure-deck.sh
+./ops/deploy.sh
 ```
 
 This document covers individual builds, verification, tests, and platform
@@ -114,7 +115,8 @@ Run shell checks on deployment code with:
 
 ```sh
 nix shell nixpkgs#shellcheck -c shellcheck \
-  ops/deploy.sh tests/run-host-tests.sh tests/verify-arm-builds.sh
+  ops/configure-deck.sh ops/deploy.sh tests/run-host-tests.sh \
+  tests/deploy_config_test.sh tests/verify-arm-builds.sh
 ```
 
 ## Validate language and music runtimes on a Deck

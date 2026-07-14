@@ -19,7 +19,7 @@ const (
 )
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage:\n  %s\n  %s --init-password PATH\n  %s --set-password PATH\n", os.Args[0], os.Args[0], os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage:\n  %s\n  %s --set-password PATH\n  %s --check-password-config PATH\n", os.Args[0], os.Args[0], os.Args[0])
 }
 
 func setPassword(path string) error {
@@ -81,10 +81,10 @@ func main() {
 	switch {
 	case len(os.Args) == 1:
 		err = runServer()
-	case len(os.Args) == 3 && os.Args[1] == "--init-password":
-		_, err = initializePassword(os.Args[2], os.Stdout)
 	case len(os.Args) == 3 && os.Args[1] == "--set-password":
 		err = setPassword(os.Args[2])
+	case len(os.Args) == 3 && os.Args[1] == "--check-password-config":
+		_, err = loadPasswordConfig(os.Args[2])
 	default:
 		usage()
 		os.Exit(2)

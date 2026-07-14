@@ -13,10 +13,14 @@ one matching ROM. Existing files are never replaced. Successful files go to
 atomically to `/mnt/data/nes-deck/uploads/games.tsv` before the dashboard is
 restarted.
 
-The first deployment generates a 27-character password and prints it once.
-The digest remains at `/mnt/data/nes-deck/uploader/password.conf`; the clear
-password is not stored. To replace it without placing the value in argv or
-shell history, run this from a trusted machine:
+`ops/configure-deck.sh` asks for the uploader password during setup and stores
+it in the local, Git-ignored `deck.conf` with mode `0600`. Each deployment
+derives a fresh password record and installs only that record at
+`/mnt/data/nes-deck/uploader/password.conf`; the clear password is not retained
+on the Deck. Change the local configuration and deploy again to rotate it.
+
+To replace it directly without placing the value in argv or shell history,
+run this from a trusted machine:
 
 ```sh
 read -rsp 'New ROM uploader password: ' password

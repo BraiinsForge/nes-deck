@@ -174,32 +174,6 @@ func atomicWrite(path string, contents []byte, mode os.FileMode) error {
 	return nil
 }
 
-func initializePassword(path string, output io.Writer) (bool, error) {
-	if _, err := os.Lstat(path); err == nil {
-		_, loadErr := loadPasswordConfig(path)
-		return false, loadErr
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return false, err
-	}
-	randomPassword := make([]byte, 20)
-	if _, err := io.ReadFull(rand.Reader, randomPassword); err != nil {
-		return false, err
-	}
-	password := base64.RawURLEncoding.EncodeToString(randomPassword)
-	config, err := newPasswordConfig(password)
-	if err != nil {
-		return false, err
-	}
-	if err := atomicWrite(path, encodePasswordConfig(config), 0600); err != nil {
-		return false, err
-	}
-	if _, err = fmt.Fprintf(output, "ROM uploader password: %s\n", password); err != nil {
-		_ = os.Remove(path)
-		return false, err
-	}
-	return true, nil
-}
-
 func readPassword(input io.Reader) (string, error) {
 	reader := bufio.NewReader(io.LimitReader(input, maximumPasswordSize+2))
 	line, err := reader.ReadString('\n')

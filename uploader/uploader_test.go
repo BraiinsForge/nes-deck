@@ -61,10 +61,8 @@ func TestPasswordDerivationAndConfiguration(t *testing.T) {
 
 	directory := t.TempDir()
 	path := filepath.Join(directory, "private", "password.conf")
-	var output bytes.Buffer
-	created, err := initializePassword(path, &output)
-	if err != nil || !created || !strings.HasPrefix(output.String(), "ROM uploader password: ") {
-		t.Fatalf("password initialization failed: created=%v err=%v output=%q", created, err, output.String())
+	if err := atomicWrite(path, encodePasswordConfig(config), 0600); err != nil {
+		t.Fatalf("password configuration write failed: %v", err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -73,11 +71,21 @@ func TestPasswordDerivationAndConfiguration(t *testing.T) {
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("password file is not private: mode=%v", info.Mode())
 	}
-	before, _ := os.ReadFile(path)
-	created, err = initializePassword(path, io.Discard)
-	after, _ := os.ReadFile(path)
-	if err != nil || created || !bytes.Equal(before, after) {
-		t.Fatal("initialization replaced an existing password")
+	loaded, err := loadPasswordConfig(path)
+	if err != nil || !loaded.matches("a-long-test-password") {
+		t.Fatalf("installed password configuration did not load: %v", err)
+	}
+}
+
+func TestPasswordInputValidation(t *testing.T) {
+	password, err := readPassword(strings.NewReader("configured-test-password\n"))
+	if err != nil || password != "configured-test-password" {
+		t.Fatalf("configured password was rejected: %q %v", password, err)
+	}
+	for _, input := range []string{"short\n", strings.Repeat("x", maximumPasswordSize+1) + "\n", "valid-password-value\rjunk\n"} {
+		if _, err := readPassword(strings.NewReader(input)); err == nil {
+			t.Fatalf("invalid password input was accepted: %q", input)
+		}
 	}
 }
 
@@ -248,7 +256,11 @@ func TestCrossOriginAndPaperDesignRules(t *testing.T) {
 			t.Fatalf("locked login returned %d", failedResponse.Code)
 		}
 	}
-	for _, forbidden := range []string{"rgba(", "color-mix(", "linear-gradient(", "border-radius", "box-shadow", "text-transform", "<hr"} {
+	for _, forbidden := range []string{
+		"rgba(", "color-mix(", "linear-gradient(", "border-radius", "box-shadow", "text-transform",
+		"<hr", "border-top", "border-bottom", "Private service", "Connection properties",
+		"No public network listener", "Persistent library", "Uploaded games", "<table",
+	} {
 		if strings.Contains(paperCSS, forbidden) || strings.Contains(pageTemplate, forbidden) {
 			t.Fatalf("Paper hard ban found: %s", forbidden)
 		}

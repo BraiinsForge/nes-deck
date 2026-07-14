@@ -1,0 +1,5 @@
+# Create deck.conf with ops/configure-deck.sh. Values are literal, unquoted
+# text. The real file contains a secret, must remain mode 0600, and is ignored
+# by Git.
+DECK_SSH_TARGET=root@192.168.1.100
+ROM_UPLOADER_PASSWORD=

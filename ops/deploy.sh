@@ -3,15 +3,106 @@
 # Build and install the complete persistent Retro Deck payload.
 
 set -euo pipefail
+export LC_ALL=C
 
 usage() {
-  echo "Usage: $0 root@DECK-IP" >&2
+  echo "Usage: $0 [--config PATH] [--check-config] [root@DECK-IP]" >&2
   exit 2
 }
 
-[[ $# -eq 1 ]] || usage
-target=$1
-[[ $target =~ ^root@[A-Za-z0-9._:-]+$ ]] || usage
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+config=$repo_root/deck.conf
+check_config=0
+target_override=
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --config)
+      [[ $# -ge 2 ]] || usage
+      config=$2
+      shift 2
+      ;;
+    --check-config)
+      check_config=1
+      shift
+      ;;
+    -* ) usage ;;
+    *)
+      [[ -z $target_override ]] || usage
+      target_override=$1
+      shift
+      ;;
+  esac
+done
+
+[[ -f $config && ! -L $config ]] || {
+  echo "Missing private Deck configuration: $config" >&2
+  echo "Create it with: $repo_root/ops/configure-deck.sh $config" >&2
+  exit 1
+}
+config_mode=$(stat -c %a -- "$config")
+if (( (8#$config_mode & 077) != 0 )); then
+  echo "Deck configuration must not be accessible by group or others: $config" >&2
+  exit 1
+fi
+
+target=
+uploader_password=
+target_seen=0
+password_seen=0
+line_number=0
+while IFS= read -r line || [[ -n $line ]]; do
+  line_number=$((line_number + 1))
+  [[ -z $line || $line == \#* ]] && continue
+  [[ $line == *=* ]] || {
+    echo "Malformed configuration line $line_number in $config" >&2
+    exit 1
+  }
+  key=${line%%=*}
+  value=${line#*=}
+  case $key in
+    DECK_SSH_TARGET)
+      [[ $target_seen -eq 0 ]] || {
+        echo "Duplicate DECK_SSH_TARGET in $config" >&2
+        exit 1
+      }
+      target=$value
+      target_seen=1
+      ;;
+    ROM_UPLOADER_PASSWORD)
+      [[ $password_seen -eq 0 ]] || {
+        echo "Duplicate ROM_UPLOADER_PASSWORD in $config" >&2
+        exit 1
+      }
+      uploader_password=$value
+      password_seen=1
+      ;;
+    *)
+      echo "Unknown configuration key on line $line_number in $config: $key" >&2
+      exit 1
+      ;;
+  esac
+done <"$config"
+
+if [[ -n $target_override ]]; then
+  target=$target_override
+fi
+[[ $target =~ ^root@[A-Za-z0-9._:-]+$ ]] || {
+  echo "DECK_SSH_TARGET must have the form root@DECK-IP" >&2
+  exit 1
+}
+if [[ $password_seen -eq 0 || ${#uploader_password} -lt 16 ||
+      ${#uploader_password} -gt 128 || $uploader_password == *$'\r'* ||
+      $uploader_password == *$'\n'* ]]; then
+  echo "ROM_UPLOADER_PASSWORD must contain 16 through 128 bytes without line breaks" >&2
+  exit 1
+fi
+
+if [[ $check_config -eq 1 ]]; then
+  echo "Deck configuration is valid for $target"
+  exit 0
+fi
 
 for command in nix ssh scp tar gzip sha256sum; do
   command -v "$command" >/dev/null 2>&1 || {
@@ -20,8 +111,6 @@ for command in nix ssh scp tar gzip sha256sum; do
   }
 done
 
-script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 cd "$repo_root"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/nes-deck-deploy.XXXXXX")
@@ -76,6 +165,9 @@ cp "$menu/bin/deck-menu" "$payload/nes-deck/menu/deck-menu"
 cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
 cp "$uploader/bin/rom-uploader" \
   "$payload/nes-deck/uploader/rom-uploader"
+printf '%s\n' "$uploader_password" |
+  (cd uploader && nix shell nixpkgs#go -c go run . --set-password \
+    "$payload/nes-deck/uploader/password.conf")
 cp "$lua/bin/lua" "$payload/nes-deck/langs/lua"
 cp "$python/bin/python" "$payload/nes-deck/langs/python"
 cp "$chibi/bin/chibi-scheme" \
@@ -143,6 +235,7 @@ find "$payload/nes-deck" -type f \( \
   -name 'lua' -o -name 'python' -o -name 'chibi-scheme' -o \
   -name 'ecl.bin' \) -exec chmod 0700 {} +
 chmod 0700 "$payload/nes-deck/uploader/rom-uploader"
+chmod 0600 "$payload/nes-deck/uploader/password.conf"
 chmod 0700 "$payload/usr/bin/ecl" \
   "$payload/usr/sbin/deck-keyboard-quirks" \
   "$payload/usr/sbin/deck-wifi-profile-add" \
@@ -249,12 +342,13 @@ scheme_result=$(
   exit 1
 }
 "$stage/nes-deck/menu/deck-menu" --help >/dev/null
-uploader_test_config=$stage/nes-deck/uploader/password.test.conf
-"$stage/nes-deck/uploader/rom-uploader" --init-password \
-  "$uploader_test_config" >/dev/null
-"$stage/nes-deck/uploader/rom-uploader" --init-password \
-  "$uploader_test_config" >/dev/null
-rm -f "$uploader_test_config"
+uploader_deploy_config=$stage/nes-deck/uploader/password.conf
+[ -f "$uploader_deploy_config" ] && [ ! -L "$uploader_deploy_config" ] || {
+  echo "Staged uploader password configuration is missing or unsafe" >&2
+  exit 1
+}
+"$stage/nes-deck/uploader/rom-uploader" --check-password-config \
+  "$uploader_deploy_config"
 
 mkdir -p "$base" /mnt/data/roms /mnt/data/langs \
   /mnt/data/chiptunes "$base/langs" "$base/licenses" \
@@ -278,8 +372,8 @@ cp -p "$stage/nes-deck/uploader/rom-uploader" \
   "$base/uploader/rom-uploader"
 chmod 0700 "$base/uploader" "$base/uploads" \
   "$base/uploader/rom-uploader"
-"$base/uploader/rom-uploader" --init-password \
-  "$base/uploader/password.conf"
+cp -p "$uploader_deploy_config" "$base/uploader/password.conf"
+chmod 0600 "$base/uploader/password.conf"
 
 mkdir -p "$base/menu" "$base/games" "$base/terminal" "$base/licenses"
 cp -p "$stage/nes-deck/menu/"* "$base/menu/"
