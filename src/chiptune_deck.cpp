@@ -1,6 +1,7 @@
 #include "deck_runtime.h"
 
 #include <gme/gme.h>
+#include <vorbis/vorbisfile.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -41,6 +42,13 @@ struct Rect {
   int width;
   int height;
 };
+
+const Rect kBackButton = {6, 3, 64, 34};
+const Rect kPreviousFileButton = {8, 66, 62, 82};
+const Rect kNextFileButton = {554, 66, 62, 82};
+const Rect kPreviousTrackButton = {148, 177, 94, 34};
+const Rect kPauseButton = {252, 177, 120, 34};
+const Rect kNextTrackButton = {382, 177, 94, 34};
 
 typedef std::vector<uint16_t> Canvas;
 
@@ -117,6 +125,7 @@ const uint8_t *glyph_rows(char input) {
   static const uint8_t period[7] = {0, 0, 0, 0, 0, 6, 6};
   static const uint8_t colon[7] = {0, 6, 6, 0, 6, 6, 0};
   static const uint8_t hyphen[7] = {0, 0, 0, 31, 0, 0, 0};
+  static const uint8_t plus[7] = {0, 4, 4, 31, 4, 4, 0};
   static const uint8_t slash[7] = {1, 2, 2, 4, 8, 8, 16};
   static const uint8_t unknown[7] = {14, 17, 1, 2, 4, 0, 4};
   unsigned char character = static_cast<unsigned char>(input);
@@ -134,6 +143,8 @@ const uint8_t *glyph_rows(char input) {
     return colon;
   if (character == '-')
     return hyphen;
+  if (character == '+')
+    return plus;
   if (character == '/')
     return slash;
   return unknown;
@@ -175,7 +186,7 @@ std::string uppercase_ascii(const std::string &input) {
     if ((character >= 'A' && character <= 'Z') ||
         (character >= '0' && character <= '9') || character == ' ' ||
         character == '.' || character == ':' || character == '-' ||
-        character == '/') {
+        character == '+' || character == '/') {
       result.push_back(static_cast<char>(character));
     } else if (character == '_' || character == '\t') {
       result.push_back(' ');
@@ -219,7 +230,7 @@ std::string lower_extension(const std::string &path) {
 bool supported_extension(const std::string &path) {
   static const char *extensions[] = {".ay",  ".gbs", ".gym", ".hes",
                                      ".kss", ".nsf", ".nsfe", ".sap",
-                                     ".spc", ".vgm", ".vgz"};
+                                     ".spc", ".vgm", ".vgz",  ".ogg"};
   const std::string extension = lower_extension(path);
   for (size_t index = 0; index < sizeof(extensions) / sizeof(extensions[0]);
        ++index) {
@@ -506,17 +517,17 @@ private:
   static unsigned int touch_command(int logical_x, int logical_y) {
     const int x = (logical_x - kCanvasOffset) / kCanvasScale;
     const int y = (logical_y - kCanvasOffset) / kCanvasScale;
-    if (contains(Rect{6, 5, 70, 25}, x, y))
+    if (contains(kBackButton, x, y))
       return ControlBack;
-    if (contains(Rect{170, 174, 70, 36}, x, y))
+    if (contains(kPreviousFileButton, x, y))
       return ControlPreviousFile;
-    if (contains(Rect{250, 174, 124, 36}, x, y))
+    if (contains(kPauseButton, x, y))
       return ControlTogglePause;
-    if (contains(Rect{384, 174, 70, 36}, x, y))
+    if (contains(kNextFileButton, x, y))
       return ControlNextFile;
-    if (contains(Rect{472, 174, 60, 36}, x, y))
+    if (contains(kPreviousTrackButton, x, y))
       return ControlPreviousTrack;
-    if (contains(Rect{544, 174, 60, 36}, x, y))
+    if (contains(kNextTrackButton, x, y))
       return ControlNextTrack;
     return ControlNone;
   }
@@ -583,11 +594,77 @@ private:
   std::vector<GamepadDevice> gamepads_;
 };
 
+struct VorbisMemoryStream {
+  const std::vector<unsigned char> *bytes;
+  size_t offset;
+
+  VorbisMemoryStream() : bytes(NULL), offset(0) {}
+};
+
+size_t vorbis_memory_read(void *destination, size_t size, size_t count,
+                          void *datasource) {
+  VorbisMemoryStream *stream = static_cast<VorbisMemoryStream *>(datasource);
+  if (!stream || !stream->bytes || !destination || size == 0 || count == 0 ||
+      count > SIZE_MAX / size)
+    return 0;
+  const size_t requested = size * count;
+  const size_t available = stream->offset < stream->bytes->size()
+                               ? stream->bytes->size() - stream->offset
+                               : 0;
+  const size_t complete_items = std::min(requested, available) / size;
+  const size_t amount = complete_items * size;
+  if (amount > 0) {
+    std::memcpy(destination, &(*stream->bytes)[stream->offset], amount);
+    stream->offset += amount;
+  }
+  return complete_items;
+}
+
+int vorbis_memory_seek(void *datasource, ogg_int64_t offset, int whence) {
+  VorbisMemoryStream *stream = static_cast<VorbisMemoryStream *>(datasource);
+  if (!stream || !stream->bytes)
+    return -1;
+  ogg_int64_t base = 0;
+  if (whence == SEEK_CUR)
+    base = static_cast<ogg_int64_t>(stream->offset);
+  else if (whence == SEEK_END)
+    base = static_cast<ogg_int64_t>(stream->bytes->size());
+  else if (whence != SEEK_SET)
+    return -1;
+  if ((offset < 0 && base < -offset) ||
+      (offset > 0 && base > static_cast<ogg_int64_t>(stream->bytes->size()) -
+                                 offset))
+    return -1;
+  const ogg_int64_t target = base + offset;
+  if (target < 0 ||
+      target > static_cast<ogg_int64_t>(stream->bytes->size()))
+    return -1;
+  stream->offset = static_cast<size_t>(target);
+  return 0;
+}
+
+int vorbis_memory_close(void *datasource) {
+  (void)datasource;
+  return 0;
+}
+
+long vorbis_memory_tell(void *datasource) {
+  VorbisMemoryStream *stream = static_cast<VorbisMemoryStream *>(datasource);
+  if (!stream || stream->offset > static_cast<size_t>(LONG_MAX))
+    return -1;
+  return static_cast<long>(stream->offset);
+}
+
+enum PlayerBackend { BackendNone, BackendGme, BackendVorbis };
+
 class ChiptunePlayer {
 public:
   explicit ChiptunePlayer(const std::vector<std::string> &files)
-      : files_(files), file_index_(0), emulator_(NULL), info_(NULL),
-        track_index_(0), track_count_(0), paused_(false), length_ms_(-1) {}
+      : files_(files), file_index_(0), backend_(BackendNone), emulator_(NULL),
+        info_(NULL), vorbis_open_(false), vorbis_channels_(0), track_index_(0),
+        track_count_(0), paused_(false), length_ms_(-1) {
+    std::memset(&vorbis_, 0, sizeof(vorbis_));
+  }
   ~ChiptunePlayer() { close_track(); }
 
   bool open_first(std::string *error) {
@@ -611,7 +688,7 @@ public:
   }
 
   bool change_track(int direction, std::string *error) {
-    if (!emulator_ || track_count_ <= 0)
+    if (backend_ != BackendGme || !emulator_ || track_count_ <= 0)
       return false;
     const int next = direction < 0
                          ? (track_index_ + track_count_ - 1) % track_count_
@@ -620,8 +697,10 @@ public:
   }
 
   bool generate(DeckAudio *audio, std::string *error) {
-    if (!emulator_ || paused_)
+    if (backend_ == BackendNone || paused_)
       return true;
+    if (backend_ == BackendVorbis)
+      return generate_vorbis(audio, error);
     samples_.assign(kFramesPerTick * 2, 0);
     const gme_err_t result =
         gme_play(emulator_, static_cast<int>(samples_.size()), &samples_[0]);
@@ -642,9 +721,17 @@ public:
   }
 
   void toggle_pause() { paused_ = !paused_; }
-  bool ready() const { return emulator_ != NULL; }
+  bool ready() const { return backend_ != BackendNone; }
   bool paused() const { return paused_; }
-  int position_ms() const { return emulator_ ? gme_tell(emulator_) : 0; }
+  int position_ms() const {
+    if (backend_ == BackendGme && emulator_)
+      return gme_tell(emulator_);
+    if (backend_ == BackendVorbis && vorbis_open_) {
+      const double seconds = ov_time_tell(const_cast<OggVorbis_File *>(&vorbis_));
+      return seconds >= 0.0 ? static_cast<int>(seconds * 1000.0) : 0;
+    }
+    return 0;
+  }
   int length_ms() const { return length_ms_; }
   int track_index() const { return track_index_; }
   int track_count() const { return track_count_; }
@@ -653,15 +740,19 @@ public:
   const std::vector<int16_t> &visual() const { return visual_; }
 
   std::string title() const {
-    if (info_ && info_->song && info_->song[0])
+    if (backend_ == BackendVorbis && !vorbis_title_.empty())
+      return vorbis_title_;
+    if (backend_ == BackendGme && info_ && info_->song && info_->song[0])
       return info_->song;
     return files_.empty() ? std::string() : base_name(files_[file_index_]);
   }
   std::string subtitle() const {
+    if (backend_ == BackendVorbis)
+      return vorbis_artist_;
     std::string result;
-    if (info_ && info_->game && info_->game[0])
+    if (backend_ == BackendGme && info_ && info_->game && info_->game[0])
       result = info_->game;
-    if (info_ && info_->author && info_->author[0]) {
+    if (backend_ == BackendGme && info_ && info_->author && info_->author[0]) {
       if (!result.empty())
         result += " - ";
       result += info_->author;
@@ -669,6 +760,8 @@ public:
     return result;
   }
   std::string system() const {
+    if (backend_ == BackendVorbis)
+      return "OGG VORBIS";
     return info_ && info_->system ? info_->system : std::string();
   }
 
@@ -677,6 +770,8 @@ private:
     close_track();
     if (index >= files_.size())
       return false;
+    if (lower_extension(files_[index]) == ".ogg")
+      return open_vorbis(index, error);
     std::vector<unsigned char> bytes;
     if (!read_chiptune(files_[index], &bytes, error))
       return false;
@@ -689,9 +784,101 @@ private:
       return false;
     }
     emulator_ = candidate;
+    backend_ = BackendGme;
     file_index_ = index;
     track_count_ = std::max(1, gme_track_count(emulator_));
     return start_track(std::max(0, std::min(track_count_ - 1, track)), error);
+  }
+
+  bool open_vorbis(size_t index, std::string *error) {
+    if (!read_chiptune(files_[index], &file_bytes_, error))
+      return false;
+    memory_stream_.bytes = &file_bytes_;
+    memory_stream_.offset = 0;
+    const ov_callbacks callbacks = {vorbis_memory_read, vorbis_memory_seek,
+                                    vorbis_memory_close, vorbis_memory_tell};
+    const int result =
+        ov_open_callbacks(&memory_stream_, &vorbis_, NULL, 0, callbacks);
+    if (result != 0) {
+      file_bytes_.clear();
+      memory_stream_.bytes = NULL;
+      if (error)
+        *error = "cannot decode Ogg Vorbis file";
+      return false;
+    }
+    vorbis_open_ = true;
+    vorbis_info *stream_info = ov_info(&vorbis_, -1);
+    if (!stream_info || stream_info->rate != static_cast<long>(kSampleRate) ||
+        (stream_info->channels != 1 && stream_info->channels != 2)) {
+      if (error)
+        *error = "Ogg Vorbis file must be 44.1 kHz mono or stereo";
+      ov_clear(&vorbis_);
+      vorbis_open_ = false;
+      file_bytes_.clear();
+      memory_stream_.bytes = NULL;
+      return false;
+    }
+    const double duration = ov_time_total(&vorbis_, -1);
+    vorbis_comment *comments = ov_comment(&vorbis_, -1);
+    const char *tag = comments ? vorbis_comment_query(comments, "TITLE", 0)
+                               : NULL;
+    vorbis_title_ = tag ? tag : std::string();
+    tag = comments ? vorbis_comment_query(comments, "ARTIST", 0) : NULL;
+    vorbis_artist_ = tag ? tag : std::string();
+    backend_ = BackendVorbis;
+    vorbis_channels_ = stream_info->channels;
+    file_index_ = index;
+    track_index_ = 0;
+    track_count_ = 1;
+    length_ms_ = duration >= 0.0 ? static_cast<int>(duration * 1000.0) : -1;
+    paused_ = false;
+    visual_.clear();
+    return true;
+  }
+
+  bool generate_vorbis(DeckAudio *audio, std::string *error) {
+    samples_.assign(kFramesPerTick * 2, 0);
+    mono_samples_.assign(kFramesPerTick, 0);
+    size_t frames = 0;
+    bool rewound = false;
+    while (frames < kFramesPerTick) {
+      int bitstream = 0;
+      const size_t remaining = kFramesPerTick - frames;
+      char *destination = vorbis_channels_ == 2
+                              ? reinterpret_cast<char *>(&samples_[frames * 2])
+                              : reinterpret_cast<char *>(&mono_samples_[frames]);
+      const int frame_bytes = vorbis_channels_ * sizeof(int16_t);
+      const long amount = ov_read(&vorbis_, destination,
+                                  static_cast<int>(remaining * frame_bytes),
+                                  0, 2, 1, &bitstream);
+      if (amount > 0) {
+        const size_t decoded = static_cast<size_t>(amount) / frame_bytes;
+        if (vorbis_channels_ == 1) {
+          for (size_t index = 0; index < decoded; ++index) {
+            const int16_t sample = mono_samples_[frames + index];
+            samples_[(frames + index) * 2] = sample;
+            samples_[(frames + index) * 2 + 1] = sample;
+          }
+        }
+        frames += decoded;
+        continue;
+      }
+      if (amount < 0) {
+        if (error)
+          *error = "Ogg Vorbis stream is damaged";
+        return false;
+      }
+      if (rewound || ov_time_seek(&vorbis_, 0.0) != 0) {
+        if (error)
+          *error = "Ogg Vorbis stream contains no audio";
+        return false;
+      }
+      rewound = true;
+    }
+    visual_ = samples_;
+    if (audio && audio->available())
+      audio->write_stereo(&samples_[0], kFramesPerTick);
+    return true;
   }
 
   bool start_track(int track, std::string *error) {
@@ -723,6 +910,17 @@ private:
     if (emulator_)
       gme_delete(emulator_);
     emulator_ = NULL;
+    if (vorbis_open_)
+      ov_clear(&vorbis_);
+    std::memset(&vorbis_, 0, sizeof(vorbis_));
+    vorbis_open_ = false;
+    vorbis_channels_ = 0;
+    file_bytes_.clear();
+    vorbis_title_.clear();
+    vorbis_artist_.clear();
+    memory_stream_.bytes = NULL;
+    memory_stream_.offset = 0;
+    backend_ = BackendNone;
     track_count_ = 0;
     track_index_ = 0;
     length_ms_ = -1;
@@ -731,13 +929,22 @@ private:
 
   std::vector<std::string> files_;
   size_t file_index_;
+  PlayerBackend backend_;
   Music_Emu *emulator_;
   gme_info_t *info_;
+  OggVorbis_File vorbis_;
+  bool vorbis_open_;
+  int vorbis_channels_;
+  std::vector<unsigned char> file_bytes_;
+  VorbisMemoryStream memory_stream_;
+  std::string vorbis_title_;
+  std::string vorbis_artist_;
   int track_index_;
   int track_count_;
   bool paused_;
   int length_ms_;
   std::vector<int16_t> samples_;
+  std::vector<int16_t> mono_samples_;
   std::vector<int16_t> visual_;
 };
 
@@ -748,50 +955,148 @@ std::string format_time(int milliseconds) {
   return text;
 }
 
-void draw_button(Canvas *canvas, const Rect &rect, const std::string &label,
-                 uint16_t fill, uint16_t text) {
-  fill_rect(canvas, rect, fill);
+void stroke_rect(Canvas *canvas, const Rect &rect, int thickness,
+                 uint16_t color) {
+  fill_rect(canvas, Rect{rect.x, rect.y, rect.width, thickness}, color);
+  fill_rect(canvas,
+            Rect{rect.x, rect.y + rect.height - thickness, rect.width,
+                 thickness},
+            color);
+  fill_rect(canvas, Rect{rect.x, rect.y, thickness, rect.height}, color);
+  fill_rect(canvas,
+            Rect{rect.x + rect.width - thickness, rect.y, thickness,
+                 rect.height},
+            color);
+}
+
+void fill_pixel_cut_rect(Canvas *canvas, const Rect &rect, int cut,
+                         uint16_t color) {
+  if (rect.width <= cut * 2 || rect.height <= cut * 2)
+    return;
+  fill_rect(canvas,
+            Rect{rect.x + cut, rect.y, rect.width - cut * 2, rect.height},
+            color);
+  fill_rect(canvas,
+            Rect{rect.x, rect.y + cut, rect.width, rect.height - cut * 2},
+            color);
+}
+
+void draw_pixel_panel(Canvas *canvas, const Rect &rect, uint16_t fill,
+                      uint16_t border, int thickness = 2) {
+  fill_pixel_cut_rect(canvas, rect, thickness, border);
+  fill_pixel_cut_rect(canvas,
+                      Rect{rect.x + thickness, rect.y + thickness,
+                           rect.width - thickness * 2,
+                           rect.height - thickness * 2},
+                      thickness, fill);
+}
+
+void draw_outline_arrow(Canvas *canvas, const Rect &bounds, bool points_left,
+                        uint16_t color) {
+  const int center_x = bounds.x + bounds.width / 2;
+  const int center_y = bounds.y + bounds.height / 2;
+  const int mirror = points_left ? -1 : 1;
+  const auto block = [&](int x, int y, int width, int height) {
+    const int left = mirror < 0 ? center_x - x - width : center_x + x;
+    fill_rect(canvas, Rect{left, center_y + y, width, height}, color);
+  };
+  block(14, -1, 2, 2);
+  block(12, -3, 2, 2);
+  block(10, -5, 2, 2);
+  block(8, -7, 2, 2);
+  block(6, -9, 2, 2);
+  block(4, -11, 2, 5);
+  block(-14, -6, 18, 2);
+  block(-14, -4, 2, 8);
+  block(-14, 4, 18, 2);
+  block(4, 6, 2, 5);
+  block(6, 7, 2, 2);
+  block(8, 5, 2, 2);
+  block(10, 3, 2, 2);
+  block(12, 1, 2, 2);
+}
+
+void draw_control_button(Canvas *canvas, const Rect &rect,
+                         const std::string &label, bool selected,
+                         uint16_t background, uint16_t active,
+                         uint16_t orange, uint16_t text) {
+  draw_pixel_panel(canvas, rect, selected ? active : background, orange);
   const int width = label.empty() ? 0 : static_cast<int>(label.size() * 12 - 2);
   draw_text(canvas, rect.x + std::max(0, (rect.width - width) / 2),
-            rect.y + 11, label, 2, text);
+            rect.y + std::max(0, (rect.height - 14) / 2), label, 2,
+            selected ? background : text);
+}
+
+void draw_file_indicators(Canvas *canvas, size_t file_index, size_t file_count,
+                          uint16_t orange, uint16_t inactive) {
+  if (file_count == 0)
+    return;
+  const size_t visible = std::min<size_t>(file_count, 40);
+  const int width = 6;
+  const int gap = 4;
+  const int row_width = static_cast<int>(visible) * width +
+                        static_cast<int>(visible - 1) * gap;
+  int x = (kCanvasWidth - row_width) / 2;
+  size_t first = 0;
+  if (file_count > visible) {
+    first = file_index > visible / 2 ? file_index - visible / 2 : 0;
+    first = std::min(first, file_count - visible);
+  }
+  for (size_t index = 0; index < visible; ++index) {
+    const bool selected = first + index == file_index;
+    stroke_rect(canvas, Rect{x, 166, width, 4}, 1,
+                selected ? orange : inactive);
+    x += width + gap;
+  }
 }
 
 void render_player(Canvas *canvas, const ChiptunePlayer &player,
                    const std::string &status, unsigned int volume_percent) {
   const uint16_t background = DeckRgb888To565(0x000000);
-  const uint16_t orange = DeckRgb888To565(0xff5f00);
-  const uint16_t cream = DeckRgb888To565(0xffffd7);
-  const uint16_t green = DeckRgb888To565(0x5fff87);
-  const uint16_t muted = DeckRgb888To565(0x9e9e9e);
-  const uint16_t panel = DeckRgb888To565(0x1c1c1c);
+  const uint16_t orange = DeckRgb888To565(0xfe6c27);
+  const uint16_t active = DeckRgb888To565(0x4d372d);
+  const uint16_t text = DeckRgb888To565(0xffffff);
+  const uint16_t green = DeckRgb888To565(0x87af87);
+  const uint16_t red = DeckRgb888To565(0xaf8787);
+  const uint16_t muted = DeckRgb888To565(0x969696);
+  const uint16_t indicator = DeckRgb888To565(0x6c6c6c);
   canvas->assign(static_cast<size_t>(kCanvasWidth * kCanvasHeight), background);
 
-  draw_button(canvas, Rect{6, 5, 70, 25}, "BACK", panel, cream);
-  draw_centered_text(canvas, 8, "CHIPTUNE PLAYER", 2, orange);
+  draw_outline_arrow(canvas, kBackButton, true, orange);
+  draw_pixel_panel(canvas, Rect{236, 4, 152, 29}, active, orange);
+  draw_centered_text(canvas, 12, "CHIPTUNES", 1, text);
   char volume[24];
-  std::snprintf(volume, sizeof(volume), "VOL %u", volume_percent);
-  draw_text(canvas, 540, 10, volume, 1, volume_percent ? green : muted);
+  if (volume_percent)
+    std::snprintf(volume, sizeof(volume), "VOL %u", volume_percent);
+  else
+    std::snprintf(volume, sizeof(volume), "VOL OFF");
+  const int volume_width = static_cast<int>(std::strlen(volume) * 6 - 1);
+  draw_text(canvas, 616 - volume_width, 14, volume, 1,
+            volume_percent ? green : red);
 
   if (!player.ready()) {
-    draw_centered_text(canvas, 74, "NO CHIPTUNES FOUND", 3, orange);
-    draw_centered_text(canvas, 112, clipped(status, 76), 1, muted);
-    draw_centered_text(canvas, 136, "AY GBS GYM HES KSS NSF NSFE SAP SPC VGM VGZ",
-                       1, cream);
+    draw_pixel_panel(canvas, Rect{78, 42, 468, 120}, active, orange);
+    draw_centered_text(canvas, 72, "NO CHIPTUNES FOUND", 2, text);
+    draw_centered_text(canvas, 103, clipped(status, 72), 1, muted);
+    draw_centered_text(
+        canvas, 126,
+        "AY GBS GYM HES KSS NSF NSFE OGG SAP SPC VGM VGZ", 1, text);
   } else {
-    draw_centered_text(canvas, 38, clipped(player.title(), 45), 2, cream);
-    draw_centered_text(canvas, 58, clipped(player.subtitle(), 72), 1, muted);
+    draw_pixel_panel(canvas, Rect{78, 42, 468, 120}, active, orange);
+    draw_centered_text(canvas, 50, clipped(player.title(), 45), 2, text);
+    draw_centered_text(canvas, 70, clipped(player.subtitle(), 72), 1, muted);
 
     const std::vector<int16_t> &samples = player.visual();
-    fill_rect(canvas, Rect{30, 76, 564, 68}, panel);
-    fill_rect(canvas, Rect{30, 109, 564, 1}, muted);
+    fill_rect(canvas, Rect{96, 84, 432, 44}, background);
+    fill_rect(canvas, Rect{96, 105, 432, 1}, muted);
     if (!samples.empty()) {
-      for (int x = 0; x < 564; ++x) {
-        const size_t frame = static_cast<size_t>(x) * kFramesPerTick / 564;
+      for (int x = 0; x < 432; ++x) {
+        const size_t frame = static_cast<size_t>(x) * kFramesPerTick / 432;
         const int mixed = (static_cast<int>(samples[frame * 2]) +
                            static_cast<int>(samples[frame * 2 + 1])) /
                           2;
-        const int height = std::min(31, std::abs(mixed) / 700);
-        fill_rect(canvas, Rect{30 + x, mixed < 0 ? 110 : 109 - height, 1,
+        const int height = std::min(20, std::abs(mixed) / 1050);
+        fill_rect(canvas, Rect{96 + x, mixed < 0 ? 106 : 105 - height, 1,
                                std::max(1, height)},
                   orange);
       }
@@ -800,31 +1105,106 @@ void render_player(Canvas *canvas, const ChiptunePlayer &player,
     const int position = player.position_ms();
     const int length = player.length_ms();
     const int progress =
-        length > 0 ? std::max(0, std::min(560, position * 560 / length)) : 0;
-    fill_rect(canvas, Rect{32, 151, 560, 5}, panel);
+        length > 0 ? std::max(0, std::min(432, position * 432 / length)) : 0;
+    fill_rect(canvas, Rect{96, 134, 432, 3}, background);
     if (progress > 0)
-      fill_rect(canvas, Rect{32, 151, progress, 5}, green);
-    draw_text(canvas, 32, 160, format_time(position), 1, cream);
-    draw_text(canvas, 548, 160, length > 0 ? format_time(length) : "--:--", 1,
-              cream);
+      fill_rect(canvas, Rect{96, 134, progress, 3}, green);
+    draw_text(canvas, 96, 143, format_time(position), 1, text);
+    const std::string end_time = length > 0 ? format_time(length) : "--:--";
+    draw_text(canvas, 528 - static_cast<int>(end_time.size() * 6 - 1), 143,
+              end_time, 1, text);
 
     char details[128];
     std::snprintf(details, sizeof(details), "%s  FILE %zu/%zu  TRACK %d/%d",
                   clipped(player.system(), 18).c_str(), player.file_index() + 1,
                   player.file_count(), player.track_index() + 1,
                   player.track_count());
-    draw_centered_text(canvas, 160, clipped(details, 74), 1, muted);
+    draw_centered_text(canvas, 143, clipped(details, 56), 1, muted);
+    draw_file_indicators(canvas, player.file_index(), player.file_count(),
+                         orange, indicator);
   }
 
-  draw_button(canvas, Rect{170, 174, 70, 36}, "PREV", panel, cream);
-  draw_button(canvas, Rect{250, 174, 124, 36},
-              player.paused() ? "PLAY" : "PAUSE", orange, background);
-  draw_button(canvas, Rect{384, 174, 70, 36}, "NEXT", panel, cream);
-  draw_button(canvas, Rect{472, 174, 60, 36}, "TRK-", panel, cream);
-  draw_button(canvas, Rect{544, 174, 60, 36}, "TRK+", panel, cream);
+  draw_outline_arrow(canvas, kPreviousFileButton, true, orange);
+  draw_outline_arrow(canvas, kNextFileButton, false, orange);
+  draw_control_button(canvas, kPreviousTrackButton, "TRK -", false,
+                      background, active, orange, text);
+  draw_control_button(canvas, kPauseButton,
+                      player.paused() ? "PLAY" : "PAUSE", true, background,
+                      active, orange, text);
+  draw_control_button(canvas, kNextTrackButton, "TRK +", false, background,
+                      active, orange, text);
+}
+
+int render_preview(const char *track_path, const char *output_path) {
+  std::vector<std::string> paths(1, track_path);
+  ChiptunePlayer player(paths);
+  std::string error;
+  if (!player.open_first(&error)) {
+    std::fprintf(stderr, "chiptune-deck: preview open failed: %s\n",
+                 error.c_str());
+    return 1;
+  }
+  for (int block = 0; block < 4; ++block) {
+    if (!player.generate(NULL, &error)) {
+      std::fprintf(stderr, "chiptune-deck: preview playback failed: %s\n",
+                   error.c_str());
+      return 1;
+    }
+  }
+  Canvas canvas;
+  render_player(&canvas, player, std::string(), 42);
+  FILE *output = std::fopen(output_path, "wb");
+  if (!output) {
+    std::fprintf(stderr, "chiptune-deck: cannot write preview: %s\n",
+                 std::strerror(errno));
+    return 1;
+  }
+  std::fprintf(output, "P6\n%d %d\n255\n", kCanvasWidth, kCanvasHeight);
+  for (size_t index = 0; index < canvas.size(); ++index) {
+    const uint16_t pixel = canvas[index];
+    const unsigned char rgb[3] = {
+        static_cast<unsigned char>(((pixel >> 11) & 0x1f) * 255 / 31),
+        static_cast<unsigned char>(((pixel >> 5) & 0x3f) * 255 / 63),
+        static_cast<unsigned char>((pixel & 0x1f) * 255 / 31)};
+    if (std::fwrite(rgb, sizeof(rgb), 1, output) != 1) {
+      std::fprintf(stderr, "chiptune-deck: cannot finish preview\n");
+      std::fclose(output);
+      return 1;
+    }
+  }
+  if (std::fclose(output) != 0) {
+    std::fprintf(stderr, "chiptune-deck: cannot close preview: %s\n",
+                 std::strerror(errno));
+    return 1;
+  }
+  return 0;
 }
 
 int probe_file(const char *path) {
+  if (lower_extension(path) == ".ogg") {
+    std::vector<std::string> paths(1, path);
+    ChiptunePlayer player(paths);
+    std::string error;
+    if (!player.open_first(&error)) {
+      std::fprintf(stderr, "chiptune-deck: probe open failed: %s\n",
+                   error.c_str());
+      return 1;
+    }
+    int peak = 0;
+    for (int block = 0; block < 60; ++block) {
+      if (!player.generate(NULL, &error)) {
+        std::fprintf(stderr, "chiptune-deck: probe playback failed: %s\n",
+                     error.c_str());
+        return 1;
+      }
+      const std::vector<int16_t> &samples = player.visual();
+      for (size_t index = 0; index < samples.size(); ++index)
+        peak = std::max(peak, std::abs(static_cast<int>(samples[index])));
+    }
+    std::printf("tracks=1 samples=%zu peak=%d\n",
+                static_cast<size_t>(60) * kFramesPerTick * 2, peak);
+    return peak > 0 ? 0 : 1;
+  }
   std::vector<unsigned char> bytes;
   std::string read_error;
   if (!read_chiptune(path, &bytes, &read_error)) {
@@ -867,11 +1247,14 @@ int main(int argc, char **argv) {
   std::setvbuf(stderr, NULL, _IOLBF, 0);
   if (argc == 3 && std::string(argv[1]) == "--probe")
     return probe_file(argv[2]);
+  if (argc == 4 && std::string(argv[1]) == "--render-preview")
+    return render_preview(argv[2], argv[3]);
   if (argc != 2) {
     std::fprintf(stderr,
                  "Usage: %s CHIPTUNE_DIRECTORY\n"
-                 "       %s --probe CHIPTUNE_FILE\n",
-                 argv[0], argv[0]);
+                 "       %s --probe CHIPTUNE_FILE\n"
+                 "       %s --render-preview CHIPTUNE_FILE OUTPUT.ppm\n",
+                 argv[0], argv[0], argv[0]);
     return 2;
   }
   install_signal_handlers();

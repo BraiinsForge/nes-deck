@@ -255,7 +255,11 @@
 
           src = pkgs.game-music-emu.src;
           nativeBuildInputs = [ pkgs.cmake pkgs.nukeReferences ];
-          buildInputs = [ pkgsCross.glibc.static staticCross.zlib ];
+          buildInputs = [
+            pkgsCross.glibc.static
+            staticCross.libvorbis
+            staticCross.zlib
+          ];
           allowedReferences = [ ];
 
           cmakeFlags = [
@@ -271,7 +275,8 @@
               ${./src/chiptune_deck.cpp} \
               ${./src/deck_runtime.cpp} \
               gme/libgme.a \
-              -static -Wl,-s -pthread -lm -lz -o chiptune-deck
+              -static -Wl,-s -pthread -lvorbisfile -lvorbis -logg -lm -lz \
+              -o chiptune-deck
             runHook postBuild
           '';
 
@@ -281,6 +286,12 @@
             install -m755 chiptune-deck $out/bin/chiptune-deck
             install -m644 ../license.txt \
               $out/share/licenses/chiptune-deck/license.txt
+            tar -xOf ${pkgs.libvorbis.src} \
+              libvorbis-${pkgs.libvorbis.version}/COPYING \
+              > $out/share/licenses/chiptune-deck/libvorbis-COPYING
+            tar -xOf ${pkgs.libogg.src} \
+              libogg-${pkgs.libogg.version}/COPYING \
+              > $out/share/licenses/chiptune-deck/libogg-COPYING
             nuke-refs $out/bin/chiptune-deck
             runHook postInstall
           '';
@@ -288,7 +299,7 @@
           meta = {
             description = "Native chiptune music player for the Braiins Forge Deck";
             homepage = "https://github.com/libgme/game-music-emu";
-            license = pkgs.lib.licenses.lgpl21Plus;
+            license = [ pkgs.lib.licenses.lgpl21Plus pkgs.lib.licenses.bsd3 ];
             platforms = [ "armv7l-linux" ];
           };
         };
