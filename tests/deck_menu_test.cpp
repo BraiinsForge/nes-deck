@@ -77,6 +77,45 @@ int main() {
   const std::string volume_state = directory + "/volume.state";
   const std::string keymap_state = directory + "/keymap.state";
 
+  expect(menu_gamepad_key_to_button(BTN_THUMB2) == kMenuPadConfirm &&
+             menu_gamepad_key_to_button(BTN_TOP) == kMenuPadConfirm &&
+             menu_gamepad_key_to_button(BTN_THUMB) == kMenuPadBack &&
+             menu_gamepad_key_to_button(BTN_TRIGGER) == kMenuPadBack,
+         "dashboard maps physical A/X to confirm and B/Y to back");
+  expect(menu_gamepad_axis_to_button(0, 0, 255, kMenuPadLeft,
+                                     kMenuPadRight) == kMenuPadLeft &&
+             menu_gamepad_axis_to_button(127, 0, 255, kMenuPadLeft,
+                                         kMenuPadRight) == 0 &&
+             menu_gamepad_axis_to_button(255, 0, 255, kMenuPadLeft,
+                                         kMenuPadRight) == kMenuPadRight,
+         "dashboard applies a center dead zone to gamepad axes");
+  MenuGamepadDevice menu_pad;
+  menu_pad.x_info.minimum = 0;
+  menu_pad.x_info.maximum = 255;
+  menu_pad.y_info.minimum = 0;
+  menu_pad.y_info.maximum = 255;
+  menu_pad.x_value = 255;
+  menu_pad.y_value = 127;
+  menu_pad.raw_buttons = 1u << (BTN_THUMB2 - BTN_TRIGGER);
+  expect(menu_gamepad_state(menu_pad) ==
+             (kMenuPadRight | kMenuPadConfirm),
+         "dashboard combines D-pad and face-button state");
+  expect(menu_gamepad_command(kMenuPadUp, false, false) ==
+                 MenuGamepadCommandPrevious &&
+             menu_gamepad_command(kMenuPadDown, false, false) ==
+                 MenuGamepadCommandNext &&
+             menu_gamepad_command(kMenuPadConfirm, false, false) ==
+                 MenuGamepadCommandConfirm &&
+             menu_gamepad_command(kMenuPadLeft, false, true) ==
+                 MenuGamepadCommandPrevious &&
+             menu_gamepad_command(kMenuPadRight, false, true) ==
+                 MenuGamepadCommandNext &&
+             menu_gamepad_command(kMenuPadBack, false, true) ==
+                 MenuGamepadCommandBack &&
+             menu_gamepad_command(kMenuPadBack, true, false) ==
+                 MenuGamepadCommandBack,
+         "dashboard controller commands follow console and game view axes");
+
   unsigned char ines[16] = {};
   std::memcpy(ines, "NES\x1a", 4);
   ines[4] = 1;

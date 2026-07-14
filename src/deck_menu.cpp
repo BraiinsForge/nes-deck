@@ -89,7 +89,17 @@ const int64_t kRebootConfirmMs = 4000;
 const unsigned int kVolumeStep = 5;
 const int kGameTitleScale = 2;
 const char kRebootExecutable[] = "/sbin/reboot";
-const char kRebootConfirmationText[] = "TAP POWER AGAIN TO REBOOT";
+const char kRebootConfirmationText[] = "PRESS A OR TAP AGAIN TO REBOOT";
+
+const unsigned int kMenuPadConfirm = 1u << 0;
+const unsigned int kMenuPadBack = 1u << 1;
+const unsigned int kMenuPadUp = 1u << 2;
+const unsigned int kMenuPadDown = 1u << 3;
+const unsigned int kMenuPadLeft = 1u << 4;
+const unsigned int kMenuPadRight = 1u << 5;
+const unsigned short kTheGamepadVendor = 0x1c59;
+const unsigned short kTheGamepadProduct = 0x0026;
+const size_t kMaximumMenuGamepads = 2;
 
 volatile sig_atomic_t g_shutdown_requested = 0;
 
@@ -2418,6 +2428,331 @@ private:
   bool grabbed_;
 };
 
+unsigned int menu_gamepad_key_to_button(unsigned short code) {
+  switch (code) {
+  case BTN_THUMB2:
+  case BTN_TOP:
+    return kMenuPadConfirm;
+  case BTN_THUMB:
+  case BTN_TRIGGER:
+    return kMenuPadBack;
+  default:
+    return 0;
+  }
+}
+
+unsigned int menu_gamepad_axis_to_button(int value, int minimum, int maximum,
+                                         unsigned int negative,
+                                         unsigned int positive) {
+  if (maximum <= minimum)
+    return 0;
+  const int64_t span = static_cast<int64_t>(maximum) - minimum;
+  const int low = minimum + static_cast<int>(span / 3);
+  const int high = maximum - static_cast<int>(span / 3);
+  if (value <= low)
+    return negative;
+  if (value >= high)
+    return positive;
+  return 0;
+}
+
+struct MenuGamepadDevice {
+  int fd;
+  std::string path;
+  std::string physical_path;
+  struct input_absinfo x_info;
+  struct input_absinfo y_info;
+  int x_value;
+  int y_value;
+  uint32_t raw_buttons;
+  unsigned int state;
+  bool dropping_events;
+
+  MenuGamepadDevice()
+      : fd(-1), x_value(0), y_value(0), raw_buttons(0), state(0),
+        dropping_events(false) {
+    std::memset(&x_info, 0, sizeof(x_info));
+    std::memset(&y_info, 0, sizeof(y_info));
+  }
+};
+
+unsigned int menu_gamepad_state(const MenuGamepadDevice &gamepad) {
+  unsigned int state = 0;
+  for (unsigned int index = 0; index < 8; ++index) {
+    if (gamepad.raw_buttons & (1u << index)) {
+      state |= menu_gamepad_key_to_button(
+          static_cast<unsigned short>(BTN_TRIGGER + index));
+    }
+  }
+  state |= menu_gamepad_axis_to_button(
+      gamepad.x_value, gamepad.x_info.minimum, gamepad.x_info.maximum,
+      kMenuPadLeft, kMenuPadRight);
+  state |= menu_gamepad_axis_to_button(
+      gamepad.y_value, gamepad.y_info.minimum, gamepad.y_info.maximum,
+      kMenuPadUp, kMenuPadDown);
+  return state;
+}
+
+class MenuGamepads {
+public:
+  MenuGamepads() : last_scan_ms_(0) {}
+  ~MenuGamepads() { close_devices(); }
+
+  size_t count() const {
+    size_t connected = 0;
+    for (size_t i = 0; i < devices_.size(); ++i)
+      connected += devices_[i].fd >= 0 ? 1 : 0;
+    return connected;
+  }
+
+  bool scan_if_due(bool force, std::string *error) {
+    const int64_t now = monotonic_ms();
+    if (!force && last_scan_ms_ > 0 && now - last_scan_ms_ < 1000)
+      return true;
+    last_scan_ms_ = now;
+    return scan(error);
+  }
+
+  void append_poll_descriptors(std::vector<struct pollfd> *descriptors) const {
+    if (!descriptors)
+      return;
+    for (size_t i = 0; i < devices_.size(); ++i) {
+      struct pollfd descriptor;
+      descriptor.fd = devices_[i].fd;
+      descriptor.events = POLLIN;
+      descriptor.revents = 0;
+      descriptors->push_back(descriptor);
+    }
+  }
+
+  unsigned int read_ready(const std::vector<struct pollfd> &descriptors,
+                          size_t first_descriptor) {
+    unsigned int pressed = 0;
+    for (size_t i = 0; i < devices_.size(); ++i) {
+      if (first_descriptor + i >= descriptors.size())
+        break;
+      const short revents = descriptors[first_descriptor + i].revents;
+      if (!(revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL)))
+        continue;
+      if ((revents & POLLIN) && drain_device(&devices_[i], &pressed))
+        continue;
+      close(devices_[i].fd);
+      devices_[i].fd = -1;
+      devices_[i].state = 0;
+      devices_[i].raw_buttons = 0;
+      last_scan_ms_ = 0;
+    }
+    return pressed;
+  }
+
+  void close_for_child() {
+    close_devices();
+    last_scan_ms_ = 0;
+  }
+
+private:
+  bool scan(std::string *error) {
+    DIR *directory = opendir("/dev/input");
+    if (!directory) {
+      if (error)
+        *error = errno_message("cannot scan gamepads");
+      return false;
+    }
+
+    std::vector<MenuGamepadDevice> candidates;
+    for (struct dirent *entry = readdir(directory); entry;
+         entry = readdir(directory)) {
+      const std::string name(entry->d_name);
+      if (name.size() <= 5 || name.compare(0, 5, "event") != 0)
+        continue;
+      bool numeric = true;
+      for (size_t i = 5; i < name.size(); ++i)
+        numeric = numeric && std::isdigit(static_cast<unsigned char>(name[i]));
+      if (!numeric)
+        continue;
+
+      MenuGamepadDevice candidate;
+      candidate.path = "/dev/input/" + name;
+      candidate.fd = open(candidate.path.c_str(),
+                          O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+      if (candidate.fd < 0)
+        continue;
+
+      struct input_id identity;
+      std::memset(&identity, 0, sizeof(identity));
+      if (ioctl(candidate.fd, EVIOCGID, &identity) != 0 ||
+          identity.vendor != kTheGamepadVendor ||
+          identity.product != kTheGamepadProduct ||
+          ioctl(candidate.fd, EVIOCGABS(ABS_X), &candidate.x_info) != 0 ||
+          ioctl(candidate.fd, EVIOCGABS(ABS_Y), &candidate.y_info) != 0) {
+        close(candidate.fd);
+        continue;
+      }
+
+      char physical_path[PATH_MAX] = {};
+      if (ioctl(candidate.fd, EVIOCGPHYS(sizeof(physical_path)),
+                physical_path) >= 0) {
+        candidate.physical_path = physical_path;
+      }
+      if (candidate.physical_path.empty())
+        candidate.physical_path = candidate.path;
+      candidates.push_back(candidate);
+    }
+    closedir(directory);
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const MenuGamepadDevice &left,
+                 const MenuGamepadDevice &right) {
+                if (left.physical_path != right.physical_path)
+                  return left.physical_path < right.physical_path;
+                return left.path < right.path;
+              });
+    while (candidates.size() > kMaximumMenuGamepads) {
+      close(candidates.back().fd);
+      candidates.pop_back();
+    }
+
+    bool unchanged = candidates.size() == devices_.size();
+    for (size_t i = 0; unchanged && i < candidates.size(); ++i) {
+      unchanged = candidates[i].path == devices_[i].path &&
+                  candidates[i].physical_path == devices_[i].physical_path &&
+                  devices_[i].fd >= 0;
+    }
+    if (unchanged) {
+      for (size_t i = 0; i < candidates.size(); ++i)
+        close(candidates[i].fd);
+      return true;
+    }
+
+    close_devices();
+    devices_.swap(candidates);
+    for (size_t i = 0; i < devices_.size(); ++i)
+      resynchronize(&devices_[i]);
+    std::cerr << "deck-menu: " << count()
+              << " THEGamepad controller(s) ready for dashboard" << std::endl;
+    return true;
+  }
+
+  static bool resynchronize(MenuGamepadDevice *gamepad) {
+    if (!gamepad || gamepad->fd < 0)
+      return false;
+    struct input_absinfo x_info;
+    struct input_absinfo y_info;
+    std::memset(&x_info, 0, sizeof(x_info));
+    std::memset(&y_info, 0, sizeof(y_info));
+    const size_t key_words = (KEY_MAX + sizeof(unsigned long) * CHAR_BIT) /
+                             (sizeof(unsigned long) * CHAR_BIT);
+    std::vector<unsigned long> keys(key_words, 0);
+    if (ioctl(gamepad->fd, EVIOCGABS(ABS_X), &x_info) != 0 ||
+        ioctl(gamepad->fd, EVIOCGABS(ABS_Y), &y_info) != 0 ||
+        ioctl(gamepad->fd,
+              EVIOCGKEY(keys.size() * sizeof(unsigned long)), &keys[0]) < 0) {
+      return false;
+    }
+    gamepad->x_info = x_info;
+    gamepad->y_info = y_info;
+    gamepad->x_value = x_info.value;
+    gamepad->y_value = y_info.value;
+    gamepad->raw_buttons = 0;
+    for (unsigned int index = 0; index < 8; ++index) {
+      if (bit_is_set(&keys[0], BTN_TRIGGER + index))
+        gamepad->raw_buttons |= 1u << index;
+    }
+    gamepad->state = menu_gamepad_state(*gamepad);
+    gamepad->dropping_events = false;
+    return true;
+  }
+
+  static bool drain_device(MenuGamepadDevice *gamepad,
+                           unsigned int *pressed) {
+    if (!gamepad || gamepad->fd < 0 || !pressed)
+      return false;
+    while (true) {
+      struct input_event events[32];
+      const ssize_t amount = read(gamepad->fd, events, sizeof(events));
+      if (amount < 0) {
+        if (errno == EINTR)
+          continue;
+        return errno == EAGAIN || errno == EWOULDBLOCK;
+      }
+      if (amount == 0 ||
+          amount % static_cast<ssize_t>(sizeof(struct input_event)) != 0) {
+        return false;
+      }
+      const size_t count = static_cast<size_t>(amount) / sizeof(events[0]);
+      for (size_t i = 0; i < count; ++i) {
+        const struct input_event &event = events[i];
+        if (gamepad->dropping_events) {
+          if (event.type == EV_SYN && event.code == SYN_REPORT) {
+            if (!resynchronize(gamepad))
+              return false;
+          }
+          continue;
+        }
+        if (event.type == EV_SYN && event.code == SYN_DROPPED) {
+          gamepad->dropping_events = true;
+        } else if (event.type == EV_KEY && event.code >= BTN_TRIGGER &&
+                   event.code <= BTN_BASE2) {
+          const uint32_t bit = 1u << (event.code - BTN_TRIGGER);
+          if (event.value)
+            gamepad->raw_buttons |= bit;
+          else
+            gamepad->raw_buttons &= ~bit;
+        } else if (event.type == EV_ABS && event.code == ABS_X) {
+          gamepad->x_value = event.value;
+        } else if (event.type == EV_ABS && event.code == ABS_Y) {
+          gamepad->y_value = event.value;
+        } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
+          const unsigned int state = menu_gamepad_state(*gamepad);
+          *pressed |= state & ~gamepad->state;
+          gamepad->state = state;
+        }
+      }
+    }
+  }
+
+  void close_devices() {
+    for (size_t i = 0; i < devices_.size(); ++i) {
+      if (devices_[i].fd >= 0)
+        close(devices_[i].fd);
+    }
+    devices_.clear();
+  }
+
+  std::vector<MenuGamepadDevice> devices_;
+  int64_t last_scan_ms_;
+};
+
+enum MenuGamepadCommand {
+  MenuGamepadCommandNone,
+  MenuGamepadCommandPrevious,
+  MenuGamepadCommandNext,
+  MenuGamepadCommandConfirm,
+  MenuGamepadCommandBack
+};
+
+MenuGamepadCommand menu_gamepad_command(unsigned int pressed, bool wifi_view,
+                                        bool game_view) {
+  if ((wifi_view || game_view) && (pressed & kMenuPadBack))
+    return MenuGamepadCommandBack;
+  if (wifi_view)
+    return MenuGamepadCommandNone;
+  if (game_view) {
+    if (pressed & kMenuPadLeft)
+      return MenuGamepadCommandPrevious;
+    if (pressed & kMenuPadRight)
+      return MenuGamepadCommandNext;
+  } else {
+    if (pressed & kMenuPadUp)
+      return MenuGamepadCommandPrevious;
+    if (pressed & kMenuPadDown)
+      return MenuGamepadCommandNext;
+  }
+  if (pressed & kMenuPadConfirm)
+    return MenuGamepadCommandConfirm;
+  return MenuGamepadCommandNone;
+}
+
 class TtySnapshot {
 public:
   TtySnapshot() : fd_(-1), have_termios_(false), have_keyboard_mode_(false),
@@ -3234,6 +3569,13 @@ int application_main(const Options &options) {
     return 1;
   }
 
+  MenuGamepads menu_gamepads;
+  std::string gamepad_error;
+  if (!menu_gamepads.scan_if_due(true, &gamepad_error)) {
+    std::cerr << "deck-menu: controller navigation unavailable: "
+              << gamepad_error << std::endl;
+  }
+
   Framebuffer framebuffer;
   if (!framebuffer.open_device(&error)) {
     std::cerr << "deck-menu: " << error << std::endl;
@@ -3263,6 +3605,7 @@ int application_main(const Options &options) {
   int64_t reconnect_attempt = 0;
   int64_t reboot_armed_until = 0;
   std::string last_touch_error;
+  std::string last_gamepad_error = gamepad_error;
 
   while (!g_shutdown_requested) {
     if (touch.fd() < 0) {
@@ -3278,35 +3621,55 @@ int application_main(const Options &options) {
       }
     }
 
-    struct pollfd descriptor;
-    descriptor.fd = touch.fd();
-    descriptor.events = POLLIN;
-    descriptor.revents = 0;
-    const int poll_result = poll(descriptor.fd >= 0 ? &descriptor : NULL,
-                                 descriptor.fd >= 0 ? 1 : 0, 250);
+    gamepad_error.clear();
+    if (!menu_gamepads.scan_if_due(false, &gamepad_error)) {
+      if (gamepad_error != last_gamepad_error) {
+        std::cerr << "deck-menu: controller navigation unavailable: "
+                  << gamepad_error << std::endl;
+        last_gamepad_error = gamepad_error;
+      }
+    } else {
+      last_gamepad_error.clear();
+    }
+
+    std::vector<struct pollfd> descriptors;
+    struct pollfd touch_descriptor;
+    touch_descriptor.fd = touch.fd();
+    touch_descriptor.events = POLLIN;
+    touch_descriptor.revents = 0;
+    descriptors.push_back(touch_descriptor);
+    const size_t first_gamepad_descriptor = descriptors.size();
+    menu_gamepads.append_poll_descriptors(&descriptors);
+    const int poll_result =
+        poll(&descriptors[0], static_cast<nfds_t>(descriptors.size()), 250);
     if (poll_result < 0) {
       if (errno == EINTR)
         continue;
       std::cerr << "deck-menu: " << errno_message("poll failed") << std::endl;
       return 1;
     }
-    if (poll_result == 0) {
-      if (reboot_armed_until > 0 &&
-          !reboot_confirmation_active(reboot_armed_until, monotonic_ms())) {
-        reboot_armed_until = 0;
-        if (status == kRebootConfirmationText) {
-          status.clear();
-          render_current_menu();
-          framebuffer.present(canvas, NULL);
-        }
+
+    if (reboot_armed_until > 0 &&
+        !reboot_confirmation_active(reboot_armed_until, monotonic_ms())) {
+      reboot_armed_until = 0;
+      if (status == kRebootConfirmationText) {
+        status.clear();
+        render_current_menu();
+        framebuffer.present(canvas, NULL);
       }
-      continue;
     }
-    if (!(descriptor.revents & (POLLIN | POLLERR | POLLHUP)))
+    if (poll_result == 0)
+      continue;
+
+    const unsigned int controller_pressed =
+        menu_gamepads.read_ready(descriptors, first_gamepad_descriptor);
+    const bool touch_ready =
+        descriptors[0].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL);
+    if (!touch_ready && controller_pressed == 0)
       continue;
 
     std::vector<TouchReport> reports;
-    if (!touch.read_reports(&reports, &error)) {
+    if (touch_ready && !touch.read_reports(&reports, &error)) {
       std::cerr << "deck-menu: " << error << std::endl;
       touch.close_device();
       pressed_target = MenuTargetNone;
@@ -3318,12 +3681,88 @@ int application_main(const Options &options) {
         render_current_menu();
       }
       framebuffer.present(canvas, NULL);
-      continue;
     }
 
     int selected_game = -1;
     bool terminal_requested = false;
     bool reboot_requested = false;
+    const auto cancel_reboot_confirmation = [&]() {
+      reboot_armed_until = 0;
+      if (status == kRebootConfirmationText)
+        status.clear();
+    };
+    const auto request_game = [&](int game_index) {
+      if (game_index < 0 || game_index >= static_cast<int>(games.size()))
+        return;
+      if (is_built_in_terminal(games[game_index])) {
+        terminal_requested = true;
+      } else if (is_built_in_reboot(games[game_index])) {
+        const int64_t now = monotonic_ms();
+        if (reboot_confirmation_active(reboot_armed_until, now)) {
+          reboot_armed_until = 0;
+          reboot_requested = true;
+          selected_game = game_index;
+        } else {
+          reboot_armed_until = now + kRebootConfirmMs;
+          status = kRebootConfirmationText;
+          render_current_menu();
+          framebuffer.present(canvas, NULL);
+        }
+      } else {
+        selected_game = game_index;
+      }
+    };
+
+    const MenuGamepadCommand controller_command =
+        menu_gamepad_command(controller_pressed, wifi_view, game_view);
+    if (controller_command != MenuGamepadCommandNone)
+      pressed_target = MenuTargetNone;
+    if (controller_command == MenuGamepadCommandBack) {
+      cancel_reboot_confirmation();
+      if (wifi_view) {
+        wifi_view = false;
+        status = "WIFI EDITOR CLOSED";
+      } else {
+        game_view = false;
+        status.clear();
+      }
+      render_current_menu();
+      framebuffer.present(canvas, NULL);
+    } else if (controller_command == MenuGamepadCommandPrevious ||
+               controller_command == MenuGamepadCommandNext) {
+      cancel_reboot_confirmation();
+      if (game_view && !layout.game_indices.empty()) {
+        if (controller_command == MenuGamepadCommandPrevious) {
+          game_position = game_position == 0
+                              ? layout.game_indices.size() - 1
+                              : game_position - 1;
+        } else {
+          game_position = (game_position + 1) % layout.game_indices.size();
+        }
+      } else if (!game_view) {
+        active_system = adjacent_system(
+            layout.systems, active_system,
+            controller_command == MenuGamepadCommandPrevious ? -1 : 1);
+        game_position = 0;
+      }
+      status.clear();
+      render_current_menu();
+      framebuffer.present(canvas, NULL);
+    } else if (controller_command == MenuGamepadCommandConfirm) {
+      if (!game_view) {
+        cancel_reboot_confirmation();
+        game_view = true;
+        game_position = 0;
+        status.clear();
+        render_current_menu();
+        framebuffer.present(canvas, NULL);
+      } else if (layout.shown_game_index < games.size()) {
+        if (!is_built_in_reboot(games[layout.shown_game_index]))
+          cancel_reboot_confirmation();
+        request_game(static_cast<int>(layout.shown_game_index));
+      }
+    }
+
     for (size_t i = 0; i < reports.size(); ++i) {
       const TouchReport &report = reports[i];
       if (report.pressed) {
@@ -3341,9 +3780,7 @@ int application_main(const Options &options) {
           released_target < static_cast<int>(games.size()) &&
           is_built_in_reboot(games[released_target]);
       if (reboot_armed_until > 0 && !released_reboot) {
-        reboot_armed_until = 0;
-        if (status == kRebootConfirmationText)
-          status.clear();
+        cancel_reboot_confirmation();
       }
 
       if (wifi_view && pressed_target == released_target) {
@@ -3460,23 +3897,7 @@ int application_main(const Options &options) {
       } else if (!wifi_view && pressed_target >= 0 &&
                  pressed_target == released_target &&
                  pressed_target < static_cast<int>(games.size())) {
-        if (is_built_in_terminal(games[pressed_target])) {
-          terminal_requested = true;
-        } else if (is_built_in_reboot(games[pressed_target])) {
-          const int64_t now = monotonic_ms();
-          if (reboot_confirmation_active(reboot_armed_until, now)) {
-            reboot_armed_until = 0;
-            reboot_requested = true;
-            selected_game = pressed_target;
-          } else {
-            reboot_armed_until = now + kRebootConfirmMs;
-            status = kRebootConfirmationText;
-            render_current_menu();
-            framebuffer.present(canvas, NULL);
-          }
-        } else {
-          selected_game = pressed_target;
-        }
+        request_game(pressed_target);
       }
       pressed_target = MenuTargetNone;
     }
@@ -3492,16 +3913,27 @@ int application_main(const Options &options) {
     render_current_menu();
     framebuffer.present(canvas, NULL);
 
+    // Close dashboard readers so the launched program gets a fresh controller
+    // queue and the menu cannot accumulate gameplay events while it waits.
+    menu_gamepads.close_for_child();
     const ChildResult child =
         terminal_requested
             ? run_terminal(options.terminal, keymap, &touch, &framebuffer)
-        : reboot_requested
-            ? run_reboot(games[selected_game].rom, &touch, &framebuffer)
-            : run_game(emulator_for_game(options, games[selected_game]),
-                       games[selected_game], volume, &touch, &framebuffer);
+            : (reboot_requested
+                   ? run_reboot(games[selected_game].rom, &touch, &framebuffer)
+                   : run_game(emulator_for_game(options, games[selected_game]),
+                              games[selected_game], volume, &touch,
+                              &framebuffer));
     pressed_target = MenuTargetNone;
     if (g_shutdown_requested)
       break;
+
+    gamepad_error.clear();
+    if (!menu_gamepads.scan_if_due(true, &gamepad_error)) {
+      std::cerr << "deck-menu: controller navigation unavailable: "
+                << gamepad_error << std::endl;
+      last_gamepad_error = gamepad_error;
+    }
 
     if (!framebuffer.open_device(&error)) {
       std::cerr << "deck-menu: " << error << std::endl;
