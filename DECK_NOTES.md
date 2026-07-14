@@ -32,6 +32,11 @@ passphrases, WireGuard private keys, or ROM data.
   service start, and the native menu issues `FBIOBLANK` with
   `FB_BLANK_UNBLANK` whenever it opens fb0. This also restores the panel after
   games and the terminal release the framebuffer.
+- The panel backlight is exposed through
+  `/sys/class/backlight/display-bl/{brightness,max_brightness}`. The inspected
+  Deck reports a maximum of 20. Dashboard settings maps persistent 10-point
+  percentages onto that live range and clamps at 10 percent so an accidental
+  touch cannot make the screen appear dead.
 - InfoNES renders the 256x240 frame at integer 2x scale. Its 512x480 output is
   centered at logical x=384..895 and fills the active y=0..479 panel. Earlier
   offsets shifted it 25 pixels left, left a 40-pixel gap above it, and clipped
@@ -73,16 +78,18 @@ passphrases, WireGuard private keys, or ROM data.
   assignments stable across game launches; keyboard input remains a Player 1
   fallback.
 - The dashboard discovers the same two controllers without relying on event
-  node numbers. Either D-pad uses Up/Down on the console selector and
-  Left/Right in the game carousel; A opens or launches and B returns to the
-  console selector. Dashboard descriptors close before a child starts and are
-  rediscovered afterward, so gameplay events never accumulate in the menu and
-  controller ownership starts cleanly for each emulator.
+  node numbers. Either controller's L/R shoulders switch console tabs,
+  Left/Right changes the selected game, A launches it, and Select opens or
+  closes settings. D-pad directions move through settings, A activates the
+  selected control, and B closes settings or the Wi-Fi keyboard. Dashboard
+  descriptors close before a child starts and are rediscovered afterward, so
+  gameplay events never accumulate in the menu and controller ownership starts
+  cleanly for each emulator.
 - Retro Games' published mapping is used: D-pad axes are NES directions, A/X
   are NES A, B/Y are NES B, Back is Select, and Start is Start. Disconnects,
   reconnects, hotplug, dropped-event resynchronization, and independent P1/P2
   state are covered by the host test. Physical L/R are also exposed to the
-  Spectrum frontend and change dashboard volume. Setting
+  Spectrum frontend during gameplay. Setting
   `INFONES_INPUT_DIAGNOSTICS=1`
   prints state changes for an explicit hardware audit without enabling routine
   input logging.
@@ -156,15 +163,13 @@ passphrases, WireGuard private keys, or ROM data.
   about 42% of that old path because the fixed-gain MAX98357A is loud on the
   Deck speaker. The launcher exposes this as `VOLUME_PERCENT=42` (valid range
   0-100) instead of relying on ALSA softvol.
-- The menu's top-right minus/display/plus group persists a canonical 0-100
-  value in `/mnt/data/nes-deck/state/menu-volume.state`. Adjustments move in
-  5-point steps. The display is a mute toggle: it is green and shows the
-  percentage while audible, then turns red and reads `VOL OFF` when muted.
-  Tapping the display or plus restores the last audible level, or the configured
-  default when the launcher started muted. Each nonzero adjustment plays a
-  two-note confirmation through `/dev/dsp`. The selected value is passed to
-  every emulator and survives service restarts and reboot. The launcher
-  migrates the former exact `on\n`/`off\n` state to 42/0 once.
+- The settings volume down/up controls persist a canonical 0-100 value in
+  `/mnt/data/nes-deck/state/menu-volume.state`. Adjustments move in 5-point
+  steps; down reaches mute and up restores the last audible level, or the
+  configured default when the launcher started muted. Each nonzero adjustment
+  plays a two-note confirmation through `/dev/dsp`. The selected value is
+  passed to every emulator and survives service restarts and reboot. The
+  launcher migrates the former exact `on\n`/`off\n` state to 42/0 once.
 - On 2026-07-13 a reported Mario-muted launch was traced to the persisted sound
   state being `off\n`: logd showed the preceding emulator launch opening at 42%
   and the later launch opening at exactly 0%. Mario's title and attract demo are
@@ -248,31 +253,32 @@ passphrases, WireGuard private keys, or ROM data.
   `/mnt/data/langs/lisp`.
 - The static ARM native menu is
   `/mnt/data/nes-deck/menu/deck-menu`, SHA-256
-  `53199519f6da67d0b8066cd1577959c9b26a90874ed781db68bb39cbe73125b9`.
+  `e3b1b6f87176a475218b4d73188fa1936b9a2090496333801c1e4cdff676ef89`.
   It validates the manifest and system-specific NES/GB/GBC/ZX/CHIP-8 game data
   before opening the framebuffer, supervises one emulator child, logs its
   exact exit status or signal, and restores tty state after the child exits.
-  This build includes the full-screen two-second return hold, persistent
-  volume controls, a persistent US/Czech terminal keymap toggle, the Wi-Fi
-  editor, a supervised shell terminal, and supervised Lua and Lisp REPLs. The
-  installed launcher SHA-256 is
-  `1b76dcce698775b7dd1dc9106d00f626777bacbb43394baaf1079af618559a25`.
+  This build includes the full-screen two-second return hold, persistent volume
+  and safe 10-through-100 brightness controls, a persistent US/Czech terminal
+  keymap toggle, the Wi-Fi editor, a supervised shell terminal, and supervised
+  Lua and Lisp REPLs. The installed launcher SHA-256 is
+  `14b5b0056a84f7c03fc93b7734cf065a28f150019276387dbb6314d3c80cb20a`.
   Successful controller and touchscreen navigation uses the same short
   chiptune cues while volume is audible.
-- The renderer uses only canonical xterm-256 colors. Its initial screen is a
-  large xterm-202 orange console selector with aligned Up/Down arrows. Opening
-  it reveals one horizontal game carousel with orange Left/Right arrows,
-  cached cover art when available, compact position markers, and the terminal,
-  Lua, Lisp, timer, and reboot app marks drawn natively. Operational controls
-  appear only in game view and have no panel background. No product label,
-  description, or license text remains in the launcher. Reproducible 1280x480
-  captures of every
-  console, every game position, mute, keymap, reboot confirmation, and all four
-  Wi-Fi keyboard states are in `/root/retro-deck-screens` on the deployment
-  host, together with a contact sheet and the reproducibly rendered timer
-  result screen. The current 34-PNG set has six console selectors, all
-  nineteen carousel positions, operational variants, the timer, and its
-  contact sheet.
+- The renderer uses exact `#fe6c27` interface borders and the 30-percent
+  `#ffb896` active composite over black; catalog accents and decoded covers stay
+  in canonical xterm-256 colors. Every populated console is a cut-corner top
+  tab. The horizontal carousel shows at most three square-cropped covers with
+  fixed-size truncated names, white outline arrows, a filled selected card,
+  and hollow position markers for the complete game count. A pixel gear opens
+  a dedicated settings screen with volume, brightness, terminal, keymap, and
+  Wi-Fi controls. The terminal, Lua, Lisp, timer, and reboot app marks are drawn
+  natively. No product label, description, or license text remains in the
+  launcher. Reproducible 1280x480 captures of every game position, settings
+  variants, reboot confirmation, and all four Wi-Fi keyboard states are in
+  `/root/retro-deck-screens` on the deployment host, together with a contact
+  sheet and the reproducibly rendered timer result screen. The current 30-PNG
+  set has all nineteen carousel positions, four settings variants, reboot
+  confirmation, four Wi-Fi states, the timer, and its contact sheet.
 - Menu transitions build the complete rotated frame in cacheable memory before
   publishing finished rows to live scanout. This removes the visible black
   clear between screens and reduces live framebuffer writes per transition
@@ -500,6 +506,11 @@ The current ZX/menu/timer deployment rollback is
 pre-Spectrum menu payloads and the tested intermediate Spectrum binaries.
 The pre-REPL menu, launcher, and terminal files are retained beside their live
 counterparts with the suffix `.pre-repl-20260714`.
+The menu and launcher immediately preceding the three-card tabbed dashboard are
+retained in
+`/mnt/data/nes-deck/backups/20260714-pre-three-card-ui/`. The replacement
+adopted the live 12-of-20 backlight as persistent 60 percent without changing
+the panel level or any network configuration.
 
 ```sh
 # Stock UI must stay disabled

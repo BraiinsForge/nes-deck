@@ -119,8 +119,9 @@ For active development and iteration, use the Nix development environment:
      /tmp/deck-covers "$HOME/retro-deck-screens"
    ```
    The renderer calls the native menu drawing code directly, emits every
-   console and game-carousel state at 1280x480, includes control and Wi-Fi
-   variants, and builds `00-overview.png` as a contact sheet.
+   game-carousel state at 1280x480, includes settings, brightness, keymap,
+   control, and Wi-Fi variants, and builds `00-overview.png` as a contact
+   sheet.
 
 The GB/GBC package builds the GPL-2.0-only Gambatte libretro core at the exact
 revision in `flake.lock`, using Cortex-A7/NEON flags, LTO, and native RGB565
@@ -249,10 +250,12 @@ port requests eight 1024-byte periods. PCM gain is intentionally set in the
 mixer because the kernel OSS path bypasses ALSA's userspace softvol.
 The touch launcher persists an exact volume from 0 through 100 in
 `menu-volume.state` and passes it through both `INFONES_VOLUME_PERCENT` and
-`RETRO_DECK_VOLUME_PERCENT`. The header's minus and plus actions move in
-5-point steps; 0 is mute. `VOLUME_ON` in `deploy/menu/deck-menu-launcher` and
-`deploy/menu/nes-deck.init` is the initial value and the migration value for
-the former `on` sound state.
+`RETRO_DECK_VOLUME_PERCENT`. The settings minus and plus actions move in
+5-point steps; 0 is mute. Settings also persists display brightness in
+`menu-brightness.state` as a 10-point step from 10 through 100 and maps it onto
+the Deck backlight's current maximum. `VOLUME_ON` in
+`deploy/menu/deck-menu-launcher` and `deploy/menu/nes-deck.init` is the initial
+value and the migration value for the former `on` sound state.
 
 ## Project Structure
 
@@ -265,7 +268,7 @@ deck-infones/
 │   ├── chip8_deck.cpp           # CHIP-8 Deck frontend
 │   ├── chip8_core.c             # c-octo adaptation boundary
 │   ├── deck_runtime.cpp         # Shared framebuffer/audio/frame clock
-│   ├── deck_menu.cpp            # Games, volume, keymap, Wi-Fi, and terminal
+│   ├── deck_menu.cpp            # Games, settings, keymap, Wi-Fi, and terminal
 │   ├── joypad_input.cpp         # Two THEGamepads plus keyboard fallback
 │   ├── nes_audio_mixer.h        # Mixer, DC blocker, and rate conversion
 │   ├── nes_apu_noise.h          # Tested 15-bit noise clock helpers

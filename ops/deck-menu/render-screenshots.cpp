@@ -135,26 +135,12 @@ int main(int argc, char **argv) {
        definition < sizeof(kSystemDefinitions) / sizeof(kSystemDefinitions[0]);
        ++definition) {
     const std::string system(kSystemDefinitions[definition].system);
-    if (!has_system(games, system))
-      continue;
-    render_menu(games, system, 42, "us", false, 0, std::string(), &canvas,
-                &menu_layout);
-    if (!save_canvas(output, number++, "console-" + system, canvas, &error)) {
-      std::fprintf(stderr, "%s\n", error.c_str());
-      return 1;
-    }
-  }
-
-  for (size_t definition = 0;
-       definition < sizeof(kSystemDefinitions) / sizeof(kSystemDefinitions[0]);
-       ++definition) {
-    const std::string system(kSystemDefinitions[definition].system);
     size_t position = 0;
     for (size_t game = 0; game < games.size(); ++game) {
       if (games[game].system != system)
         continue;
-      render_menu(games, system, 42, "us", true, position++, std::string(),
-                  &canvas, &menu_layout);
+      render_menu(games, system, position++, std::string(), &canvas,
+                  &menu_layout);
       if (!save_canvas(output, number++, "game-" + games[game].id, canvas,
                        &error)) {
         std::fprintf(stderr, "%s\n", error.c_str());
@@ -163,16 +149,25 @@ int main(int argc, char **argv) {
     }
   }
 
-  render_menu(games, "nes", 0, "us", true, 0, std::string(), &canvas,
-              &menu_layout);
+  SettingsLayout settings_layout;
+  render_settings(42, 60, "us", SettingsTargetVolumeDown, std::string(),
+                  &canvas, &settings_layout);
+  if (!save_canvas(output, number++, "settings", canvas, &error))
+    return 1;
+  render_settings(0, 60, "us", SettingsTargetVolumeUp, std::string(), &canvas,
+                  &settings_layout);
   if (!save_canvas(output, number++, "volume-off", canvas, &error))
     return 1;
-  render_menu(games, "nes", 42, "cz", true, 0, std::string(), &canvas,
-              &menu_layout);
+  render_settings(42, 100, "us", SettingsTargetBrightnessUp, std::string(),
+                  &canvas, &settings_layout);
+  if (!save_canvas(output, number++, "brightness-100", canvas, &error))
+    return 1;
+  render_settings(42, 60, "cz", SettingsTargetKeymap, std::string(), &canvas,
+                  &settings_layout);
   if (!save_canvas(output, number++, "czech-keymap", canvas, &error))
     return 1;
-  render_menu(games, "deck", 42, "us", true, 4,
-              kRebootConfirmationText, &canvas, &menu_layout);
+  render_menu(games, "deck", 4, kRebootConfirmationText, &canvas,
+              &menu_layout);
   if (!save_canvas(output, number++, "reboot-confirmation", canvas, &error))
     return 1;
 

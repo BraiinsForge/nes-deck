@@ -27,6 +27,9 @@ GENERATED_MANIFEST=$STATE_DIR/games.tsv
 COVER_DIR=$BASE/covers
 COVER_FETCHER=$MENU_DIR/fetch-covers
 VOLUME_STATE=$STATE_DIR/menu-volume.state
+BRIGHTNESS_STATE=$STATE_DIR/menu-brightness.state
+BRIGHTNESS=/sys/class/backlight/display-bl/brightness
+BRIGHTNESS_MAX=/sys/class/backlight/display-bl/max_brightness
 LEGACY_SOUND_STATE=$STATE_DIR/menu-sound.state
 KEYMAP_STATE=$STATE_DIR/terminal-keymap.state
 TERMINAL=$BASE/terminal/retro-terminal
@@ -123,6 +126,10 @@ if [ ! -x "$DECK_GAME" ]; then
 fi
 if [ ! -x "$TERMINAL" ]; then
 	log_message "terminal launcher is missing or not executable: $TERMINAL"
+	exit 1
+fi
+if [ ! -w "$BRIGHTNESS" ] || [ ! -r "$BRIGHTNESS_MAX" ]; then
+	log_message "display brightness controls are unavailable under /sys/class/backlight/display-bl"
 	exit 1
 fi
 if [ ! -x "$LUA" ]; then
@@ -226,6 +233,9 @@ exec "$MENU" \
 	--chip8-emulator "$CHIP8_EMULATOR" \
 	--deck-game "$DECK_GAME" \
 	--volume-state "$VOLUME_STATE" \
+	--brightness "$BRIGHTNESS" \
+	--brightness-max "$BRIGHTNESS_MAX" \
+	--brightness-state "$BRIGHTNESS_STATE" \
 	--keymap-state "$KEYMAP_STATE" \
 	--terminal "$TERMINAL" \
 	--wifi-helper "$WIFI_HELPER" \

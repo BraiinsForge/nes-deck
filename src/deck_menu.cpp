@@ -11,6 +11,9 @@
  *             --manifest /absolute/path/to/games.tsv \
  *             --cover-directory /absolute/path/to/covers \
  *             --volume-state /absolute/path/to/volume.state \
+ *             --brightness /sys/class/backlight/display-bl/brightness \
+ *             --brightness-max /sys/class/backlight/display-bl/max_brightness \
+ *             --brightness-state /absolute/path/to/brightness.state \
  *             --keymap-state /absolute/path/to/keymap.state \
  *             --terminal /absolute/path/to/terminal-launcher \
  *             --wifi-helper /absolute/path/to/profile-writer
@@ -88,7 +91,10 @@ const int64_t kExitHoldMs = 2000;
 const int64_t kChildTermGraceMs = 4000;
 const int64_t kRebootConfirmMs = 4000;
 const unsigned int kVolumeStep = 5;
+const unsigned int kBrightnessStep = 10;
+const unsigned int kMinimumBrightness = 10;
 const int kGameTitleScale = 2;
+const int kPixelStroke = 4;
 const char kRebootExecutable[] = "/sbin/reboot";
 const char kRebootConfirmationText[] = "PRESS A OR TAP AGAIN TO REBOOT";
 
@@ -98,8 +104,9 @@ const unsigned int kMenuPadUp = 1u << 2;
 const unsigned int kMenuPadDown = 1u << 3;
 const unsigned int kMenuPadLeft = 1u << 4;
 const unsigned int kMenuPadRight = 1u << 5;
-const unsigned int kMenuPadVolumeDown = 1u << 6;
-const unsigned int kMenuPadVolumeUp = 1u << 7;
+const unsigned int kMenuPadSystemPrevious = 1u << 6;
+const unsigned int kMenuPadSystemNext = 1u << 7;
+const unsigned int kMenuPadSettings = 1u << 8;
 const unsigned short kTheGamepadVendor = 0x1c59;
 const unsigned short kTheGamepadProduct = 0x0026;
 const size_t kMaximumMenuGamepads = 2;
@@ -275,6 +282,14 @@ bool is_xterm_color(const RgbColor &color) {
 }
 
 uint16_t xterm_pixel(unsigned int index) { return xterm_color(index).pixel(); }
+
+// The design-team orange is intentionally outside the older xterm-only
+// dashboard palette. RGB565 quantizes it only at final scanout. The active
+// fill is #ffb896 composited at 30% over black: round(0.3 * RGB).
+const RgbColor kInterfaceOrange = {254, 108, 39};
+const RgbColor kInterfaceActive = {77, 55, 45};
+const RgbColor kInterfaceSurface = {48, 48, 48};
+const RgbColor kInterfaceMuted = {150, 150, 150};
 
 // Semantic colors are canonical xterm-256 indices. Catalog colors are
 // validated against the same palette before the framebuffer is opened.
@@ -955,6 +970,167 @@ bool load_volume_state(const std::string &path, unsigned int default_volume,
   return true;
 }
 
+bool read_device_integer(const std::string &path, const std::string &role,
+                         unsigned int *value, std::string *error) {
+  if (!value || !is_absolute_path(path)) {
+    if (error)
+      *error = role + " path must be absolute";
+    return false;
+  }
+  const int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+  if (fd < 0) {
+    if (error)
+      *error = errno_message("cannot open " + role + " " + path);
+    return false;
+  }
+  char buffer[64] = {};
+  size_t used = 0;
+  while (used < sizeof(buffer) - 1) {
+    const ssize_t amount = read(fd, buffer + used, sizeof(buffer) - 1 - used);
+    if (amount > 0) {
+      used += static_cast<size_t>(amount);
+      continue;
+    }
+    if (amount < 0 && errno == EINTR)
+      continue;
+    if (amount < 0 && error)
+      *error = errno_message("cannot read " + role + " " + path);
+    close(fd);
+    if (amount < 0)
+      return false;
+    break;
+  }
+  close(fd);
+  const std::string text = trim_ascii_space(std::string(buffer, used));
+  if (text.empty()) {
+    if (error)
+      *error = role + " is empty";
+    return false;
+  }
+  uint64_t parsed = 0;
+  for (size_t index = 0; index < text.size(); ++index) {
+    if (text[index] < '0' || text[index] > '9') {
+      if (error)
+        *error = role + " must contain an unsigned integer";
+      return false;
+    }
+    parsed = parsed * 10 + static_cast<unsigned int>(text[index] - '0');
+    if (parsed > UINT_MAX) {
+      if (error)
+        *error = role + " is too large";
+      return false;
+    }
+  }
+  *value = static_cast<unsigned int>(parsed);
+  return true;
+}
+
+bool write_device_integer(const std::string &path, const std::string &role,
+                          unsigned int value, std::string *error) {
+  if (!is_absolute_path(path)) {
+    if (error)
+      *error = role + " path must be absolute";
+    return false;
+  }
+  const int fd = open(path.c_str(), O_WRONLY | O_CLOEXEC);
+  if (fd < 0) {
+    if (error)
+      *error = errno_message("cannot open " + role + " " + path);
+    return false;
+  }
+  struct stat info;
+  if (fstat(fd, &info) == 0 && S_ISREG(info.st_mode) && info.st_size > 0 &&
+      ftruncate(fd, 0) != 0 && errno != EINVAL && errno != EPERM) {
+    const int saved_errno = errno;
+    close(fd);
+    errno = saved_errno;
+    if (error)
+      *error = errno_message("cannot truncate " + role + " " + path);
+    return false;
+  }
+  const std::string bytes = std::to_string(value) + "\n";
+  const bool wrote = write_all(fd, bytes.data(), bytes.size());
+  const int saved_errno = errno;
+  const bool closed = close(fd) == 0;
+  if (!wrote || !closed) {
+    errno = saved_errno;
+    if (error)
+      *error = errno_message("cannot write " + role + " " + path);
+    return false;
+  }
+  return true;
+}
+
+unsigned int brightness_raw_value(unsigned int percent,
+                                  unsigned int maximum) {
+  if (maximum == 0)
+    return 0;
+  const unsigned int raw =
+      static_cast<unsigned int>((static_cast<uint64_t>(percent) * maximum + 50) /
+                                100);
+  return std::max(1U, std::min(maximum, raw));
+}
+
+bool set_brightness_percent(const std::string &brightness_path,
+                            const std::string &state_path,
+                            unsigned int maximum, unsigned int percent,
+                            std::string *error) {
+  if (maximum == 0 || percent < kMinimumBrightness || percent > 100 ||
+      percent % kBrightnessStep != 0) {
+    if (error)
+      *error = "brightness must be a 10-point step from 10 through 100";
+    return false;
+  }
+  if (!write_device_integer(brightness_path, "brightness",
+                            brightness_raw_value(percent, maximum), error))
+    return false;
+  return save_state_value(state_path, std::to_string(percent), "brightness",
+                          error);
+}
+
+bool load_brightness(const std::string &brightness_path,
+                     const std::string &maximum_path,
+                     const std::string &state_path, unsigned int *maximum,
+                     unsigned int *percent, std::string *error) {
+  if (!maximum || !percent)
+    return false;
+  unsigned int current = 0;
+  if (!read_device_integer(maximum_path, "maximum brightness", maximum,
+                           error) ||
+      *maximum == 0 ||
+      !read_device_integer(brightness_path, "brightness", &current, error) ||
+      current > *maximum) {
+    if (error && error->empty())
+      *error = "brightness is outside the backlight range";
+    return false;
+  }
+
+  std::string bytes;
+  bool missing = false;
+  if (!load_state_value(state_path, "brightness", &bytes, &missing, error))
+    return false;
+  if (missing) {
+    const unsigned int observed = static_cast<unsigned int>(
+        (static_cast<uint64_t>(current) * 100 + *maximum / 2) / *maximum);
+    *percent = std::max(
+        kMinimumBrightness,
+        std::min(100U, ((observed + kBrightnessStep / 2) / kBrightnessStep) *
+                           kBrightnessStep));
+  } else {
+    if (bytes.empty() || bytes[bytes.size() - 1] != '\n' ||
+        bytes.find('\n') != bytes.size() - 1 ||
+        !parse_volume_percent(bytes.substr(0, bytes.size() - 1), percent) ||
+        *percent < kMinimumBrightness || *percent % kBrightnessStep != 0) {
+      if (error)
+        *error = "brightness state must contain a 10-point step from 10 "
+                 "through 100 followed by a newline";
+      return false;
+    }
+  }
+  return set_brightness_percent(brightness_path, state_path, *maximum,
+                                *percent, error);
+}
+
 bool valid_keymap(const std::string &keymap) {
   return keymap == "us" || keymap == "cz";
 }
@@ -1581,21 +1757,6 @@ void fill_rect(Canvas *canvas, const Rect &rect, uint16_t color) {
   }
 }
 
-void draw_cover(Canvas *canvas, const Rect &bounds, const CoverImage &cover) {
-  if (!canvas || !cover.available() || cover.width > bounds.width ||
-      cover.height > bounds.height)
-    return;
-  const int left = bounds.x + (bounds.width - cover.width) / 2;
-  const int top = bounds.y + (bounds.height - cover.height) / 2;
-  for (int y = 0; y < cover.height; ++y) {
-    std::copy(cover.pixels.begin() + static_cast<size_t>(y * cover.width),
-              cover.pixels.begin() +
-                  static_cast<size_t>((y + 1) * cover.width),
-              canvas->begin() +
-                  static_cast<size_t>((top + y) * kLogicalWidth + left));
-  }
-}
-
 void stroke_rect(Canvas *canvas, const Rect &rect, int thickness,
                  uint16_t color) {
   fill_rect(canvas, Rect{rect.x, rect.y, rect.width, thickness}, color);
@@ -1608,6 +1769,49 @@ void stroke_rect(Canvas *canvas, const Rect &rect, int thickness,
             Rect{rect.x + rect.width - thickness, rect.y, thickness,
                  rect.height},
             color);
+}
+
+void fill_pixel_cut_rect(Canvas *canvas, const Rect &rect, int cut,
+                         uint16_t color) {
+  if (rect.width <= cut * 2 || rect.height <= cut * 2)
+    return;
+  fill_rect(canvas,
+            Rect{rect.x + cut, rect.y, rect.width - cut * 2, rect.height},
+            color);
+  fill_rect(canvas,
+            Rect{rect.x, rect.y + cut, rect.width, rect.height - cut * 2},
+            color);
+}
+
+void draw_pixel_panel(Canvas *canvas, const Rect &rect, uint16_t fill,
+                      uint16_t border, int thickness = kPixelStroke) {
+  fill_pixel_cut_rect(canvas, rect, thickness, border);
+  const Rect inside{rect.x + thickness, rect.y + thickness,
+                    rect.width - thickness * 2,
+                    rect.height - thickness * 2};
+  fill_pixel_cut_rect(canvas, inside, thickness, fill);
+}
+
+void draw_cover_square(Canvas *canvas, const Rect &bounds,
+                       const CoverImage &cover) {
+  if (!canvas || !cover.available() || bounds.width < 1 || bounds.height < 1)
+    return;
+  const int source_size = std::min(cover.width, cover.height);
+  const int source_left = (cover.width - source_size) / 2;
+  const int source_top = (cover.height - source_size) / 2;
+  for (int y = 0; y < bounds.height; ++y) {
+    const int source_y = source_top +
+                         static_cast<int>(static_cast<int64_t>(y) *
+                                          source_size / bounds.height);
+    for (int x = 0; x < bounds.width; ++x) {
+      const int source_x = source_left +
+                           static_cast<int>(static_cast<int64_t>(x) *
+                                            source_size / bounds.width);
+      (*canvas)[static_cast<size_t>(bounds.y + y) * kLogicalWidth +
+                bounds.x + x] =
+          cover.pixels[static_cast<size_t>(source_y * cover.width + source_x)];
+    }
+  }
 }
 
 const uint8_t *glyph_rows(char input) {
@@ -1777,46 +1981,49 @@ std::string fit_text_width(const std::string &text, int maximum_width,
   return shown;
 }
 
-std::string volume_label(unsigned int volume) {
-  return volume == 0 ? "VOL OFF" : "VOL " + std::to_string(volume) + "%";
-}
-
 struct MenuLayout {
-  Rect volume_down_button;
-  Rect volume_display;
-  Rect volume_up_button;
-  Rect keymap_button;
-  Rect wifi_button;
-  Rect terminal_button;
-  Rect system_up_button;
-  Rect system_button;
-  Rect system_down_button;
+  Rect settings_button;
   Rect game_previous_button;
   Rect game_next_button;
-  Rect game_art;
-  Rect game_placeholder;
-  bool game_view;
   std::vector<std::string> systems;
+  std::vector<Rect> system_buttons;
   std::vector<Rect> game_buttons;
   std::vector<Rect> game_position_indicators;
   std::vector<size_t> game_indices;
+  std::vector<size_t> visible_game_indices;
   size_t shown_game_index;
 };
 
 enum MenuTarget {
   MenuTargetNone = -1,
-  MenuTargetVolumeDown = -2,
-  MenuTargetWifi = -3,
-  MenuTargetTerminal = -4,
-  MenuTargetVolumeUp = -5,
-  MenuTargetKeymap = -6,
-  MenuTargetVolumeToggle = -7,
-  MenuTargetSystemUp = -8,
-  MenuTargetSystemOpen = -9,
-  MenuTargetSystemDown = -10,
-  MenuTargetGamePrevious = -11,
-  MenuTargetGameNext = -12,
-  MenuTargetSystemBack = -13,
+  MenuTargetSettings = -2,
+  MenuTargetGamePrevious = -3,
+  MenuTargetGameNext = -4,
+  MenuTargetSystemBase = 1000,
+};
+
+enum SettingsTarget {
+  SettingsTargetNone = -1,
+  SettingsTargetClose = 0,
+  SettingsTargetVolumeDown,
+  SettingsTargetVolumeUp,
+  SettingsTargetBrightnessDown,
+  SettingsTargetBrightnessUp,
+  SettingsTargetTerminal,
+  SettingsTargetKeymap,
+  SettingsTargetWifi,
+  SettingsTargetCount
+};
+
+struct SettingsLayout {
+  Rect close_button;
+  Rect wifi_button;
+  Rect volume_down_button;
+  Rect volume_up_button;
+  Rect brightness_down_button;
+  Rect brightness_up_button;
+  Rect terminal_button;
+  Rect keymap_button;
 };
 
 struct SystemDefinition {
@@ -1875,40 +2082,6 @@ void draw_terminal_icon(Canvas *canvas, const Rect &button, uint16_t color) {
 
 enum ArrowDirection { ArrowUp, ArrowDown, ArrowLeft, ArrowRight };
 
-void draw_arrow_icon(Canvas *canvas, const Rect &button,
-                     ArrowDirection direction, uint16_t color) {
-  const int center_x = button.x + button.width / 2;
-  const int center_y = button.y + button.height / 2;
-  if (direction == ArrowUp) {
-    const int tip_y = center_y - 24;
-    fill_rect(canvas, Rect{center_x - 8, tip_y, 16, 8}, color);
-    fill_rect(canvas, Rect{center_x - 16, tip_y + 8, 32, 8}, color);
-    fill_rect(canvas, Rect{center_x - 24, tip_y + 16, 48, 8}, color);
-    fill_rect(canvas, Rect{center_x - 8, tip_y + 24, 16, 24}, color);
-    return;
-  }
-  if (direction == ArrowDown) {
-    const int stem_y = center_y - 24;
-    fill_rect(canvas, Rect{center_x - 8, stem_y, 16, 24}, color);
-    fill_rect(canvas, Rect{center_x - 24, stem_y + 24, 48, 8}, color);
-    fill_rect(canvas, Rect{center_x - 16, stem_y + 32, 32, 8}, color);
-    fill_rect(canvas, Rect{center_x - 8, stem_y + 40, 16, 8}, color);
-    return;
-  }
-
-  if (direction == ArrowLeft) {
-    fill_rect(canvas, Rect{center_x - 36, center_y - 8, 8, 16}, color);
-    fill_rect(canvas, Rect{center_x - 28, center_y - 16, 8, 32}, color);
-    fill_rect(canvas, Rect{center_x - 20, center_y - 24, 8, 48}, color);
-    fill_rect(canvas, Rect{center_x - 12, center_y - 8, 48, 16}, color);
-    return;
-  }
-  fill_rect(canvas, Rect{center_x + 28, center_y - 8, 8, 16}, color);
-  fill_rect(canvas, Rect{center_x + 20, center_y - 16, 8, 32}, color);
-  fill_rect(canvas, Rect{center_x + 12, center_y - 24, 8, 48}, color);
-  fill_rect(canvas, Rect{center_x - 36, center_y - 8, 48, 16}, color);
-}
-
 void draw_wifi_icon(Canvas *canvas, const Rect &button, uint16_t color) {
   const int center_x = button.x + button.width / 2;
   const int top = button.y + 5;
@@ -1923,298 +2096,287 @@ void draw_wifi_icon(Canvas *canvas, const Rect &button, uint16_t color) {
   fill_rect(canvas, Rect{center_x - 3, top + 36, 6, 6}, color);
 }
 
-void draw_cover_placeholder(Canvas *canvas, const Rect &bounds,
-                            const std::string &title, uint16_t accent) {
-  stroke_rect(canvas, bounds, 4, accent);
-  stroke_rect(canvas,
-              Rect{bounds.x + 14, bounds.y + 14, bounds.width - 28,
-                   bounds.height - 28},
-              2, xterm_pixel(kColorInactiveBorder));
-  draw_centered_text(canvas,
-                     Rect{bounds.x + 24, bounds.y + 58,
-                          bounds.width - 48, 150},
-                     "?", 8, accent);
-  const std::string shown_title =
-      fit_text_width(title, bounds.width - 48, kGameTitleScale);
-  draw_centered_text(canvas,
-                     Rect{bounds.x + 24, bounds.y + 260,
-                          bounds.width - 48, 54},
-                     shown_title, kGameTitleScale, xterm_pixel(kColorText));
-}
-
-void draw_seven_segment_digit(Canvas *canvas, int x, int y, char digit,
-                              uint16_t active, uint16_t inactive) {
-  static const unsigned int segments[10] = {
-      0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f};
-  const int width = 52;
-  const int height = 94;
-  const int thickness = 8;
-  const Rect bounds[7] = {
-      Rect{x + thickness, y, width - 2 * thickness, thickness},
-      Rect{x + width - thickness, y + thickness, thickness,
-           height / 2 - thickness},
-      Rect{x + width - thickness, y + height / 2, thickness,
-           height / 2 - thickness},
-      Rect{x + thickness, y + height - thickness, width - 2 * thickness,
-           thickness},
-      Rect{x, y + height / 2, thickness, height / 2 - thickness},
-      Rect{x, y + thickness, thickness, height / 2 - thickness},
-      Rect{x + thickness, y + height / 2 - thickness / 2,
-           width - 2 * thickness, thickness}};
-  const unsigned int mask = digit >= '0' && digit <= '9'
-                                ? segments[digit - '0']
-                                : 0;
-  for (int segment = 0; segment < 7; ++segment)
-    fill_rect(canvas, bounds[segment],
-              mask & (1u << segment) ? active : inactive);
-}
-
-void draw_coverless_title(Canvas *canvas, const Rect &bounds,
-                          const std::string &title) {
-  const std::string shown_title =
-      fit_text_width(title, bounds.width - 48, kGameTitleScale);
-  draw_centered_text(canvas,
-                     Rect{bounds.x + 24, bounds.y + 260,
-                          bounds.width - 48, 54},
-                     shown_title, kGameTitleScale, xterm_pixel(kColorText));
-}
-
-void draw_power_on_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
+void draw_outline_arrow(Canvas *canvas, const Rect &bounds,
+                        ArrowDirection direction, uint16_t color) {
   const int center_x = bounds.x + bounds.width / 2;
-  const int top = bounds.y + 38;
-  fill_rect(canvas, Rect{center_x - 10, top, 20, 92}, color);
-
-  fill_rect(canvas, Rect{center_x - 78, top + 46, 42, 18}, color);
-  fill_rect(canvas, Rect{center_x + 36, top + 46, 42, 18}, color);
-  fill_rect(canvas, Rect{center_x - 96, top + 64, 18, 24}, color);
-  fill_rect(canvas, Rect{center_x + 78, top + 64, 18, 24}, color);
-  fill_rect(canvas, Rect{center_x - 108, top + 88, 18, 58}, color);
-  fill_rect(canvas, Rect{center_x + 90, top + 88, 18, 58}, color);
-  fill_rect(canvas, Rect{center_x - 96, top + 146, 18, 24}, color);
-  fill_rect(canvas, Rect{center_x + 78, top + 146, 18, 24}, color);
-  fill_rect(canvas, Rect{center_x - 78, top + 170, 38, 18}, color);
-  fill_rect(canvas, Rect{center_x + 40, top + 170, 38, 18}, color);
-  fill_rect(canvas, Rect{center_x - 40, top + 188, 80, 18}, color);
+  const int center_y = bounds.y + bounds.height / 2;
+  const int mirror = direction == ArrowLeft ? -1 : 1;
+  const auto block = [&](int x, int y, int width, int height) {
+    const int left = mirror < 0 ? center_x - x - width : center_x + x;
+    fill_rect(canvas, Rect{left, center_y + y, width, height}, color);
+  };
+  block(28, -2, 4, 4);
+  block(24, -6, 4, 4);
+  block(20, -10, 4, 4);
+  block(16, -14, 4, 4);
+  block(12, -18, 4, 4);
+  block(8, -22, 4, 10);
+  block(-28, -12, 36, 4);
+  block(-28, -8, 4, 16);
+  block(-28, 8, 36, 4);
+  block(8, 12, 4, 10);
+  block(12, 14, 4, 4);
+  block(16, 10, 4, 4);
+  block(20, 6, 4, 4);
+  block(24, 2, 4, 4);
 }
 
-bool draw_deck_app_logo(Canvas *canvas, const Rect &bounds,
-                        const GameEntry &game) {
+void draw_settings_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
+  const int center_x = bounds.x + bounds.width / 2;
+  const int center_y = bounds.y + bounds.height / 2;
+  draw_pixel_panel(canvas, Rect{center_x - 14, center_y - 14, 28, 28},
+                   xterm_pixel(kColorBackground), color, 4);
+  fill_rect(canvas, Rect{center_x - 4, center_y - 4, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x - 4, center_y - 22, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x - 4, center_y + 14, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x - 22, center_y - 4, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x + 14, center_y - 4, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x - 18, center_y - 18, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x + 10, center_y - 18, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x - 18, center_y + 10, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x + 10, center_y + 10, 8, 8}, color);
+}
+
+void draw_close_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
+  const int center_x = bounds.x + bounds.width / 2;
+  const int center_y = bounds.y + bounds.height / 2;
+  for (int offset = -16; offset <= 16; offset += 4) {
+    fill_rect(canvas, Rect{center_x + offset, center_y + offset, 4, 4}, color);
+    fill_rect(canvas, Rect{center_x + offset, center_y - offset, 4, 4}, color);
+  }
+}
+
+void draw_speaker_icon(Canvas *canvas, const Rect &bounds, bool loud,
+                       uint16_t color) {
+  const int x = bounds.x + 24;
+  const int y = bounds.y + bounds.height / 2;
+  fill_rect(canvas, Rect{x, y - 12, 12, 24}, color);
+  fill_rect(canvas, Rect{x + 12, y - 20, 12, 40}, color);
+  fill_rect(canvas, Rect{x + 24, y - 28, 8, 56}, color);
+  fill_rect(canvas, Rect{x + 40, y - 16, 4, 32}, color);
+  fill_rect(canvas, Rect{x + 44, y - 12, 4, 24}, color);
+  if (loud) {
+    fill_rect(canvas, Rect{x + 56, y - 24, 4, 48}, color);
+    fill_rect(canvas, Rect{x + 60, y - 16, 4, 32}, color);
+  }
+}
+
+void draw_sun_icon(Canvas *canvas, const Rect &bounds, bool bright,
+                   uint16_t color) {
+  const int center_x = bounds.x + bounds.width / 2;
+  const int center_y = bounds.y + bounds.height / 2;
+  const int half = bright ? 16 : 12;
+  fill_pixel_cut_rect(canvas,
+                      Rect{center_x - half, center_y - half, half * 2,
+                           half * 2},
+                      4, color);
+  const int reach = bright ? 34 : 28;
+  fill_rect(canvas, Rect{center_x - 3, center_y - reach, 6, 10}, color);
+  fill_rect(canvas, Rect{center_x - 3, center_y + reach - 10, 6, 10}, color);
+  fill_rect(canvas, Rect{center_x - reach, center_y - 3, 10, 6}, color);
+  fill_rect(canvas, Rect{center_x + reach - 10, center_y - 3, 10, 6}, color);
+  if (bright) {
+    fill_rect(canvas, Rect{center_x - 25, center_y - 25, 7, 7}, color);
+    fill_rect(canvas, Rect{center_x + 18, center_y - 25, 7, 7}, color);
+    fill_rect(canvas, Rect{center_x - 25, center_y + 18, 7, 7}, color);
+    fill_rect(canvas, Rect{center_x + 18, center_y + 18, 7, 7}, color);
+  }
+}
+
+void draw_compact_power_icon(Canvas *canvas, const Rect &bounds,
+                             uint16_t color) {
+  const int center_x = bounds.x + bounds.width / 2;
+  const int center_y = bounds.y + bounds.height / 2;
+  fill_rect(canvas, Rect{center_x - 5, center_y - 58, 10, 54}, color);
+  fill_rect(canvas, Rect{center_x - 48, center_y - 34, 22, 8}, color);
+  fill_rect(canvas, Rect{center_x + 26, center_y - 34, 22, 8}, color);
+  fill_rect(canvas, Rect{center_x - 58, center_y - 26, 8, 54}, color);
+  fill_rect(canvas, Rect{center_x + 50, center_y - 26, 8, 54}, color);
+  fill_rect(canvas, Rect{center_x - 48, center_y + 28, 16, 8}, color);
+  fill_rect(canvas, Rect{center_x + 32, center_y + 28, 16, 8}, color);
+  fill_rect(canvas, Rect{center_x - 32, center_y + 36, 64, 8}, color);
+}
+
+bool draw_compact_deck_logo(Canvas *canvas, const Rect &bounds,
+                            const GameEntry &game) {
   if (game.system != "deck")
     return false;
-
   const uint16_t accent = game.color.pixel();
   if (game.id == "ten-seconds") {
-    const int origin_x = bounds.x + 74;
-    const int digit_y = bounds.y + 72;
-    const uint16_t inactive = xterm_pixel(kColorTextDark);
-    draw_seven_segment_digit(canvas, origin_x, digit_y, '1', accent,
-                             inactive);
-    draw_seven_segment_digit(canvas, origin_x + 64, digit_y, '0', accent,
-                             inactive);
-    fill_rect(canvas, Rect{origin_x + 132, digit_y + 82, 10, 10}, accent);
-    draw_seven_segment_digit(canvas, origin_x + 148, digit_y, '0', accent,
-                             inactive);
-    draw_seven_segment_digit(canvas, origin_x + 212, digit_y, '0', accent,
-                             inactive);
-    draw_coverless_title(canvas, bounds, game.title);
-    return true;
-  }
-
-  if (is_built_in_lua(game)) {
-    const Rect screen{bounds.x + 58, bounds.y + 46, bounds.width - 116, 184};
-    stroke_rect(canvas, screen, 6, accent);
-    draw_centered_text(canvas,
-                       Rect{screen.x + 12, screen.y + 28,
-                            screen.width - 24, screen.height - 56},
-                       "LUA>", 6, accent);
-    draw_coverless_title(canvas, bounds, game.title);
-    return true;
-  }
-
-  if (is_built_in_lisp(game)) {
-    draw_centered_text(canvas,
-                       Rect{bounds.x + 46, bounds.y + 48,
-                            bounds.width - 92, 170},
-                       "( )", 12, accent);
-    draw_centered_text(canvas,
-                       Rect{bounds.x + 102, bounds.y + 106,
-                            bounds.width - 204, 54},
-                       "LISP", 4, xterm_pixel(kColorText));
-    draw_coverless_title(canvas, bounds, game.title);
-    return true;
-  }
-
-  if (is_built_in_terminal(game)) {
-    const Rect screen{bounds.x + 76, bounds.y + 46, bounds.width - 152, 150};
-    stroke_rect(canvas, screen, 6, accent);
-    draw_centered_text(canvas,
-                       Rect{screen.x + 18, screen.y + 18,
-                            screen.width - 36, screen.height - 36},
-                       ">_", 8, xterm_pixel(kColorText));
+    draw_centered_text(canvas, bounds, "10.00", 5, accent);
+  } else if (is_built_in_lua(game)) {
+    draw_pixel_panel(canvas,
+                     Rect{bounds.x + 24, bounds.y + 46,
+                          bounds.width - 48, bounds.height - 92},
+                     xterm_pixel(kColorBackground), accent, 4);
+    draw_centered_text(canvas, bounds, "LUA>", 4, accent);
+  } else if (is_built_in_lisp(game)) {
+    draw_centered_text(canvas, bounds, "(LISP)", 4, accent);
+  } else if (is_built_in_terminal(game)) {
+    const Rect screen{bounds.x + 30, bounds.y + 44, bounds.width - 60, 96};
+    stroke_rect(canvas, screen, 4, accent);
+    draw_centered_text(canvas, screen, ">_", 5, xterm_pixel(kColorText));
     fill_rect(canvas,
-              Rect{bounds.x + bounds.width / 2 - 10, bounds.y + 202, 20, 26},
+              Rect{bounds.x + bounds.width / 2 - 6, screen.y + screen.height,
+                   12, 18},
               accent);
     fill_rect(canvas,
-              Rect{bounds.x + bounds.width / 2 - 70, bounds.y + 228, 140, 8},
+              Rect{bounds.x + bounds.width / 2 - 44,
+                   screen.y + screen.height + 18, 88, 4},
               accent);
-    draw_coverless_title(canvas, bounds, game.title);
-    return true;
+  } else if (is_built_in_reboot(game)) {
+    draw_compact_power_icon(canvas, bounds, accent);
+  } else {
+    return false;
   }
-
-  if (is_built_in_reboot(game)) {
-    draw_power_on_icon(canvas, bounds, accent);
-    draw_coverless_title(canvas, bounds, game.title);
-    return true;
-  }
-
-  return false;
+  return true;
 }
 
-void render_top_controls(unsigned int volume, const std::string &keymap,
-                         Canvas *canvas, MenuLayout *layout) {
-  const int gap = 0;
-  int x = 537;
-  layout->terminal_button = Rect{x, 10, 68, 52};
-  draw_terminal_icon(canvas, layout->terminal_button,
-                     xterm_pixel(kColorText));
-  x += layout->terminal_button.width + gap;
+void draw_compact_cartridge(Canvas *canvas, const Rect &bounds,
+                            uint16_t color) {
+  const Rect cartridge{bounds.x + 34, bounds.y + 28, bounds.width - 68,
+                       bounds.height - 56};
+  draw_pixel_panel(canvas, cartridge, xterm_pixel(kColorBackground), color, 4);
+  fill_rect(canvas,
+            Rect{cartridge.x + 24, cartridge.y + 26,
+                 cartridge.width - 48, 8},
+            color);
+  fill_rect(canvas,
+            Rect{cartridge.x + 24, cartridge.y + 46,
+                 cartridge.width - 48, 4},
+            color);
+  fill_rect(canvas,
+            Rect{cartridge.x + 20, cartridge.y + cartridge.height - 30,
+                 cartridge.width - 40, 10},
+            color);
+}
 
-  layout->keymap_button = Rect{x, 10, 52, 52};
-  draw_centered_text(canvas, layout->keymap_button,
-                     keymap == "cz" ? "CZ" : "EN", 2,
-                     xterm_pixel(kColorText));
-  x += layout->keymap_button.width + gap;
-
-  layout->wifi_button = Rect{x, 10, 52, 52};
-  draw_wifi_icon(canvas, layout->wifi_button, xterm_pixel(kColorText));
-  x += layout->wifi_button.width + gap;
-
-  layout->volume_down_button = Rect{x, 10, 52, 52};
-  draw_centered_text(canvas, layout->volume_down_button, "-", 4,
-                     xterm_pixel(kColorText));
-  x += layout->volume_down_button.width + gap;
-
-  layout->volume_display = Rect{x, 10, 110, 52};
-  const RgbColor volume_color =
-      xterm_color(volume == 0 ? kColorVolumeOff : kColorVolumeOn);
-  draw_centered_text(canvas, layout->volume_display, volume_label(volume), 2,
-                     volume_color.pixel());
-  x += layout->volume_display.width + gap;
-
-  layout->volume_up_button = Rect{x, 10, 52, 52};
-  draw_centered_text(canvas, layout->volume_up_button, "+", 4,
+void draw_game_card(Canvas *canvas, const Rect &card, const GameEntry &game,
+                    bool selected) {
+  const uint16_t fill = selected ? kInterfaceActive.pixel()
+                                 : xterm_pixel(kColorBackground);
+  draw_pixel_panel(canvas, card, fill, kInterfaceOrange.pixel());
+  const Rect art{card.x + 8, card.y + 8, card.width - 16, card.width - 16};
+  if (game.cover.available()) {
+    draw_cover_square(canvas, art, game.cover);
+  } else if (!draw_compact_deck_logo(canvas, art, game)) {
+    draw_compact_cartridge(canvas, art, game.color.pixel());
+  }
+  const Rect label{card.x + 8, card.y + card.width,
+                   card.width - 16, card.height - card.width - 8};
+  const std::string title =
+      fit_text_width(game.title, label.width - 12, kGameTitleScale);
+  draw_centered_text(canvas, label, title, kGameTitleScale,
                      xterm_pixel(kColorText));
 }
 
 void render_menu(const std::vector<GameEntry> &games,
-                 const std::string &active_system, unsigned int volume,
-                 const std::string &keymap, bool game_view,
-                 size_t game_position,
+                 const std::string &active_system, size_t game_position,
                  const std::string &status, Canvas *canvas,
                  MenuLayout *layout) {
   if (!canvas || !layout)
     return;
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
                  xterm_pixel(kColorBackground));
-  layout->terminal_button = Rect{0, 0, 0, 0};
-  layout->keymap_button = Rect{0, 0, 0, 0};
-  layout->wifi_button = Rect{0, 0, 0, 0};
-  layout->volume_down_button = Rect{0, 0, 0, 0};
-  layout->volume_display = Rect{0, 0, 0, 0};
-  layout->volume_up_button = Rect{0, 0, 0, 0};
-  if (game_view)
-    render_top_controls(volume, keymap, canvas, layout);
-
-  layout->game_view = game_view;
+  layout->settings_button = Rect{1212, 12, 56, 56};
+  layout->game_previous_button = Rect{156, 232, 80, 100};
+  layout->game_next_button = Rect{1044, 232, 80, 100};
   layout->systems.clear();
+  layout->system_buttons.clear();
+  layout->game_indices.clear();
+  layout->visible_game_indices.clear();
+  layout->game_buttons.clear();
+  layout->game_position_indicators.clear();
+  layout->shown_game_index = games.size();
+
+  draw_settings_icon(canvas, layout->settings_button,
+                     xterm_pixel(kColorInactiveText));
+
   for (size_t definition = 0;
        definition < sizeof(kSystemDefinitions) / sizeof(kSystemDefinitions[0]);
        ++definition) {
-    if (!has_system(games, kSystemDefinitions[definition].system))
-      continue;
-    layout->systems.push_back(kSystemDefinitions[definition].system);
+    if (has_system(games, kSystemDefinitions[definition].system))
+      layout->systems.push_back(kSystemDefinitions[definition].system);
+  }
+  const int tab_gap = 8;
+  const int tab_left = 56;
+  const int tab_width = layout->systems.empty()
+                            ? 0
+                            : (1168 - tab_gap *
+                                          (static_cast<int>(layout->systems.size()) - 1)) /
+                                  static_cast<int>(layout->systems.size());
+  for (size_t index = 0; index < layout->systems.size(); ++index) {
+    const Rect tab{tab_left + static_cast<int>(index) * (tab_width + tab_gap),
+                   76, tab_width, 52};
+    layout->system_buttons.push_back(tab);
+    const bool active = layout->systems[index] == active_system;
+    draw_pixel_panel(canvas, tab,
+                     active ? kInterfaceActive.pixel()
+                            : xterm_pixel(kColorBackground),
+                     kInterfaceOrange.pixel());
+    const std::string label = system_label(layout->systems[index]);
+    draw_centered_text(canvas, tab, label,
+                       fit_text_scale(label, tab.width - 16, 2, 1),
+                       xterm_pixel(kColorText));
   }
 
-  layout->game_indices.clear();
   for (size_t index = 0; index < games.size(); ++index) {
     if (games[index].system == active_system)
       layout->game_indices.push_back(index);
   }
-  layout->game_buttons.clear();
-  layout->game_position_indicators.clear();
-  layout->shown_game_index = games.size();
-  layout->system_up_button = Rect{0, 0, 0, 0};
-  layout->system_down_button = Rect{0, 0, 0, 0};
-  layout->game_previous_button = Rect{0, 0, 0, 0};
-  layout->game_next_button = Rect{0, 0, 0, 0};
-  layout->game_art = Rect{0, 0, 0, 0};
-  layout->game_placeholder = Rect{0, 0, 0, 0};
-
-  const RgbColor console_color = xterm_color(202);
-  if (!game_view) {
-    layout->system_button = Rect{290, 140, 700, 200};
-    layout->system_up_button = Rect{1002, 140, 120, 90};
-    layout->system_down_button = Rect{1002, 250, 120, 90};
-    draw_arrow_icon(canvas, layout->system_up_button, ArrowUp,
-                    console_color.pixel());
-    fill_rect(canvas, layout->system_button, console_color.pixel());
-    const std::string label = system_label(active_system);
-    draw_centered_text(canvas, layout->system_button, label,
-                       fit_text_scale(label, layout->system_button.width - 40,
-                                      6, 3),
-                       xterm_pixel(kColorBackground));
-    draw_arrow_icon(canvas, layout->system_down_button, ArrowDown,
-                    console_color.pixel());
-  } else if (!layout->game_indices.empty()) {
-    layout->system_button = Rect{357, 10, 180, 52};
-    const Rect system_label_bounds{layout->system_button.x,
-                                   layout->system_button.y + 8,
-                                   layout->system_button.width, 36};
-    fill_rect(canvas, system_label_bounds, console_color.pixel());
-    draw_centered_text(canvas, layout->system_button,
-                       system_label(active_system),
-                       fit_text_scale(system_label(active_system),
-                                      layout->system_button.width - 8, 2, 1),
-                       xterm_pixel(kColorBackground));
-
-    layout->game_previous_button = Rect{24, 188, 128, 150};
-    layout->game_next_button = Rect{1128, 188, 128, 150};
-    draw_arrow_icon(canvas, layout->game_previous_button, ArrowLeft,
-                    console_color.pixel());
-    draw_arrow_icon(canvas, layout->game_next_button, ArrowRight,
-                    console_color.pixel());
-
-    const size_t shown_position = game_position % layout->game_indices.size();
-    const size_t game_index = layout->game_indices[shown_position];
-    layout->shown_game_index = game_index;
-    const Rect game_button{174, 70, 932, 386};
-    layout->game_art = game_button;
-    layout->game_buttons.push_back(game_button);
-    if (games[game_index].cover.available()) {
-      draw_cover(canvas, layout->game_art, games[game_index].cover);
-    } else {
-      layout->game_placeholder = Rect{430, 88, 420, 350};
-      if (!draw_deck_app_logo(canvas, layout->game_placeholder,
-                              games[game_index])) {
-        draw_cover_placeholder(canvas, layout->game_placeholder,
-                               games[game_index].title,
-                               games[game_index].color.pixel());
-      }
+  if (!layout->game_indices.empty()) {
+    const size_t selected_position = game_position % layout->game_indices.size();
+    layout->shown_game_index = layout->game_indices[selected_position];
+    const size_t visible_count = std::min<size_t>(3, layout->game_indices.size());
+    size_t first_position = 0;
+    if (layout->game_indices.size() > visible_count) {
+      if (selected_position == 0)
+        first_position = 0;
+      else if (selected_position + 1 >= layout->game_indices.size())
+        first_position = layout->game_indices.size() - visible_count;
+      else
+        first_position = selected_position - 1;
     }
+    const int card_width = 216;
+    const int card_height = 264;
+    const int card_gap = 36;
+    const int row_width = static_cast<int>(visible_count) * card_width +
+                          static_cast<int>(visible_count - 1) * card_gap;
+    int card_x = (kLogicalWidth - row_width) / 2;
+    for (size_t visible = 0; visible < visible_count; ++visible) {
+      const size_t game_index =
+          layout->game_indices[first_position + visible];
+      const Rect card{card_x, 154, card_width, card_height};
+      layout->visible_game_indices.push_back(game_index);
+      layout->game_buttons.push_back(card);
+      draw_game_card(canvas, card, games[game_index],
+                     game_index == layout->shown_game_index);
+      card_x += card_width + card_gap;
+    }
+
+    if (layout->game_indices.size() > 1) {
+      draw_outline_arrow(canvas, layout->game_previous_button, ArrowLeft,
+                         xterm_pixel(kColorText));
+      draw_outline_arrow(canvas, layout->game_next_button, ArrowRight,
+                         xterm_pixel(kColorText));
+    } else {
+      layout->game_previous_button = Rect{0, 0, 0, 0};
+      layout->game_next_button = Rect{0, 0, 0, 0};
+    }
+
     const int indicator_width = 16;
     const int indicator_height = 8;
     const int indicator_gap = 8;
-    const int indicator_count =
-        static_cast<int>(layout->game_indices.size());
+    const int indicator_count = static_cast<int>(layout->game_indices.size());
     const int indicator_row_width =
         indicator_count * indicator_width +
         std::max(0, indicator_count - 1) * indicator_gap;
     int indicator_x = (kLogicalWidth - indicator_row_width) / 2;
     for (int indicator = 0; indicator < indicator_count; ++indicator) {
-      const Rect bounds{indicator_x, 464, indicator_width, indicator_height};
+      const Rect bounds{indicator_x, 438, indicator_width, indicator_height};
       layout->game_position_indicators.push_back(bounds);
       stroke_rect(canvas, bounds, 2,
-                  xterm_pixel(static_cast<size_t>(indicator) == shown_position
+                  xterm_pixel(static_cast<size_t>(indicator) == selected_position
                                   ? kColorFooter
                                   : kColorControlBorder));
       indicator_x += indicator_width + indicator_gap;
@@ -2222,10 +2384,100 @@ void render_menu(const std::vector<GameEntry> &games,
   }
 
   if (!status.empty()) {
-    fill_rect(canvas, Rect{0, 456, kLogicalWidth, 24},
-              xterm_pixel(kColorBackground));
     const int footer_scale = fit_text_scale(status, kLogicalWidth - 24, 2, 1);
-    draw_centered_text(canvas, Rect{12, 456, kLogicalWidth - 24, 24}, status,
+    draw_centered_text(canvas, Rect{12, 452, kLogicalWidth - 24, 24}, status,
+                       footer_scale, xterm_pixel(kColorFooter));
+  }
+}
+
+void draw_settings_control(Canvas *canvas, const Rect &bounds, bool selected) {
+  draw_pixel_panel(canvas, bounds,
+                   selected ? kInterfaceActive.pixel()
+                            : kInterfaceSurface.pixel(),
+                   selected ? kInterfaceOrange.pixel()
+                            : xterm_pixel(kColorControlBorder));
+}
+
+void render_settings(unsigned int volume, unsigned int brightness,
+                     const std::string &keymap, int selected,
+                     const std::string &status, Canvas *canvas,
+                     SettingsLayout *layout) {
+  if (!canvas || !layout)
+    return;
+  canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
+                 xterm_pixel(kColorBackground));
+  layout->close_button = Rect{1212, 12, 56, 56};
+  layout->wifi_button = Rect{926, 20, 262, 108};
+  layout->volume_down_button = Rect{108, 208, 104, 104};
+  layout->volume_up_button = Rect{228, 208, 104, 104};
+  layout->brightness_down_button = Rect{438, 208, 104, 104};
+  layout->brightness_up_button = Rect{558, 208, 104, 104};
+  layout->terminal_button = Rect{792, 208, 112, 104};
+  layout->keymap_button = Rect{1036, 208, 112, 104};
+
+  draw_close_icon(canvas, layout->close_button, xterm_pixel(kColorText));
+  draw_settings_control(canvas, layout->wifi_button,
+                        selected == SettingsTargetWifi);
+  draw_wifi_icon(canvas,
+                 Rect{layout->wifi_button.x + 12, layout->wifi_button.y + 24,
+                      54, 54},
+                 xterm_pixel(kColorText));
+  draw_text(canvas, layout->wifi_button.x + 78, layout->wifi_button.y + 28,
+            "WIFI", 3, xterm_pixel(kColorText));
+  draw_text(canvas, layout->wifi_button.x + 78, layout->wifi_button.y + 64,
+            "SETTINGS", 2, kInterfaceMuted.pixel());
+
+  draw_settings_control(canvas, layout->volume_down_button,
+                        selected == SettingsTargetVolumeDown);
+  draw_settings_control(canvas, layout->volume_up_button,
+                        selected == SettingsTargetVolumeUp);
+  draw_speaker_icon(canvas, layout->volume_down_button, false,
+                    xterm_pixel(kColorText));
+  draw_speaker_icon(canvas, layout->volume_up_button, true,
+                    xterm_pixel(kColorText));
+
+  draw_settings_control(canvas, layout->brightness_down_button,
+                        selected == SettingsTargetBrightnessDown);
+  draw_settings_control(canvas, layout->brightness_up_button,
+                        selected == SettingsTargetBrightnessUp);
+  draw_sun_icon(canvas, layout->brightness_down_button, false,
+                xterm_pixel(kColorText));
+  draw_sun_icon(canvas, layout->brightness_up_button, true,
+                xterm_pixel(kColorText));
+
+  draw_settings_control(canvas, layout->terminal_button,
+                        selected == SettingsTargetTerminal);
+  draw_terminal_icon(canvas, layout->terminal_button,
+                     xterm_pixel(kColorText));
+  draw_settings_control(canvas, layout->keymap_button,
+                        selected == SettingsTargetKeymap);
+  draw_centered_text(canvas, layout->keymap_button,
+                     keymap == "cz" ? "CZ" : "EN", 4,
+                     xterm_pixel(kColorText));
+
+  draw_centered_text(canvas, Rect{82, 328, 276, 34},
+                     volume == 0 ? "OFF" : std::to_string(volume), 3,
+                     xterm_pixel(kColorText));
+  draw_centered_text(canvas, Rect{82, 366, 276, 28}, "VOLUME", 2,
+                     kInterfaceMuted.pixel());
+  draw_centered_text(canvas, Rect{412, 328, 276, 34},
+                     std::to_string(brightness), 3,
+                     xterm_pixel(kColorText));
+  draw_centered_text(canvas, Rect{412, 366, 276, 28}, "BRIGHTNESS", 2,
+                     kInterfaceMuted.pixel());
+  draw_centered_text(canvas, Rect{750, 328, 196, 34}, "TERMINAL", 3,
+                     xterm_pixel(kColorText));
+  draw_centered_text(canvas, Rect{750, 366, 196, 28}, "SHELL", 2,
+                     kInterfaceMuted.pixel());
+  draw_centered_text(canvas, Rect{994, 328, 196, 34}, "KEYS", 3,
+                     xterm_pixel(kColorText));
+  draw_centered_text(canvas, Rect{994, 366, 196, 28},
+                     keymap == "cz" ? "CZECH" : "US ANSI", 2,
+                     kInterfaceMuted.pixel());
+
+  if (!status.empty()) {
+    const int footer_scale = fit_text_scale(status, kLogicalWidth - 24, 2, 1);
+    draw_centered_text(canvas, Rect{12, 440, kLogicalWidth - 24, 28}, status,
                        footer_scale, xterm_pixel(kColorFooter));
   }
 }
@@ -2730,9 +2982,11 @@ unsigned int menu_gamepad_key_to_button(unsigned short code) {
   case BTN_TRIGGER:
     return kMenuPadBack;
   case BTN_TOP2:
-    return kMenuPadVolumeDown;
+    return kMenuPadSystemPrevious;
   case BTN_PINKIE:
-    return kMenuPadVolumeUp;
+    return kMenuPadSystemNext;
+  case BTN_BASE:
+    return kMenuPadSettings;
   default:
     return 0;
   }
@@ -3024,33 +3278,29 @@ enum MenuGamepadCommand {
   MenuGamepadCommandNone,
   MenuGamepadCommandPrevious,
   MenuGamepadCommandNext,
+  MenuGamepadCommandSystemPrevious,
+  MenuGamepadCommandSystemNext,
   MenuGamepadCommandConfirm,
   MenuGamepadCommandBack,
-  MenuGamepadCommandVolumeDown,
-  MenuGamepadCommandVolumeUp
+  MenuGamepadCommandSettings
 };
 
 MenuGamepadCommand menu_gamepad_command(unsigned int pressed, bool wifi_view,
-                                        bool game_view) {
-  if ((wifi_view || game_view) && (pressed & kMenuPadBack))
+                                        bool settings_view) {
+  if ((wifi_view || settings_view) && (pressed & kMenuPadBack))
     return MenuGamepadCommandBack;
   if (wifi_view)
     return MenuGamepadCommandNone;
-  if (pressed & kMenuPadVolumeDown)
-    return MenuGamepadCommandVolumeDown;
-  if (pressed & kMenuPadVolumeUp)
-    return MenuGamepadCommandVolumeUp;
-  if (game_view) {
-    if (pressed & kMenuPadLeft)
-      return MenuGamepadCommandPrevious;
-    if (pressed & kMenuPadRight)
-      return MenuGamepadCommandNext;
-  } else {
-    if (pressed & kMenuPadUp)
-      return MenuGamepadCommandPrevious;
-    if (pressed & kMenuPadDown)
-      return MenuGamepadCommandNext;
-  }
+  if (pressed & kMenuPadSettings)
+    return MenuGamepadCommandSettings;
+  if (!settings_view && (pressed & kMenuPadSystemPrevious))
+    return MenuGamepadCommandSystemPrevious;
+  if (!settings_view && (pressed & kMenuPadSystemNext))
+    return MenuGamepadCommandSystemNext;
+  if (pressed & (kMenuPadLeft | kMenuPadUp))
+    return MenuGamepadCommandPrevious;
+  if (pressed & (kMenuPadRight | kMenuPadDown))
+    return MenuGamepadCommandNext;
   if (pressed & kMenuPadConfirm)
     return MenuGamepadCommandConfirm;
   return MenuGamepadCommandNone;
@@ -3428,33 +3678,44 @@ ChildResult run_reboot(const std::string &executable, TouchDevice *touch,
 }
 
 int target_at(const MenuLayout &layout, int x, int y) {
-  if (layout.volume_down_button.contains(x, y))
-    return MenuTargetVolumeDown;
-  if (layout.volume_display.contains(x, y))
-    return MenuTargetVolumeToggle;
-  if (layout.wifi_button.contains(x, y))
-    return MenuTargetWifi;
-  if (layout.terminal_button.contains(x, y))
-    return MenuTargetTerminal;
-  if (layout.volume_up_button.contains(x, y))
-    return MenuTargetVolumeUp;
-  if (layout.keymap_button.contains(x, y))
-    return MenuTargetKeymap;
-  if (layout.system_up_button.contains(x, y))
-    return MenuTargetSystemUp;
-  if (layout.system_button.contains(x, y))
-    return layout.game_view ? MenuTargetSystemBack : MenuTargetSystemOpen;
-  if (layout.system_down_button.contains(x, y))
-    return MenuTargetSystemDown;
+  if (layout.settings_button.contains(x, y))
+    return MenuTargetSettings;
   if (layout.game_previous_button.contains(x, y))
     return MenuTargetGamePrevious;
   if (layout.game_next_button.contains(x, y))
     return MenuTargetGameNext;
-  if (!layout.game_buttons.empty() &&
-      layout.game_buttons[0].contains(x, y) &&
-      layout.shown_game_index < static_cast<size_t>(INT_MAX))
-    return static_cast<int>(layout.shown_game_index);
+  for (size_t index = 0; index < layout.system_buttons.size(); ++index) {
+    if (layout.system_buttons[index].contains(x, y))
+      return MenuTargetSystemBase + static_cast<int>(index);
+  }
+  for (size_t index = 0; index < layout.game_buttons.size() &&
+                         index < layout.visible_game_indices.size();
+       ++index) {
+    if (layout.game_buttons[index].contains(x, y) &&
+        layout.visible_game_indices[index] < static_cast<size_t>(INT_MAX))
+      return static_cast<int>(layout.visible_game_indices[index]);
+  }
   return MenuTargetNone;
+}
+
+int settings_target_at(const SettingsLayout &layout, int x, int y) {
+  if (layout.close_button.contains(x, y))
+    return SettingsTargetClose;
+  if (layout.volume_down_button.contains(x, y))
+    return SettingsTargetVolumeDown;
+  if (layout.volume_up_button.contains(x, y))
+    return SettingsTargetVolumeUp;
+  if (layout.brightness_down_button.contains(x, y))
+    return SettingsTargetBrightnessDown;
+  if (layout.brightness_up_button.contains(x, y))
+    return SettingsTargetBrightnessUp;
+  if (layout.terminal_button.contains(x, y))
+    return SettingsTargetTerminal;
+  if (layout.keymap_button.contains(x, y))
+    return SettingsTargetKeymap;
+  if (layout.wifi_button.contains(x, y))
+    return SettingsTargetWifi;
+  return SettingsTargetNone;
 }
 
 std::string adjacent_system(const std::vector<std::string> &systems,
@@ -3479,14 +3740,23 @@ unsigned int volume_after_menu_target(int target, unsigned int volume,
       last_audible_volume == 0
           ? kVolumeStep
           : std::min(100U, last_audible_volume);
-  if (target == MenuTargetVolumeToggle)
-    return volume == 0 ? restore_volume : 0;
-  if (target == MenuTargetVolumeUp)
+  if (target == SettingsTargetVolumeUp)
     return volume == 0 ? restore_volume
                        : std::min(100U, volume + kVolumeStep);
-  if (target == MenuTargetVolumeDown)
+  if (target == SettingsTargetVolumeDown)
     return volume > kVolumeStep ? volume - kVolumeStep : 0;
   return volume;
+}
+
+unsigned int brightness_after_settings_target(int target,
+                                               unsigned int brightness) {
+  if (target == SettingsTargetBrightnessUp)
+    return std::min(100U, brightness + kBrightnessStep);
+  if (target == SettingsTargetBrightnessDown)
+    return brightness > kMinimumBrightness
+               ? std::max(kMinimumBrightness, brightness - kBrightnessStep)
+               : kMinimumBrightness;
+  return brightness;
 }
 
 enum WifiTarget {
@@ -3746,6 +4016,9 @@ struct Options {
   std::string manifest;
   std::string cover_directory;
   std::string volume_state;
+  std::string brightness;
+  std::string brightness_max;
+  std::string brightness_state;
   std::string keymap_state;
   std::string terminal;
   std::string wifi_helper;
@@ -3774,6 +4047,8 @@ void print_usage(const char *program) {
                "--deck-game PATH --manifest PATH "
                "--cover-directory PATH "
                "--volume-state PATH "
+               "--brightness PATH --brightness-max PATH "
+               "--brightness-state PATH "
                "--keymap-state PATH --terminal PATH --wifi-helper PATH\n  "
             << program << " --geometry-test\n";
 }
@@ -3796,6 +4071,9 @@ bool parse_options(int argc, char **argv, Options *options,
                argument == "--manifest" ||
                argument == "--cover-directory" ||
                argument == "--volume-state" ||
+               argument == "--brightness" ||
+               argument == "--brightness-max" ||
+               argument == "--brightness-state" ||
                argument == "--keymap-state" || argument == "--terminal" ||
                argument == "--wifi-helper") {
       if (++i >= argc) {
@@ -3820,6 +4098,12 @@ bool parse_options(int argc, char **argv, Options *options,
         destination = &options->cover_directory;
       else if (argument == "--volume-state")
         destination = &options->volume_state;
+      else if (argument == "--brightness")
+        destination = &options->brightness;
+      else if (argument == "--brightness-max")
+        destination = &options->brightness_max;
+      else if (argument == "--brightness-state")
+        destination = &options->brightness_state;
       else if (argument == "--keymap-state")
         destination = &options->keymap_state;
       else if (argument == "--terminal")
@@ -3853,12 +4137,15 @@ bool parse_options(int argc, char **argv, Options *options,
       options->zx_emulator.empty() || options->chip8_emulator.empty() ||
       options->deck_game.empty() ||
       options->manifest.empty() || options->cover_directory.empty() ||
-      options->volume_state.empty() || options->keymap_state.empty() ||
+      options->volume_state.empty() || options->brightness.empty() ||
+      options->brightness_max.empty() || options->brightness_state.empty() ||
+      options->keymap_state.empty() ||
       options->terminal.empty() || options->wifi_helper.empty()) {
     if (error)
       *error = "--nes-emulator, --gb-emulator, --zx-emulator, "
                "--chip8-emulator, --deck-game, --manifest, "
-               "--cover-directory, --volume-state, "
+               "--cover-directory, --volume-state, --brightness, "
+               "--brightness-max, --brightness-state, "
                "--keymap-state, --terminal, and --wifi-helper are required";
     return false;
   }
@@ -3913,6 +4200,15 @@ int application_main(const Options &options) {
       volume != 0 ? volume
                   : (default_volume != 0 ? default_volume : kVolumeStep);
 
+  unsigned int brightness_maximum = 0;
+  unsigned int brightness = 0;
+  if (!load_brightness(options.brightness, options.brightness_max,
+                       options.brightness_state, &brightness_maximum,
+                       &brightness, &error)) {
+    std::cerr << "deck-menu: " << error << std::endl;
+    return 1;
+  }
+
   std::string keymap;
   if (!load_keymap_state(options.keymap_state, &keymap, &error)) {
     std::cerr << "deck-menu: " << error << std::endl;
@@ -3942,18 +4238,27 @@ int application_main(const Options &options) {
 
   Canvas canvas;
   MenuLayout layout;
+  SettingsLayout settings_layout;
   WifiLayout wifi_layout;
   WifiState wifi_state;
   bool wifi_view = false;
-  bool game_view = false;
+  bool settings_view = false;
+  int settings_selection = SettingsTargetVolumeDown;
   size_t game_position = 0;
   std::string active_system = initial_system(games);
   std::string status;
-  const auto render_current_menu = [&]() {
-    render_menu(games, active_system, volume, keymap, game_view,
-                game_position, status, &canvas, &layout);
+  const auto render_current_screen = [&]() {
+    if (wifi_view) {
+      render_wifi(wifi_state, &canvas, &wifi_layout);
+    } else if (settings_view) {
+      render_settings(volume, brightness, keymap, settings_selection, status,
+                      &canvas, &settings_layout);
+    } else {
+      render_menu(games, active_system, game_position, status, &canvas,
+                  &layout);
+    }
   };
-  render_current_menu();
+  render_current_screen();
   if (!framebuffer.present(canvas, &error)) {
     std::cerr << "deck-menu: " << error << std::endl;
     return 1;
@@ -3973,13 +4278,11 @@ int application_main(const Options &options) {
     }
     if (touch.fd() < 0) {
       if (reconnect_touch(&touch, &reconnect_attempt, &last_touch_error)) {
-        if (wifi_view) {
+        if (wifi_view)
           wifi_state.status = "TOUCHSCREEN RECONNECTED";
-          render_wifi(wifi_state, &canvas, &wifi_layout);
-        } else {
+        else
           status = "TOUCHSCREEN RECONNECTED";
-          render_current_menu();
-        }
+        render_current_screen();
         framebuffer.present(canvas, NULL);
       }
     }
@@ -4017,7 +4320,7 @@ int application_main(const Options &options) {
       reboot_armed_until = 0;
       if (status == kRebootConfirmationText) {
         status.clear();
-        render_current_menu();
+        render_current_screen();
         framebuffer.present(canvas, NULL);
       }
     }
@@ -4038,11 +4341,10 @@ int application_main(const Options &options) {
       pressed_target = MenuTargetNone;
       if (wifi_view) {
         wifi_state.status = "WAITING FOR TOUCHSCREEN";
-        render_wifi(wifi_state, &canvas, &wifi_layout);
       } else {
         status = "WAITING FOR TOUCHSCREEN";
-        render_current_menu();
       }
+      render_current_screen();
       framebuffer.present(canvas, NULL);
     }
 
@@ -4088,7 +4390,7 @@ int application_main(const Options &options) {
         } else {
           reboot_armed_until = now + kRebootConfirmMs;
           status = kRebootConfirmationText;
-          render_current_menu();
+          render_current_screen();
           framebuffer.present(canvas, NULL);
         }
       } else {
@@ -4113,7 +4415,7 @@ int application_main(const Options &options) {
         status = volume == 0
                      ? "GAME VOLUME MUTED"
                      : "GAME VOLUME " + std::to_string(volume) + "%";
-        render_current_menu();
+        render_current_screen();
         framebuffer.present(canvas, NULL);
         if (volume == 0) {
           menu_sound_player.stop();
@@ -4123,20 +4425,84 @@ int application_main(const Options &options) {
                                       &sound_error)) {
             status = "VOLUME SAVED; CONFIRMATION TONE FAILED";
             std::cerr << "deck-menu: " << sound_error << std::endl;
-            render_current_menu();
+            render_current_screen();
             framebuffer.present(canvas, NULL);
           }
         }
       } else {
         status = "VOLUME STATE ERROR";
         std::cerr << "deck-menu: " << state_error << std::endl;
-        render_current_menu();
+        render_current_screen();
         framebuffer.present(canvas, NULL);
       }
     };
 
+    const auto apply_brightness_target = [&](int target) {
+      const unsigned int requested =
+          brightness_after_settings_target(target, brightness);
+      std::string state_error;
+      if (set_brightness_percent(options.brightness, options.brightness_state,
+                                 brightness_maximum, requested,
+                                 &state_error)) {
+        brightness = requested;
+        status = "BRIGHTNESS " + std::to_string(brightness) + "%";
+      } else {
+        status = "BRIGHTNESS ERROR - CHECK LOG";
+        std::cerr << "deck-menu: " << state_error << std::endl;
+      }
+      render_current_screen();
+      framebuffer.present(canvas, NULL);
+    };
+
+    const auto toggle_keymap = [&]() {
+      const std::string requested = keymap == "cz" ? "us" : "cz";
+      std::string state_error;
+      if (save_keymap_state(options.keymap_state, requested, &state_error)) {
+        keymap = requested;
+        status = keymap == "cz" ? "TERMINAL KEYS: CZECH"
+                                : "TERMINAL KEYS: US ANSI";
+      } else {
+        status = "KEYMAP STATE ERROR";
+        std::cerr << "deck-menu: " << state_error << std::endl;
+      }
+      render_current_screen();
+      framebuffer.present(canvas, NULL);
+    };
+
+    const auto activate_settings_target = [&](int target) {
+      settings_selection = target;
+      if (target == SettingsTargetClose) {
+        settings_view = false;
+        status.clear();
+        render_current_screen();
+        framebuffer.present(canvas, NULL);
+        play_menu_sound(MenuSoundCueBack);
+      } else if (target == SettingsTargetVolumeDown ||
+                 target == SettingsTargetVolumeUp) {
+        apply_volume_target(target);
+      } else if (target == SettingsTargetBrightnessDown ||
+                 target == SettingsTargetBrightnessUp) {
+        apply_brightness_target(target);
+        play_menu_sound(target == SettingsTargetBrightnessDown
+                            ? MenuSoundCuePrevious
+                            : MenuSoundCueNext);
+      } else if (target == SettingsTargetTerminal) {
+        terminal_mode = "shell";
+        play_menu_sound(MenuSoundCueConfirm);
+      } else if (target == SettingsTargetKeymap) {
+        toggle_keymap();
+        play_menu_sound(MenuSoundCueConfirm);
+      } else if (target == SettingsTargetWifi) {
+        wifi_view = true;
+        wifi_state.status.clear();
+        render_current_screen();
+        framebuffer.present(canvas, NULL);
+        play_menu_sound(MenuSoundCueConfirm);
+      }
+    };
+
     const MenuGamepadCommand controller_command =
-        menu_gamepad_command(controller_pressed, wifi_view, game_view);
+        menu_gamepad_command(controller_pressed, wifi_view, settings_view);
     if (controller_command != MenuGamepadCommandNone) {
       pressed_target = MenuTargetNone;
       reports.clear();
@@ -4146,41 +4512,63 @@ int application_main(const Options &options) {
       if (wifi_view) {
         wifi_view = false;
         status = "WIFI EDITOR CLOSED";
-      } else {
-        game_view = false;
+      } else if (settings_view) {
+        settings_view = false;
         status.clear();
       }
-      render_current_menu();
+      render_current_screen();
       framebuffer.present(canvas, NULL);
       play_menu_sound(MenuSoundCueBack);
-    } else if (controller_command == MenuGamepadCommandVolumeDown ||
-               controller_command == MenuGamepadCommandVolumeUp) {
+    } else if (controller_command == MenuGamepadCommandSettings) {
       cancel_reboot_confirmation();
-      apply_volume_target(controller_command == MenuGamepadCommandVolumeDown
-                              ? MenuTargetVolumeDown
-                              : MenuTargetVolumeUp);
+      settings_view = !settings_view;
+      if (settings_view)
+        settings_selection = SettingsTargetVolumeDown;
+      status.clear();
+      render_current_screen();
+      framebuffer.present(canvas, NULL);
+      play_menu_sound(settings_view ? MenuSoundCueConfirm : MenuSoundCueBack);
+    } else if (controller_command == MenuGamepadCommandSystemPrevious ||
+               controller_command == MenuGamepadCommandSystemNext) {
+      cancel_reboot_confirmation();
+      active_system = adjacent_system(
+          layout.systems, active_system,
+          controller_command == MenuGamepadCommandSystemPrevious ? -1 : 1);
+      game_position = 0;
+      status.clear();
+      render_current_screen();
+      framebuffer.present(canvas, NULL);
+      play_menu_sound(controller_command == MenuGamepadCommandSystemPrevious
+                          ? MenuSoundCuePrevious
+                          : MenuSoundCueNext);
     } else if (controller_command == MenuGamepadCommandPrevious ||
                controller_command == MenuGamepadCommandNext) {
       cancel_reboot_confirmation();
       bool moved = false;
-      if (game_view && !layout.game_indices.empty()) {
+      if (settings_view) {
         if (controller_command == MenuGamepadCommandPrevious) {
+          settings_selection =
+              settings_selection <= SettingsTargetVolumeDown
+                  ? SettingsTargetWifi
+                  : settings_selection - 1;
+        } else {
+          settings_selection =
+              settings_selection >= SettingsTargetWifi
+                  ? SettingsTargetVolumeDown
+                  : settings_selection + 1;
+        }
+        moved = true;
+      } else if (!layout.game_indices.empty()) {
+        if (controller_command == MenuGamepadCommandPrevious)
           game_position = game_position == 0
                               ? layout.game_indices.size() - 1
                               : game_position - 1;
-        } else {
+        else
           game_position = (game_position + 1) % layout.game_indices.size();
-        }
         moved = true;
-      } else if (!game_view) {
-        active_system = adjacent_system(
-            layout.systems, active_system,
-            controller_command == MenuGamepadCommandPrevious ? -1 : 1);
-        game_position = 0;
-        moved = !layout.systems.empty();
       }
       status.clear();
-      render_current_menu();
+      render_current_screen();
       framebuffer.present(canvas, NULL);
       if (moved) {
         play_menu_sound(controller_command == MenuGamepadCommandPrevious
@@ -4188,14 +4576,8 @@ int application_main(const Options &options) {
                             : MenuSoundCueNext);
       }
     } else if (controller_command == MenuGamepadCommandConfirm) {
-      if (!game_view) {
-        cancel_reboot_confirmation();
-        game_view = true;
-        game_position = 0;
-        status.clear();
-        render_current_menu();
-        framebuffer.present(canvas, NULL);
-        play_menu_sound(MenuSoundCueConfirm);
+      if (settings_view) {
+        activate_settings_target(settings_selection);
       } else if (layout.shown_game_index < games.size()) {
         if (!is_built_in_reboot(games[layout.shown_game_index]))
           cancel_reboot_confirmation();
@@ -4207,17 +4589,23 @@ int application_main(const Options &options) {
     for (size_t i = 0; i < reports.size(); ++i) {
       const TouchReport &report = reports[i];
       if (report.pressed) {
-        pressed_target = wifi_view
-                             ? wifi_target_at(wifi_layout, report.x, report.y)
-                             : target_at(layout, report.x, report.y);
+        pressed_target =
+            wifi_view
+                ? wifi_target_at(wifi_layout, report.x, report.y)
+                : (settings_view
+                       ? settings_target_at(settings_layout, report.x, report.y)
+                       : target_at(layout, report.x, report.y));
       }
       if (!report.released)
         continue;
       const int released_target =
-          wifi_view ? wifi_target_at(wifi_layout, report.x, report.y)
-                    : target_at(layout, report.x, report.y);
+          wifi_view
+              ? wifi_target_at(wifi_layout, report.x, report.y)
+              : (settings_view
+                     ? settings_target_at(settings_layout, report.x, report.y)
+                     : target_at(layout, report.x, report.y));
       const bool released_reboot =
-          !wifi_view && released_target >= 0 &&
+          !wifi_view && !settings_view && released_target >= 0 &&
           released_target < static_cast<int>(games.size()) &&
           is_built_in_reboot(games[released_target]);
       if (reboot_armed_until > 0 && !released_reboot) {
@@ -4228,7 +4616,7 @@ int application_main(const Options &options) {
         if (released_target == WifiTargetBack) {
           wifi_view = false;
           status = "WIFI EDITOR CLOSED";
-          render_current_menu();
+          render_current_screen();
           play_menu_sound(MenuSoundCueBack);
         } else if (released_target == WifiTargetSave) {
           std::string wifi_error;
@@ -4240,45 +4628,43 @@ int application_main(const Options &options) {
           } else {
             wifi_state.status = wifi_error;
           }
-          render_wifi(wifi_state, &canvas, &wifi_layout);
+          render_current_screen();
           play_menu_sound(MenuSoundCueConfirm);
         } else if (apply_wifi_target(released_target, wifi_layout,
                                      &wifi_state)) {
-          render_wifi(wifi_state, &canvas, &wifi_layout);
+          render_current_screen();
           play_menu_sound(MenuSoundCueNext);
         }
         framebuffer.present(canvas, NULL);
-      } else if (!wifi_view && pressed_target == released_target &&
-                 (pressed_target == MenuTargetSystemUp ||
-                  pressed_target == MenuTargetSystemDown)) {
-        active_system = adjacent_system(
-            layout.systems, active_system,
-            pressed_target == MenuTargetSystemUp ? -1 : 1);
-        game_position = 0;
+      } else if (settings_view && pressed_target == released_target &&
+                 pressed_target != SettingsTargetNone) {
+        activate_settings_target(released_target);
+      } else if (!wifi_view && !settings_view &&
+                 pressed_target == MenuTargetSettings &&
+                 released_target == MenuTargetSettings) {
+        settings_view = true;
+        settings_selection = SettingsTargetVolumeDown;
         status.clear();
-        render_current_menu();
-        framebuffer.present(canvas, NULL);
-        play_menu_sound(pressed_target == MenuTargetSystemUp
-                            ? MenuSoundCuePrevious
-                            : MenuSoundCueNext);
-      } else if (!wifi_view &&
-                 pressed_target == MenuTargetSystemOpen &&
-                 released_target == MenuTargetSystemOpen) {
-        game_view = true;
-        game_position = 0;
-        status.clear();
-        render_current_menu();
+        render_current_screen();
         framebuffer.present(canvas, NULL);
         play_menu_sound(MenuSoundCueConfirm);
-      } else if (!wifi_view &&
-                 pressed_target == MenuTargetSystemBack &&
-                 released_target == MenuTargetSystemBack) {
-        game_view = false;
+      } else if (!wifi_view && !settings_view &&
+                 pressed_target == released_target &&
+                 pressed_target >= MenuTargetSystemBase &&
+                 pressed_target - MenuTargetSystemBase <
+                     static_cast<int>(layout.systems.size())) {
+        const std::string requested_system = layout.systems[static_cast<size_t>(
+            pressed_target - MenuTargetSystemBase)];
+        const bool moved = requested_system != active_system;
+        active_system = requested_system;
+        game_position = 0;
         status.clear();
-        render_current_menu();
+        render_current_screen();
         framebuffer.present(canvas, NULL);
-        play_menu_sound(MenuSoundCueBack);
-      } else if (!wifi_view && pressed_target == released_target &&
+        if (moved)
+          play_menu_sound(MenuSoundCueNext);
+      } else if (!wifi_view && !settings_view &&
+                 pressed_target == released_target &&
                  (pressed_target == MenuTargetGamePrevious ||
                   pressed_target == MenuTargetGameNext) &&
                  !layout.game_indices.empty()) {
@@ -4290,46 +4676,12 @@ int application_main(const Options &options) {
           game_position = (game_position + 1) % layout.game_indices.size();
         }
         status.clear();
-        render_current_menu();
+        render_current_screen();
         framebuffer.present(canvas, NULL);
         play_menu_sound(pressed_target == MenuTargetGamePrevious
                             ? MenuSoundCuePrevious
                             : MenuSoundCueNext);
-      } else if (!wifi_view &&
-                 (pressed_target == MenuTargetVolumeDown ||
-                  pressed_target == MenuTargetVolumeUp ||
-                  pressed_target == MenuTargetVolumeToggle) &&
-                 pressed_target == released_target) {
-        apply_volume_target(pressed_target);
-        pressed_target = MenuTargetNone;
-        break;
-      } else if (!wifi_view && pressed_target == MenuTargetWifi &&
-                 released_target == MenuTargetWifi) {
-        wifi_view = true;
-        wifi_state.status.clear();
-        render_wifi(wifi_state, &canvas, &wifi_layout);
-        framebuffer.present(canvas, NULL);
-        play_menu_sound(MenuSoundCueConfirm);
-      } else if (!wifi_view && pressed_target == MenuTargetTerminal &&
-                 released_target == MenuTargetTerminal) {
-        terminal_mode = "shell";
-        play_menu_sound(MenuSoundCueConfirm);
-      } else if (!wifi_view && pressed_target == MenuTargetKeymap &&
-                 released_target == MenuTargetKeymap) {
-        const std::string requested = keymap == "cz" ? "us" : "cz";
-        std::string state_error;
-        if (save_keymap_state(options.keymap_state, requested, &state_error)) {
-          keymap = requested;
-          status = keymap == "cz" ? "TERMINAL KEYS: CZECH"
-                                  : "TERMINAL KEYS: US ANSI";
-        } else {
-          status = "KEYMAP STATE ERROR";
-          std::cerr << "deck-menu: " << state_error << std::endl;
-        }
-        render_current_menu();
-        framebuffer.present(canvas, NULL);
-        play_menu_sound(MenuSoundCueConfirm);
-      } else if (!wifi_view && pressed_target >= 0 &&
+      } else if (!wifi_view && !settings_view && pressed_target >= 0 &&
                  pressed_target == released_target &&
                  pressed_target < static_cast<int>(games.size())) {
         request_game(pressed_target);
@@ -4347,7 +4699,7 @@ int application_main(const Options &options) {
                  : (reboot_requested
                         ? "REBOOTING"
                         : "STARTING " + games[selected_game].title);
-    render_current_menu();
+    render_current_screen();
     framebuffer.present(canvas, NULL);
 
     // Close dashboard readers so the launched program gets a fresh controller
@@ -4427,7 +4779,7 @@ int application_main(const Options &options) {
                           ? "REBOOT STOPPED"
                           : games[selected_game].title + " STOPPED");
     }
-    render_current_menu();
+    render_current_screen();
     if (!framebuffer.present(canvas, &error)) {
       std::cerr << "deck-menu: " << error << std::endl;
       return 1;

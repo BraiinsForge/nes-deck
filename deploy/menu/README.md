@@ -36,10 +36,13 @@ The launcher also expects:
 
 The launcher exports the exact trailing-slash runtime path
 `ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/`. It initializes persistent volume at
-`/mnt/data/nes-deck/state/menu-volume.state` to 42 and terminal layout at
-`/mnt/data/nes-deck/state/terminal-keymap.state` to `us`. A legacy exact
-`on`/`off` sound state migrates to 42/0. The generated manifest and persistent
-control state stay under `/mnt/data/nes-deck/state`. A bounded
+`/mnt/data/nes-deck/state/menu-volume.state` to 42, adopts the current display
+backlight in `/mnt/data/nes-deck/state/menu-brightness.state`, and initializes
+terminal layout at `/mnt/data/nes-deck/state/terminal-keymap.state` to `us`.
+Brightness is persisted in 10-point steps from 10 through 100 so the dashboard
+cannot turn the panel fully black. A legacy exact `on`/`off` sound state
+migrates to 42/0. The generated manifest and persistent control state stay
+under `/mnt/data/nes-deck/state`. A bounded
 persistent launcher log is kept at `/mnt/data/nes-deck/log/deck-menu.log`.
 The native menu appends child start, exit-status, and signal details there;
 launcher milestones are also sent to logd.
@@ -53,25 +56,27 @@ prefers Libretro box art, then falls back to a title screen and finally a
 gameplay snapshot when a system's box-art set is incomplete. Cached images,
 source URLs, system indexes, and confirmed misses are reused on later boots.
 
-At runtime, use Up/Down on the orange console selector, then tap it to open the
-active console's carousel. Either THEGamepad controller provides the same
-navigation: Up/Down switches consoles, A opens one, Left/Right selects a game,
-A launches it, B returns to the console selector, and L/R changes volume in
-5-point steps. Successful controller and touchscreen navigation plays a short
-directional, enter, or back chiptune while volume is audible. An isolated
-sound worker keeps input responsive, and input arriving during a cue is
-discarded. Each game
-retains its original catalog index for launch routing. Descriptions and license
-labels
-stay out of the launcher; redistribution and license details remain in
-`FOSS_GAMES.md` and the installed license files. The top-right minus and plus
-buttons and controller shoulders atomically persist volume in 5-point steps.
-The green volume display is also a button: tapping it mutes, turns it red, and
-labels it `VOL OFF`. Tapping the display or plus while muted restores the last
-audible level, or the configured default if the launcher started muted. Every
-nonzero adjustment plays a short confirmation chime. The selected volume is
-passed to every emulator. A continuous two-second hold anywhere on the
-touchscreen
+At runtime, every populated console is a top tab and the carousel shows at most
+three games. Tap a tab or use a THEGamepad controller's L/R shoulders to switch
+consoles. Left/Right moves the selected game, A launches it, and the hollow
+marker row preserves the complete game count. Successful controller and
+touchscreen navigation plays a short directional, enter, or back chiptune while
+volume is audible. An isolated sound worker keeps input responsive, and input
+arriving during a cue is discarded. Each game retains its original catalog
+index for launch routing. Descriptions and license labels stay out of the
+launcher; redistribution and license details remain in `FOSS_GAMES.md` and the
+installed license files.
+
+The top-right gear or controller Select opens settings. D-pad directions move
+among volume down/up, brightness down/up, terminal, keymap, and Wi-Fi; A
+activates the selected control and B or the cross closes the screen. Volume is
+atomically persisted in 5-point steps from 0 through 100. Plus while muted
+restores the last audible level, or the configured default if the launcher
+started muted. Every nonzero adjustment plays a short confirmation chime. The
+selected volume is passed to every emulator. Brightness updates
+`/sys/class/backlight/display-bl/brightness` and persists in safe 10-point steps
+without changing any network state. A continuous two-second hold anywhere on
+the touchscreen
 terminates the emulator child and redraws the menu. Touch does not supply
 controller input; a keyboard or mapped controller is still needed to press
 Start and play.
@@ -80,8 +85,9 @@ The Deck-native **10 SECONDS** game owns touch while it runs and has its own
 BACK action. Physical A on either controller also starts and stops it. Short
 start and result chiptunes follow the dashboard volume.
 
-The computer icon launches `/mnt/data/nes-deck/terminal/retro-terminal`. The
-adjacent keymap action toggles between US ANSI and Czech QWERTZ. The terminal
+The settings computer icon and DECK terminal entry launch
+`/mnt/data/nes-deck/terminal/retro-terminal`. The adjacent keymap action toggles
+between US ANSI and Czech QWERTZ. The terminal
 launcher applies that map for fbterm and restores US when its child exits or
 the menu terminates it. The DECK carousel also routes exact `lua` and `lisp`
 modes to Lua 5.5.0 and ECL 26.5.5. They start in private persistent working

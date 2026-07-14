@@ -147,25 +147,28 @@ ssh root@<deck-ip> '
 '
 ```
 
-Use the orange console selector to choose **NES**, **GAME BOY**, **GAME BOY
-COLOR**, **ZX SPECTRUM**, **CHIP-8**, or **DECK**. Tap its Up/Down arrows, or
-use either controller's D-pad, to switch consoles. Tap the console or press A
-to open its game carousel. Left/Right selects a game, A launches it, and B
-returns to the console selector. The DECK carousel includes Lua and Common
-Lisp REPLs alongside the timer, shell terminal, and reboot action. Both REPLs
-use fbterm and keep user files under `/mnt/data/langs/lua` and
-`/mnt/data/langs/lisp` respectively.
-Successful controller or touchscreen navigation plays a brief chiptune while
-volume is audible. The touchscreen
-arrows and game art remain fully usable without a controller. The **- / VOL /
-+** control and controller L/R buttons change the next game's PCM volume in
-5-point steps from 0 through 100. Tap the green volume display to mute it; the
-display turns red and reads **VOL OFF**. Tap that display or **+** to restore
-the last audible level, or the configured default if the launcher started
-muted. Each nonzero adjustment plays a short two-note confirmation at the
-selected level. The value is saved under `/mnt/data` and survives reboot. While
-a game is running, hold anywhere on the touchscreen for two seconds to return
-to the menu. Touch does not emulate a game controller. Both Retro Games
+The main screen keeps **NES**, **GAME BOY**, **GAME BOY COLOR**, **ZX
+SPECTRUM**, **CHIP-8**, and **DECK** tabs visible above a carousel of up to
+three games. Tap a tab, or use either controller's L/R shoulders, to switch
+consoles. Left/Right selects a game, and A or a tap on any visible card launches
+it. The hollow rectangles below the carousel show the complete game count and
+current position even when only three cards fit on screen. The DECK carousel
+includes Lua and Common Lisp REPLs alongside the timer, shell terminal, and
+reboot action. Both REPLs use fbterm and keep user files under
+`/mnt/data/langs/lua` and `/mnt/data/langs/lisp` respectively.
+
+Tap the pixel gear or press Select to open settings. Its large controls adjust
+volume and display brightness, open the terminal, toggle US ANSI/Czech terminal
+keys, and open the Wi-Fi editor. D-pad directions move the controller selection,
+A activates it, and B or the top-right cross closes settings or returns from
+the Wi-Fi keyboard. Volume moves in 5-point steps from mute through 100;
+brightness moves in 10-point steps from a safe minimum of 10 through 100. Both
+values are saved under `/mnt/data` and survive reboot. Raising volume from mute
+restores the last audible level. Successful controller or touchscreen
+navigation plays a brief chiptune while volume is audible, and each nonzero
+volume adjustment plays a short two-note confirmation at the selected level.
+While a game is running, hold anywhere on the touchscreen for two seconds to
+return to the menu. Touch does not emulate a game controller. Both Retro Games
 THEGamepad USB controllers (`1c59:0026`) navigate the dashboard, then retain
 stable Player 1 and Player 2 ordering inside games. The keyboard remains a
 Player 1 fallback. Space Racer uses both controllers simultaneously.
@@ -178,10 +181,11 @@ earlier InfoNES frontend on first load. The GB/GBC frontend does the same with
 battery-backed storage do not create cartridge-save sidecars. ZX Spectrum TAP
 images are read-only tape media and do not create automatic save sidecars.
 
-The computer icon opens a real framebuffer shell with a 16-pixel safe area for
-the display's rounded corners. **KEYS US** and **KEYS CZ** select the terminal
-layout; the launcher applies it only for that terminal session and restores US
-ANSI afterward. Type `exit` or use the same two-second touch hold to return.
+The settings computer icon and the DECK terminal entry open a real framebuffer
+shell with a 16-pixel safe area for the display's rounded corners. **EN** and
+**CZ** select the terminal layout; the launcher applies it only for that
+terminal session and restores US ANSI afterward. Type `exit` or use the same
+two-second touch hold to return.
 The Deck carousel also includes a red power-on icon for rebooting the device.
 Its first tap or A press arms the action for four seconds; select it again
 during that window to reboot. Any other action or an expired window cancels
