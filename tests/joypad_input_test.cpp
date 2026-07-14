@@ -8,9 +8,13 @@ static void test_keyboard_mapping(void) {
   assert(keycode_to_pad(0x6c) == PAD_DOWN);
   assert(keycode_to_pad(0x69) == PAD_LEFT);
   assert(keycode_to_pad(0x6a) == PAD_RIGHT);
+  assert(keycode_to_pad(0x39) == PAD_A);
   assert(keycode_to_pad(0x2c) == PAD_A);
+  assert(keycode_to_pad(0x2a) == PAD_B);
+  assert(keycode_to_pad(0x36) == PAD_B);
   assert(keycode_to_pad(0x2d) == PAD_B);
-  assert(keycode_to_pad(0x39) == PAD_SELECT);
+  assert(keycode_to_pad(0x1d) == PAD_SELECT);
+  assert(keycode_to_pad(0x61) == PAD_SELECT);
   assert(keycode_to_pad(0x1c) == PAD_START);
 }
 

@@ -145,15 +145,15 @@ except Space Racer maps one controller to each ship. ZX Spectrum assigns
 Kempston to Player 1 and Sinclair 2 to Player 2; A/X fires, Back opens the
 Spectrum keyboard, L is Enter, and R is Space.
 
-A keyboard remains a Player 1 fallback for NES:
+A keyboard remains a Player 1 fallback for the emulators:
 
-| NES control | Keyboard |
+| Console control | Keyboard |
 | --- | --- |
 | D-pad | Arrow keys or WASD |
-| A | Z or J |
-| B | X or K |
+| A | Space; Z or J also work |
+| B | Shift; X or K also work |
 | Start | Enter |
-| Select | Space or Shift |
+| Select | Control |
 
 ## ROMs and save games
 

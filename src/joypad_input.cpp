@@ -115,14 +115,16 @@ static unsigned int keycode_to_pad(unsigned char keycode) {
   case 0x1f: return PAD_DOWN;  // S
   case 0x1e: return PAD_LEFT;  // A
   case 0x20: return PAD_RIGHT; // D
+  case 0x39: return PAD_A;     // Space
   case 0x2c: return PAD_A;     // Z
   case 0x24: return PAD_A;     // J
+  case 0x2a: return PAD_B;     // Left Shift
+  case 0x36: return PAD_B;     // Right Shift
   case 0x2d: return PAD_B;     // X
   case 0x25: return PAD_B;     // K
   case 0x1c: return PAD_START; // Enter
-  case 0x39: return PAD_SELECT; // Space
-  case 0x2a: return PAD_SELECT; // Left Shift
-  case 0x36: return PAD_SELECT; // Right Shift
+  case 0x1d: return PAD_SELECT; // Left Control
+  case 0x61: return PAD_SELECT; // Right Control
   default: return 0;
   }
 }
@@ -679,8 +681,8 @@ extern "C" int InitJoypadInput(void) {
   printf("InfoNES: %zu THEGamepad controller(s) ready\n", gamepad_count);
   printf("InfoNES: THEGamepad D-pad=move, A/X=primary, B/Y=secondary, "
          "L/R=shoulders, Back=Select, Start=Start\n");
-  printf("InfoNES: Keyboard Arrows/WASD=move, Z/J=A, X/K=B, "
-         "Space=Select, Enter=Start\n");
+  printf("InfoNES: Keyboard Arrows/WASD=move, Space=A, Shift=B, "
+         "Control=Select, Enter=Start\n");
 
   input_running = 1;
   if (pthread_create(&input_thread, NULL, input_thread_func, NULL) != 0) {
