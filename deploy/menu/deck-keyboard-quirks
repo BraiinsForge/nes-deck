@@ -1,0 +1,48 @@
+#!/bin/sh
+
+# The Mechboards Corne exposes a redundant composite HID interface that makes
+# the Deck's DWC2 USB host reset the whole device and stall the adjacent
+# gamepad. Keep the primary boot-keyboard interface and detach only interface
+# 02, which contains the duplicate keyboard, mouse, and media controls.
+
+set -u
+
+USB_DEVICES=${RETRO_DECK_USB_DEVICES:-/sys/bus/usb/devices}
+USB_DRIVERS=${RETRO_DECK_USB_DRIVERS:-/sys/bus/usb/drivers}
+
+for device in "$USB_DEVICES"/*; do
+	[ -d "$device" ] || continue
+	[ -r "$device/idVendor" ] || continue
+	[ -r "$device/idProduct" ] || continue
+	[ -r "$device/manufacturer" ] || continue
+	[ -r "$device/product" ] || continue
+
+	vendor=$(cat "$device/idVendor" 2>/dev/null) || continue
+	product_id=$(cat "$device/idProduct" 2>/dev/null) || continue
+	manufacturer=$(cat "$device/manufacturer" 2>/dev/null) || continue
+	product=$(cat "$device/product" 2>/dev/null) || continue
+	[ "$vendor" = 4653 ] || continue
+	[ "$product_id" = 0001 ] || continue
+	[ "$manufacturer" = Mechboards ] || continue
+	[ "$product" = Corne ] || continue
+
+	for interface in "$device":*; do
+		[ -d "$interface" ] || continue
+		[ -r "$interface/bInterfaceNumber" ] || continue
+		interface_number=$(cat "$interface/bInterfaceNumber" 2>/dev/null) || continue
+		[ "$interface_number" = 02 ] || continue
+		[ -e "$interface/driver" ] || continue
+		driver=$(basename "$(readlink -f "$interface/driver" 2>/dev/null)") || continue
+		[ "$driver" = usbhid ] || continue
+
+		interface_name=${interface##*/}
+		if printf '%s' "$interface_name" > "$USB_DRIVERS/usbhid/unbind" 2>/dev/null; then
+			logger -t nes-deck-menu \
+				"detached redundant Corne HID interface $interface_name" \
+				2>/dev/null || :
+		elif [ -e "$interface/driver" ]; then
+			echo "deck-keyboard-quirks: cannot detach $interface_name" >&2
+			exit 1
+		fi
+	done
+done

@@ -44,6 +44,7 @@ PYTHON=$BASE/langs/python
 SCHEME=$BASE/langs/chibi/chibi-scheme
 CHIBI_MODULE_PATH=$BASE/langs/chibi/lib
 WIFI_HELPER=/usr/sbin/deck-wifi-profile-add
+KEYBOARD_QUIRKS=/usr/sbin/deck-keyboard-quirks
 COMPILER=$MENU_DIR/compile-catalog.lisp
 ECL=$BASE/ecl/bin/ecl.bin
 ECLDIR=$BASE/ecl/lib/ecl/
@@ -99,6 +100,10 @@ write_state() {
 }
 
 rotate_log
+
+if [ -x "$KEYBOARD_QUIRKS" ] && ! "$KEYBOARD_QUIRKS"; then
+	log_message "warning: Corne keyboard workaround failed"
+fi
 
 # Linux console blanking remains active even while a framebuffer process owns
 # the visible pixels. Disable its ten-minute timer and wake scanout on every

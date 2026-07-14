@@ -100,6 +100,11 @@ cp deploy/ecl "$payload/usr/bin/ecl"
 cp ops/deck-wifi/deck-wifi-profile-add \
   "$payload/usr/sbin/deck-wifi-profile-add"
 cp deploy/menu/nes-deck.init "$payload/etc/init.d/nes-deck"
+mkdir -p "$payload/etc/hotplug.d/usb"
+cp deploy/menu/nes-deck-keyboard.hotplug \
+  "$payload/etc/hotplug.d/usb/90-nes-deck-keyboard"
+cp deploy/menu/deck-keyboard-quirks \
+  "$payload/usr/sbin/deck-keyboard-quirks"
 cp deploy/uploader/nes-deck-uploader.init \
   "$payload/etc/init.d/nes-deck-uploader"
 
@@ -139,7 +144,9 @@ find "$payload/nes-deck" -type f \( \
   -name 'ecl.bin' \) -exec chmod 0700 {} +
 chmod 0700 "$payload/nes-deck/uploader/rom-uploader"
 chmod 0700 "$payload/usr/bin/ecl" \
+  "$payload/usr/sbin/deck-keyboard-quirks" \
   "$payload/usr/sbin/deck-wifi-profile-add" \
+  "$payload/etc/hotplug.d/usb/90-nes-deck-keyboard" \
   "$payload/etc/init.d/nes-deck" \
   "$payload/etc/init.d/nes-deck-uploader"
 
@@ -209,6 +216,14 @@ for executable in \
     exit 1
   }
 done
+[ -x "$stage/usr/sbin/deck-keyboard-quirks" ] || {
+  echo "Staged keyboard quirk helper is missing" >&2
+  exit 1
+}
+[ -x "$stage/etc/hotplug.d/usb/90-nes-deck-keyboard" ] || {
+  echo "Staged keyboard hotplug hook is missing" >&2
+  exit 1
+}
 [ -r "$stage/nes-deck/langs/chibi/lib/init-7.scm" ] || {
   echo "Staged Chibi module library is incomplete" >&2
   exit 1

@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# USB hotplug may run before usbhid finishes binding every interface. Give the
+# driver a moment, then apply the narrowly scoped Corne workaround.
+
+[ "${ACTION:-}" = add ] || exit 0
+sleep 1
+/usr/sbin/deck-keyboard-quirks >/dev/null 2>&1 || \
+	logger -t nes-deck-menu "warning: Corne keyboard workaround failed" \
+		2>/dev/null || :

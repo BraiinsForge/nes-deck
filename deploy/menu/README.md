@@ -14,6 +14,8 @@ Copy these files to the Deck without changing their basenames:
 | `games.tsv` | `/mnt/data/nes-deck/menu/games.tsv` |
 | `compile-catalog.lisp` | `/mnt/data/nes-deck/menu/compile-catalog.lisp` |
 | `deck-menu-launcher` | `/mnt/data/nes-deck/menu/deck-menu-launcher` |
+| `deck-keyboard-quirks` | `/usr/sbin/deck-keyboard-quirks` |
+| `nes-deck-keyboard.hotplug` | `/etc/hotplug.d/usb/90-nes-deck-keyboard` |
 | `nes-deck.init` | `/etc/init.d/nes-deck` |
 
 The separate uploader bundle installs `nes-deck-uploader.init` as
@@ -86,6 +88,10 @@ USB keyboards are discovered and hot-plugged through evdev. Arrows move the
 selection, Enter activates it, Escape goes back, Tab moves to the next console,
 and Shift-Tab moves to the previous console. The dashboard exclusively grabs
 each keyboard while visible, then releases it before a managed child starts.
+The Mechboards Corne's redundant composite HID interface is detached by a
+device-specific hotplug quirk; its primary boot-keyboard interface remains
+active. This prevents repeated DWC2 USB resets from stalling both keyboard and
+gamepad input on the shared host controller.
 
 The top-right gear or controller Select opens settings. D-pad directions move
 among volume down/up, brightness down/up, terminal, keymap, and Wi-Fi; A
