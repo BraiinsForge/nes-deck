@@ -1,8 +1,8 @@
 # Deck menu deployment bundle
 
 This directory contains the catalog and boot plumbing for the persistent
-touchscreen menu.  It does not contain ROMs, emulators, ECL, or the native
-`deck-menu` binary.
+touchscreen menu. It does not contain ROMs, emulators, language runtimes, or
+the native `deck-menu` binary.
 
 ## Installed layout
 
@@ -24,15 +24,20 @@ The launcher also expects:
 - `/mnt/data/nes-deck/zx-deck`
 - `/mnt/data/nes-deck/chip8-deck`
 - `/mnt/data/nes-deck/ten-seconds-deck`
+- `/mnt/data/nes-deck/chiptune-deck`
 - `/mnt/data/nes-deck/ecl/bin/ecl.bin` (ECL 26.5.5)
 - `/mnt/data/nes-deck/ecl/lib/ecl/` (the ECL runtime directory)
 - `/mnt/data/nes-deck/langs/lua` (Lua 5.5.0)
+- `/mnt/data/nes-deck/langs/python` (MicroPython 1.25)
+- `/mnt/data/nes-deck/langs/chibi/chibi-scheme` (Chibi Scheme 0.11)
+- `/mnt/data/nes-deck/langs/chibi/lib/` (Chibi Scheme module library)
 - `/mnt/data/nes-deck/terminal/retro-terminal`
 - `/mnt/data/nes-deck/terminal/{fbterm,loadkeys,keymaps/}`
 - `/usr/sbin/deck-wifi-profile-add`
 - `/mnt/data/roms/{nes,gb,gbc,zx,chip8}/` and the ROM paths listed in
   `games.sexp`
-- `/mnt/data/langs/{lua,lisp}/` for persistent REPL files
+- `/mnt/data/langs/{lua,lisp,python,scheme}/` for persistent REPL files
+- `/mnt/data/chiptunes/` for user and tracked music files
 
 The launcher exports the exact trailing-slash runtime path
 `ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/`. It initializes persistent volume at
@@ -90,14 +95,22 @@ The settings computer icon and DECK terminal entry launch
 the fixed `/bin/ash` login shell. The adjacent keymap action toggles between US
 ANSI and Czech QWERTZ. The terminal launcher applies that map for fbterm and
 restores US when its child exits or the menu terminates it. The DECK carousel
-also routes exact `lua` and `lisp` modes to Lua 5.5.0 and ECL 26.5.5. They start
-in private persistent working directories at `/mnt/data/langs/lua` and
-`/mnt/data/langs/lisp`; no catalog or user text is evaluated as a command. The
-Deck carousel adds a built-in red
-power-on entry for `/sbin/reboot`; two selections within four seconds are
-required, and any other action cancels the armed request. The WIFI button opens the on-screen
-keyboard and passes credentials to
-`deck-wifi-profile-add` over stdin, never argv. The helper only writes a
+also routes exact `lua`, `lisp`, `python`, and `scheme` modes to Lua 5.5.0,
+ECL 26.5.5, MicroPython 1.25, and Chibi Scheme 0.11. They start in private
+persistent working directories below `/mnt/data/langs`; no catalog or user
+text is evaluated as a command.
+
+The built-in CHIPTUNES entry runs the native player against
+`/mnt/data/chiptunes`. It supports the GME console-music formats plus 44.1 kHz
+mono or stereo Ogg Vorbis. Its top-left arrow is a direct back target, side
+arrows move between files, the center control pauses, and the track controls
+select subsongs. Files are read with a 16 MiB limit, directory recursion is
+bounded, and symbolic links are not followed.
+
+The Deck carousel adds a built-in red power-on entry for `/sbin/reboot`; two
+selections within four seconds are required, and any other action cancels the
+armed request. The WIFI button opens the on-screen keyboard and passes
+credentials to `deck-wifi-profile-add` over stdin, never argv. The helper only writes a
 root-only profile; it does not scan, reload, roam, or alter the active network.
 Saving an existing SSID commits the canonical replacement first and then
 removes duplicate plain/hex profile names.

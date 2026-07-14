@@ -1,275 +1,180 @@
-# Retro Deck for Braiins Forge Deck
+# Retro Deck
 
-Play NES, Game Boy, Game Boy Color, ZX Spectrum, CHIP-8, and Deck-native games
-on a Braiins Forge Deck with a full-screen touch launcher. This project
-combines Deck-native
-[FCEUmm](https://github.com/libretro/libretro-fceumm),
-[Gambatte](https://github.com/libretro/gambatte-libretro), and
-[Fuse](https://github.com/libretro/fuse-libretro), plus the
-[c-octo](https://github.com/JohnEarnest/c-octo) frontend with a persistent
-game catalog, a Wi-Fi profile editor, and an integrated framebuffer terminal.
+Retro Deck turns a Braiins Forge Deck into a persistent touch-first game and
+program launcher. It boots directly into a native framebuffer dashboard with
+NES, Game Boy, Game Boy Color, ZX Spectrum, CHIP-8, utilities, language REPLs,
+and a chiptune player. Two Retro Games THEGamepad controllers work as stable
+Player 1 and Player 2 devices.
 
-## What You Need
+## Deploy to a Deck
 
-- **Braiins Forge Deck**
-- **USB-C PD Power Adapter**
-- **USB-C Hub with PD Support**
-- **USB Keyboard or another mapped input for gameplay**
-- **ROM files** (`.nes`, `.gb`, `.gbc`, `.tap`, or `.ch8`)
+You need:
 
-The touchscreen operates the launcher. NES controls still use the keyboard
-bindings below.
+- a Braiins Forge Deck reachable as `root` over SSH
+- a mounted `/mnt/data` partition on the Deck
+- a Linux development machine with Nix flakes, SSH, SCP, tar, and gzip
+- this private repository, including the owner-supplied `roms/` library
+- stable power during activation
 
-## Quick Start
+Clone the repository and run the deployment script with the Deck's address:
 
-### 1. Download Pre-compiled Binary
-
-Download the latest release zip from the [releases page](https://github.com/BraiinsForge/deck-infones/releases/latest).
-
-### 2. Access Your Deck via SSH
-
-```bash
-ssh root@<deck-ip>  # Use the admin password you set during setup
+```sh
+git clone git@github.com:BraiinsForge/nes-deck.git
+cd nes-deck
+./ops/deploy.sh root@10.0.0.10
 ```
 
-### 3. Stop the Deck Application
+The first build downloads the pinned ARM toolchain and can take several
+minutes. The script builds every static runtime, verifies the staged payload,
+uploads it below `/mnt/data`, briefly stops the dashboard, activates the new
+files, and waits for `deck-menu` to be ready. If activation fails after the
+menu is stopped, it attempts to restart the service before exiting.
 
-```bash
-service bmc stop
+The deployment script does not edit, reload, or disconnect Wi-Fi. It merges
+the tracked ROMs and CC0 chiptunes into persistent storage without deleting
+additional files, save games, or user programs already on the Deck.
+
+Verify the result:
+
+```sh
+ssh root@10.0.0.10 '/etc/init.d/nes-deck status; \
+  tail -n 40 /mnt/data/nes-deck/log/deck-menu.log'
 ```
 
-### 4. Copy Files to Your Deck
+To update an existing Deck, pull the repository and run the same deploy
+command again.
 
-```bash
-unzip deck-infones.zip
-scp nes-deck root@<deck-ip>:/tmp/
-scp your-game.nes root@<deck-ip>:/tmp/
-```
+If Nix is not installed, follow the
+[official installation instructions](https://nixos.org/download/). Detailed
+build and test commands are in [BUILD.md](BUILD.md).
 
-### 5. Run the Emulator
+## Included systems and programs
 
-```bash
-ssh root@<deck-ip>
-chmod +x /tmp/nes-deck
-/tmp/nes-deck /tmp/your-game.nes
-```
+| Dashboard section | Runtime | Persistent content |
+| --- | --- | --- |
+| NES | FCEUmm | `/mnt/data/roms/nes` |
+| Game Boy | Gambatte | `/mnt/data/roms/gb` |
+| Game Boy Color | Gambatte | `/mnt/data/roms/gbc` |
+| ZX Spectrum | Fuse | `/mnt/data/roms/zx` |
+| CHIP-8 | c-octo | `/mnt/data/roms/chip8` |
+| Deck | Native programs and REPLs | `/mnt/data/langs`, `/mnt/data/chiptunes` |
 
-The Deck port opens the active console keyboard itself. It also continues
-without a keyboard, which is important for unattended boot.
+The Deck section contains:
 
-## Touch launcher on boot
+- 10 Seconds, a native touch and controller timing game
+- a `/bin/ash` framebuffer terminal with US ANSI and Czech QWERTZ layouts
+- Lua 5.5, ECL Common Lisp 26.5.5, MicroPython 1.25, and Chibi Scheme 0.11
+- a native GME and Ogg Vorbis chiptune player
+- a guarded reboot action
 
-Deck firmware with a `/mnt/data` partition should keep the emulators, language
-runtimes, and ROMs there instead of filling the small OpenWrt overlay. Build
-the ARM payloads and fetch the checksum-pinned homebrew set first:
+REPL files persist under `/mnt/data/langs/{lua,lisp,python,scheme}`. The music
+player scans `/mnt/data/chiptunes` for `ay`, `gbs`, `gym`, `hes`, `kss`, `nsf`,
+`nsfe`, `ogg`, `sap`, `spc`, `vgm`, and `vgz` files. Ogg files must be 44.1 kHz
+mono or stereo. Three CC0 tracks are included with provenance and checksums in
+[chiptunes/README.md](chiptunes/README.md).
 
-```bash
-nix build .#nes-deck -o result-nes-deck
-nix build .#gb-deck -o result-gb-deck
-nix build .#zx-deck -o result-zx-deck
-nix build .#chip8-deck -o result-chip8-deck
-nix build .#ten-seconds-deck -o result-ten-seconds
-nix build .#deck-menu -o result-menu
-nix build .#fbterm-deck -o result-fbterm
-nix build .#lua-deck -o result-lua
-nix build -f nix/ecl-arm-static.nix -o result-ecl
-./ops/deck-menu/fetch-foss-games.sh foss-games
-```
+## Using the dashboard
 
-The exact file map and catalog contract are documented in
-[`deploy/menu/README.md`](deploy/menu/README.md). The installed service runs
-`deck-menu` at S99, after `/mnt/data` is mounted:
+Tap a system tab or use either controller's shoulder buttons to change
+sections. Tap a visible card, or select it with Left/Right and press A, to
+launch it. The small hollow rectangles show the selected position and total
+number of entries.
 
-```bash
-ssh root@<deck-ip> 'mkdir -p /mnt/data/nes-deck/menu \
-  /mnt/data/nes-deck/ecl /mnt/data/nes-deck/games /mnt/data/nes-deck/langs \
-  /mnt/data/nes-deck/licenses /mnt/data/nes-deck/terminal/fonts \
-  /mnt/data/nes-deck/terminal/keymaps /mnt/data/roms/nes \
-  /mnt/data/roms/gb /mnt/data/roms/gbc /mnt/data/roms/zx \
-  /mnt/data/roms/chip8 /mnt/data/langs/lua /mnt/data/langs/lisp'
-scp result-nes-deck/bin/nes-deck root@<deck-ip>:/mnt/data/nes-deck/nes-deck
-scp result-gb-deck/bin/gb-deck root@<deck-ip>:/mnt/data/nes-deck/gb-deck
-scp result-zx-deck/bin/zx-deck root@<deck-ip>:/mnt/data/nes-deck/zx-deck
-scp result-chip8-deck/bin/chip8-deck root@<deck-ip>:/mnt/data/nes-deck/chip8-deck
-scp result-ten-seconds/bin/ten-seconds-deck \
-  root@<deck-ip>:/mnt/data/nes-deck/ten-seconds-deck
-scp result-menu/bin/deck-menu root@<deck-ip>:/mnt/data/nes-deck/menu/deck-menu
-scp result-fbterm/bin/fbterm root@<deck-ip>:/mnt/data/nes-deck/terminal/fbterm
-scp result-fbterm/bin/loadkeys root@<deck-ip>:/mnt/data/nes-deck/terminal/loadkeys
-scp result-fbterm/share/retro-deck/fonts/DejaVuSansMono.ttf \
-  root@<deck-ip>:/mnt/data/nes-deck/terminal/fonts/
-scp result-fbterm/share/retro-deck/keymaps/* \
-  root@<deck-ip>:/mnt/data/nes-deck/terminal/keymaps/
-scp -r result-fbterm/share/licenses/fbterm-deck \
-  root@<deck-ip>:/mnt/data/nes-deck/licenses/
-scp -r result-nes-deck/share/licenses/nes-deck \
-  root@<deck-ip>:/mnt/data/nes-deck/licenses/
-scp -r result-gb-deck/share/licenses/gb-deck \
-  root@<deck-ip>:/mnt/data/nes-deck/licenses/
-scp -r result-zx-deck/share/licenses/zx-deck \
-  root@<deck-ip>:/mnt/data/nes-deck/licenses/
-scp -r result-chip8-deck/share/licenses/chip8-deck \
-  root@<deck-ip>:/mnt/data/nes-deck/licenses/
-scp -r result-ecl/bin result-ecl/lib root@<deck-ip>:/mnt/data/nes-deck/ecl/
-scp result-lua/bin/lua root@<deck-ip>:/mnt/data/nes-deck/langs/lua
-scp -r result-lua/share/licenses/lua-deck \
-  root@<deck-ip>:/mnt/data/nes-deck/licenses/
-scp deploy/ecl root@<deck-ip>:/usr/bin/ecl
-scp -r foss-games/roms/* root@<deck-ip>:/mnt/data/roms/
-scp -r roms/nes roms/gb roms/gbc roms/zx root@<deck-ip>:/mnt/data/roms/
-scp foss-games/licenses/* root@<deck-ip>:/mnt/data/nes-deck/licenses/
-scp deploy/menu/{games.sexp,games.tsv,compile-catalog.lisp,deck-menu-launcher} \
-  root@<deck-ip>:/mnt/data/nes-deck/menu/
-scp deploy/terminal/{retro-terminal,fonts.conf} \
-  root@<deck-ip>:/mnt/data/nes-deck/terminal/
-scp ops/deck-wifi/deck-wifi-profile-add \
-  root@<deck-ip>:/usr/sbin/deck-wifi-profile-add
-scp deploy/menu/nes-deck.init root@<deck-ip>:/etc/init.d/nes-deck.new
+The gear or controller Select opens settings. Its controls adjust volume and
+backlight brightness, open the terminal, switch terminal keymaps, and add a
+Wi-Fi profile. Volume and brightness persist below `/mnt/data`; volume uses
+five-point steps and brightness is bounded from 10 through 100. Menu actions
+play short cues while sound is enabled. The service disables console blanking
+at boot and whenever a child program returns.
 
-ssh root@<deck-ip> '
-  chmod 755 /mnt/data/nes-deck/nes-deck /mnt/data/nes-deck/gb-deck \
-    /mnt/data/nes-deck/zx-deck /mnt/data/nes-deck/chip8-deck \
-    /mnt/data/nes-deck/ten-seconds-deck \
-    /mnt/data/nes-deck/menu/deck-menu \
-    /mnt/data/nes-deck/menu/deck-menu-launcher \
-    /mnt/data/nes-deck/terminal/fbterm \
-    /mnt/data/nes-deck/terminal/loadkeys \
-    /mnt/data/nes-deck/terminal/retro-terminal \
-    /mnt/data/nes-deck/langs/lua \
-    /usr/sbin/deck-wifi-profile-add /usr/bin/ecl \
-    /etc/init.d/nes-deck.new
-  /etc/init.d/bmc stop
-  /etc/init.d/bmc disable
-  /etc/init.d/nes-deck stop
-  mv /etc/init.d/nes-deck.new /etc/init.d/nes-deck
-  /etc/init.d/nes-deck enable
-  /etc/init.d/nes-deck start
-'
-```
+Hold the touchscreen for two seconds to leave a running emulator or terminal.
+Touch does not emulate game controls. In the chiptune player, the top-left
+arrow returns immediately, the side arrows change files, the center button
+pauses, and `TRK -`/`TRK +` change subsongs. Controller Left/Right changes
+files, Up/Down changes subsongs, A pauses, and B returns.
 
-The main screen keeps **NES**, **GAME BOY**, **GAME BOY COLOR**, **ZX
-SPECTRUM**, **CHIP-8**, and **DECK** tabs visible above a carousel of up to
-three games. Tap a tab, or use either controller's L/R shoulders, to switch
-consoles. Left/Right selects a game, and A or a tap on any visible card launches
-it. The hollow rectangles below the carousel show the complete game count and
-current position even when only three cards fit on screen. The DECK carousel
-includes Lua and Common Lisp REPLs alongside the timer, shell terminal, and
-reboot action. Both REPLs use fbterm and keep user files under
-`/mnt/data/langs/lua` and `/mnt/data/langs/lisp` respectively.
+The Wi-Fi editor only writes a root-only profile. Saving does not scan, roam,
+reload networking, or disturb the current connection. The profile becomes
+eligible when the current connection is later lost. Network and recovery
+findings for the audited unit are in [DECK_NOTES.md](DECK_NOTES.md).
 
-Tap the pixel gear or press Select to open settings. Its large controls adjust
-volume and display brightness, open the terminal, toggle US ANSI/Czech terminal
-keys, and open the Wi-Fi editor. D-pad directions move the controller selection,
-A activates it, and B or the top-right cross closes settings or returns from
-the Wi-Fi keyboard. Volume moves in 5-point steps from mute through 100;
-brightness moves in 10-point steps from a safe minimum of 10 through 100. Both
-values are saved under `/mnt/data` and survive reboot. Raising volume from mute
-restores the last audible level. Successful controller or touchscreen
-navigation plays a brief chiptune while volume is audible, and each nonzero
-volume adjustment plays a short two-note confirmation at the selected level.
-While a game is running, hold anywhere on the touchscreen for two seconds to
-return to the menu. Touch does not emulate a game controller. Both Retro Games
-THEGamepad USB controllers (`1c59:0026`) navigate the dashboard, then retain
-stable Player 1 and Player 2 ordering inside games. The keyboard remains a
-Player 1 fallback. Space Racer uses both controllers simultaneously.
+## Controllers
 
-Battery-backed cartridge saves are automatic and live beside their ROMs.
-The FCEUmm frontend writes changed NES SRAM atomically to `.srm` every ten
-seconds and on exit. It migrates the compressed `.srm` format written by the
-earlier InfoNES frontend on first load. The GB/GBC frontend does the same with
-`.sav` and, when the cartridge has a real-time clock, `.rtc`. Games without
-battery-backed storage do not create cartridge-save sidecars. ZX Spectrum TAP
-images are read-only tape media and do not create automatic save sidecars.
+Identical THEGamepad devices are ordered by physical USB path. Keep them in the
+same hub ports to preserve Player 1 and Player 2 across boots.
 
-The settings computer icon and the DECK terminal entry open a real framebuffer
-shell with a 16-pixel safe area for the display's rounded corners. The settings
-subtitle identifies its `/bin/ash` login shell. **EN** and **CZ** select the
-terminal layout; the launcher applies it only for that terminal session and
-restores US ANSI afterward. Type `exit` or use the same two-second touch hold
-to return.
-The Deck carousel also includes a red power-on icon for rebooting the device.
-Its first tap or A press arms the action for four seconds; select it again
-during that window to reboot. Any other action or an expired window cancels
-the request.
-The **WIFI** action opens a touch keyboard for adding PSK
-networks. Saving a network never reloads or changes the live Wi-Fi connection.
-A profile with the same SSID atomically replaces all older records and becomes
-eligible only after the current connection is lost.
-
-The **10 SECONDS** Deck game starts and stops on touch press.
-
-The launcher is supervised by procd and shuts the emulator down cleanly so
-keyboard mode is restored. The bounded persistent log includes catalog,
-terminal, and emulator exit details. Check it with:
-
-```bash
-ssh root@<deck-ip> '/etc/init.d/nes-deck status; \
-  tail -n 100 /mnt/data/nes-deck/log/deck-menu.log'
-```
-
-The freely licensed catalog contains Outlaw and the simultaneous two-player
-Space Racer for CHIP-8. Their pinned sources, license, and hashes are in
-[FOSS_GAMES.md](FOSS_GAMES.md). The private repository retains the
-owner-supplied library under `roms/<system>/` so another clone can reproduce
-the working collection. A ROM or single-ROM ZIP at the repository root is an
-unprocessed intake file; the filing contract is documented in
-[`roms/README.md`](roms/README.md).
-
-Hardware, framebuffer, audio, Wi-Fi, WireGuard, and recovery findings for the
-audited Deck are kept in [DECK_NOTES.md](DECK_NOTES.md). Wi-Fi selector source
-is under [`ops/deck-wifi`](ops/deck-wifi/); it contains no credentials.
-
-## Controls
-
-Identical gamepads are assigned by physical USB path, so keeping them in the
-same hub ports keeps Player 1 and Player 2 stable. The emulator logs the path
-assigned to each player at launch. For a temporary hardware audit, launch with
-`INFONES_INPUT_DIAGNOSTICS=1` to log only controller state changes.
-
-| NES Button | THEGamepad |
-|------------|------------|
-| D-Pad | D-Pad |
+| Console control | THEGamepad |
+| --- | --- |
+| D-pad | D-pad |
 | A | A or X |
 | B | B or Y |
 | Start | Start |
 | Select | Back |
 
-GB/GBC use the same D-pad, A, B, Start, and Select mapping. CHIP-8's standard
-Octo profile maps the D-pad to WASD, A/X to E, B/Y to Q, Back to Z, and Start
-to V. Space Racer instead maps controller 1 up/down to the left ship and
-controller 2 up/down to the right ship.
+NES, GB, and GBC use this mapping. CHIP-8 uses the standard Octo mapping,
+except Space Racer maps one controller to each ship. ZX Spectrum assigns
+Kempston to Player 1 and Sinclair 2 to Player 2; A/X fires, Back opens the
+Spectrum keyboard, L is Enter, and R is Space.
 
-ZX Spectrum uses Kempston joystick for Player 1 and Sinclair 2 for Player 2.
-A/X fires, B/Y also supplies joystick Up, Back opens Fuse's on-screen Spectrum
-keyboard, L is Enter, R is Space, and Start also sends Enter. TAP files load
-automatically at accelerated tape speed. The medium-border 288x216 frame is
-shown at exact 2x scale inside the rounded-screen safe area.
+A keyboard remains a Player 1 fallback for NES:
 
-Keyboard controls apply to Player 1:
-
-| NES Button | Keyboard |
-|------------|----------|
-| D-Pad | Arrow keys or WASD |
+| NES control | Keyboard |
+| --- | --- |
+| D-pad | Arrow keys or WASD |
 | A | Z or J |
 | B | X or K |
 | Start | Enter |
 | Select | Space or Shift |
 
-## Getting more ROMs
+## ROMs and save games
 
-To extend the private library, you can:
+`roms/<system>/` is the canonical tracked library. Supported intake folders
+are `nes`, `gb`, `gbc`, and `chip8`. A ROM or single-ROM ZIP at the
+repository root is unprocessed intake and must be validated, renamed, filed,
+checksummed, and added to the catalog before deployment. See
+[roms/README.md](roms/README.md) for the exact intake contract.
 
-1. Run the pinned FOSS game fetcher described above
-2. Use other clearly licensed homebrew ROMs for a supported system
-3. Dump your own cartridges
+The repository contains owner-supplied console ROMs and only freely licensed
+CHIP-8 ROMs. The reproducible CHIP-8 sources, licenses, and hashes are recorded
+in [FOSS_GAMES.md](FOSS_GAMES.md).
 
-## Building from Source
+NES battery SRAM is saved atomically beside the ROM as `.srm`. GB and GBC use
+`.sav` plus `.rtc` when the cartridge has a real-time clock. The deploy script
+preserves these sidecars. ZX TAP files are read-only tape media and do not
+produce automatic save files.
 
-Build instructions for every emulator are in [BUILD.md](BUILD.md).
+## Operations and recovery
+
+Check the service and its bounded persistent log:
+
+```sh
+ssh root@10.0.0.10 '/etc/init.d/nes-deck status; \
+  tail -n 100 /mnt/data/nes-deck/log/deck-menu.log'
+```
+
+Restart the dashboard without rebooting the Deck:
+
+```sh
+ssh root@10.0.0.10 '/etc/init.d/nes-deck restart'
+```
+
+If the display remains black, inspect the log before changing files or network
+configuration. The launcher refuses to start before `/mnt/data` is mounted,
+validates the framebuffer geometry, hides the console cursor, and unblanks the
+panel on every return.
+
+## Development
+
+- [BUILD.md](BUILD.md) covers reproducible builds, tests, screenshots, and
+  platform details.
+- [deploy/menu/README.md](deploy/menu/README.md) defines the installed layout
+  and strict catalog schema.
+- [DECK_NOTES.md](DECK_NOTES.md) records verified hardware, audio, display,
+  Wi-Fi, WireGuard, and recovery behavior.
+- [AGENTS.md](AGENTS.md) defines repository-specific ROM handling.
 
 ## License
 
-FCEUmm and Gambatte are GPL-2.0-only. The vendored fbterm source is GPL-2; its
-license and exact upstream provenance are retained under
-[`terminal/`](terminal/). c-octo is MIT licensed. Exact upstream revisions are
-pinned in `flake.lock`, and license texts are installed with the binaries.
+The project combines components under GPL, LGPL, BSD, MIT, and CC0 terms.
+Exact upstream revisions are pinned, and required license texts are installed
+with the binaries. Owner-supplied ROMs remain private and are not relicensed.

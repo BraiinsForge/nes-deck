@@ -1,298 +1,193 @@
-# Building Retro Deck emulators for Braiins Forge Deck
+# Build and test Retro Deck
 
-This guide explains how to build the NES, GB/GBC, ZX Spectrum, and CHIP-8
-emulators, the
-Deck-native ten-second game, and
-launcher for the Braiins Forge Deck.
+Retro Deck uses Nix for reproducible ARMv7 hard-float builds. The generated
+executables are static and run on the Deck's OpenWrt userspace without copying
+a Nix store closure to the device.
+
+For ordinary installation, use the complete deployment command in
+[README.md](README.md):
+
+```sh
+./ops/deploy.sh root@10.0.0.10
+```
+
+This document covers individual builds, verification, tests, and platform
+details for development.
 
 ## Prerequisites
 
-The Deck uses an ARMv7 Cortex-A7 (`arm_cortex-a7_neon-vfpv4`) hard-float
-processor and OpenWrt uses musl. The provided build emits a static ARMv7
-hard-float binary, so it does not depend on the Deck's userspace C library.
+Install Nix with flakes enabled. Host tests also require a C and C++ compiler,
+`pkg-config`, and libpng development headers.
 
-## Option 1: Using Nix (Recommended)
+On Debian or Ubuntu:
 
-Nix is a reproducible build system and package manager that ensures consistent builds across different machines. The easiest way to build InfoNES is using the provided Nix flake, which sets up the complete cross-compilation environment automatically.
-
-Alternatively, you can build by hand if you procure an ARM cross-compilation toolchain.
-
-### Installing Nix
-
-If you don't have Nix installed, install it with flakes support:
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+```sh
+sudo apt-get install build-essential pkg-config libpng-dev
 ```
 
-For more information, see the [Nix installation guide](https://nixos.org/download.html).
+Then clone the private repository:
 
-### Quick Build (Flake)
-
-The fastest way to build is using the Nix flake directly, without cloning the repository:
-
-```bash
-nix build github:BraiinsForge/deck-infones
+```sh
+git clone git@github.com:BraiinsForge/nes-deck.git
+cd nes-deck
 ```
 
-The binary will be at `./result/bin/infones`.
+The first Nix build downloads the pinned cross toolchain and may take several
+minutes. Later builds reuse the Nix store.
 
-### Advanced Development Workflow
+## Build packages individually
 
-For active development and iteration, use the Nix development environment:
+Use `--no-link` to avoid leaving `result-*` symlinks in the repository:
 
-1. Clone this repository:
-   ```bash
-   git clone git@github.com:BraiinsForge/deck-infones.git
-   cd deck-infones
-   ```
-
-2. Enter the Nix development environment:
-   ```bash
-   nix develop
-   ```
-
-   **Note:** The first run downloads the ARM toolchain and builds dependencies, which can take several minutes.
-
-3. Build using Nix:
-   ```bash
-   nix build
-   ```
-
-   The compiled binary will be at `./result/bin/infones`.
-
-   Build the static ARM touch launcher and language runtimes separately:
-   ```bash
-   nix build .#deck-menu -o result-menu
-   nix build .#gb-deck -o result-gb-deck
-   nix build .#zx-deck -o result-zx-deck
-   nix build .#chip8-deck -o result-chip8-deck
-   nix build .#ten-seconds-deck -o result-ten-seconds
-   nix build .#fbterm-deck -o result-fbterm
-   nix build .#lua-deck -o result-lua
-   nix build -f nix/ecl-arm-static.nix -o result-ecl
-   ```
-
-   Those payloads include `result-menu/bin/deck-menu`,
-   `result-lua/bin/lua`, and `result-ecl/{bin/ecl.bin,lib/ecl/help.doc}`.
-   Lua 5.5.0 is pinned to its official source archive, and both language
-   interpreters are closure-free static ARM binaries.
-
-4. Run the host-side audio checks after mixer changes:
-   ```bash
-   g++ -std=c++11 -Wall -Wextra -Werror -Isrc \
-     tests/nes_audio_test.cpp -o nes_audio_test
-   ./nes_audio_test
-
-   g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-     tests/joypad_input_test.cpp -pthread -o joypad-input-test
-   ./joypad-input-test
-
-   g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-     src/deck_menu.cpp $(pkg-config --cflags --libs libpng) \
-     -o deck-menu-host
-   ./deck-menu-host --geometry-test
-   g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-     tests/deck_menu_test.cpp $(pkg-config --cflags --libs libpng) \
-     -o deck-menu-test
-   ./deck-menu-test
-   tests/deck_wifi_profile_add_test.sh
-   tests/retro_terminal_test.sh
-
-   g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-     tests/deck_runtime_test.cpp src/deck_runtime.cpp -pthread \
-     -o deck-runtime-test
-   ./deck-runtime-test
-
-   octo_src=$(nix eval --raw --impure --expr \
-     '(builtins.getFlake ("path:" + toString ./.)).inputs."c-octo-src".outPath')
-   cc -std=c99 -O2 -Wall -Wextra -Werror -I"$octo_src/src" \
-     tests/chip8_core_test.c src/chip8_core.c -o chip8-core-test
-   ./chip8-core-test
-   ```
-
-5. Render a designer-facing dashboard screenshot set from the checked-in
-   catalog and the Deck's persistent cover cache:
-   ```bash
-   scp -r root@10.0.0.10:/mnt/data/nes-deck/covers /tmp/deck-covers
-   ops/deck-menu/render-screenshots.sh deploy/menu/games.tsv \
-     /tmp/deck-covers "$HOME/retro-deck-screens"
-   ```
-   The renderer calls the native menu drawing code directly, emits every
-   game-carousel state at 1280x480, includes settings, brightness, keymap,
-   control, and Wi-Fi variants, and builds `00-overview.png` as a contact
-   sheet.
-
-The GB/GBC package builds the GPL-2.0-only Gambatte libretro core at the exact
-revision in `flake.lock`, using Cortex-A7/NEON flags, LTO, and native RGB565
-output. The ZX package statically links the GPL-3.0 Fuse libretro core pinned
-in the same lock file, enables fast TAP autoload, uses the 288x216 medium-border
-frame for exact 2x scaling, and assigns Kempston and Sinclair 2 joysticks to
-the two stable controller ports. The CHIP-8 package
-statically links the pinned MIT c-octo core through `src/chip8_core.c`. They use
-the shared framebuffer/audio implementation in `src/deck_runtime.cpp` and the
-same stable two-controller discovery as InfoNES.
-
-## Option 2: Manual Toolchain Setup
-
-If you prefer not to use Nix, you can manually install an ARM cross-compiler.
-
-### Install ARM Toolchain
-
-**Debian/Ubuntu:**
-```bash
-sudo apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+```sh
+nix build --no-link --print-out-paths .#nes-deck
+nix build --no-link --print-out-paths .#gb-deck
+nix build --no-link --print-out-paths .#zx-deck
+nix build --no-link --print-out-paths .#chip8-deck
+nix build --no-link --print-out-paths .#ten-seconds-deck
+nix build --no-link --print-out-paths .#deck-menu
+nix build --no-link --print-out-paths .#fbterm-deck
+nix build --no-link --print-out-paths .#lua-deck
+nix build --no-link --print-out-paths .#python-deck
+nix build --no-link --print-out-paths .#chibi-deck
+nix build --no-link --print-out-paths .#chiptune-deck
+nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 ```
 
-**Arch Linux:**
-```bash
-yay -S arm-linux-gnueabihf-gcc
+| Package | Main output |
+| --- | --- |
+| `nes-deck` | `bin/nes-deck` |
+| `gb-deck` | `bin/gb-deck` |
+| `zx-deck` | `bin/zx-deck` |
+| `chip8-deck` | `bin/chip8-deck` |
+| `ten-seconds-deck` | `bin/ten-seconds-deck` |
+| `deck-menu` | `bin/deck-menu` |
+| `fbterm-deck` | `bin/{fbterm,loadkeys}` plus font and keymaps |
+| `lua-deck` | `bin/lua` |
+| `python-deck` | `bin/python` |
+| `chibi-deck` | `bin/chibi-scheme` plus Scheme modules |
+| `chiptune-deck` | `bin/chiptune-deck` |
+| ECL expression | `bin/ecl.bin` plus the ECL runtime library |
+
+Check that a package has no Nix runtime references before deploying it:
+
+```sh
+out=$(nix build --no-link --print-out-paths .#chiptune-deck | tail -n 1)
+file "$out/bin/chiptune-deck"
+test -z "$(nix-store -q --references "$out")"
 ```
 
-### Clone Repository
+The expected executable is a statically linked 32-bit ARM EABI5 binary.
 
-```bash
-git clone git@github.com:BraiinsForge/deck-infones.git
-cd deck-infones
+## Run the host test suite
+
+The test runner compiles into a temporary directory and leaves the worktree
+clean:
+
+```sh
+tests/run-host-tests.sh
 ```
 
-### Build
+It covers the NES mixer, APU noise, SRAM codec, two-controller ordering,
+dashboard geometry and behavior, ROM catalog, cover cache, Wi-Fi profile
+helper, terminal lifecycle, shared framebuffer/audio runtime, timer
+configuration, and CHIP-8 core.
 
-This project patches the upstream InfoNES source at build time. To build manually, you'll need to:
+Run shell checks on deployment code with:
 
-1. Clone the upstream InfoNES:
-   ```bash
-   git clone https://github.com/nejidev/arm-NES-linux.git infones-upstream
-   git -C infones-upstream checkout e14ec579b3fb58f4c061ca38c103cc11d58d1673
-   ```
-
-2. Apply the pinned APU corrections and copy the Deck-specific source files:
-   ```bash
-   sed -i 's/\r$//' \
-     infones-upstream/{InfoNES.cpp,K6502_rw.h,InfoNES_pAPU.cpp,InfoNES_pAPU.h} \
-     infones-upstream/mapper/InfoNES_Mapper_000.cpp
-   git -C infones-upstream apply ../patches/infones-apu-register.patch
-   git -C infones-upstream apply ../patches/infones-apu.patch
-   git -C infones-upstream apply ../patches/infones-apu-quality.patch
-   git -C infones-upstream apply ../patches/infones-apu-noise.patch
-   cp src/InfoNES_System_Deck.cpp infones-upstream/linux/InfoNES_System_Linux.cpp
-   cp src/joypad_input.cpp infones-upstream/linux/
-   cp src/nes_audio_mixer.h infones-upstream/linux/
-   cp src/nes_apu_noise.h infones-upstream/linux/
-   cp src/nes_sram.h infones-upstream/linux/
-   ```
-
-3. Build with the cross-compiler:
-   ```bash
-   cd infones-upstream/linux
-   arm-linux-gnueabihf-g++ -static -O2 -fsigned-char -DNDEBUG \
-     ../K6502.cpp ../InfoNES.cpp ../InfoNES_Mapper.cpp ../InfoNES_pAPU.cpp \
-     InfoNES_System_Linux.cpp joypad_input.cpp -pthread -lm -o InfoNES
-   ```
-
-The compiled binary will be `InfoNES`.
-
-The menu itself has no third-party runtime dependencies and can be built with
-the same cross compiler:
-
-```bash
-arm-linux-gnueabihf-g++ -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-  -static src/deck_menu.cpp -lpng -lz -o deck-menu
+```sh
+nix shell nixpkgs#shellcheck -c shellcheck \
+  ops/deploy.sh tests/run-host-tests.sh
 ```
 
-The integrated terminal is built from the vendored GPL-2 source and bundles a
-DejaVu Sans Mono runtime font, a static `loadkeys`, and self-contained US ANSI
-and Czech QWERTZ console maps:
+## Validate language and music runtimes on a Deck
 
-```bash
-nix build .#fbterm-deck -o result-fbterm
-nix build .#lua-deck -o result-lua
+The deploy script performs basic Python, Scheme, and dashboard smoke tests
+before stopping the running service. For focused checks against a staged
+binary:
+
+```sh
+/mnt/data/nes-deck/langs/python -c 'print(6 * 7)'
+CHIBI_MODULE_PATH=/mnt/data/nes-deck/langs/chibi/lib \
+  /mnt/data/nes-deck/langs/chibi/chibi-scheme -q -p '(+ 20 22)'
+/mnt/data/nes-deck/chiptune-deck --probe \
+  /mnt/data/chiptunes/crazy.ogg
 ```
 
-The DECK carousel starts Lua and ECL through the framebuffer terminal. Their
-private persistent working directories are `/mnt/data/langs/lua` and
-`/mnt/data/langs/lisp`; interpreter binaries remain in
-`/mnt/data/nes-deck/langs` and `/mnt/data/nes-deck/ecl`.
+The chiptune player can render its UI without opening the framebuffer:
 
-## Display Configuration
+```sh
+/mnt/data/nes-deck/chiptune-deck --render-preview \
+  /mnt/data/chiptunes/crazy.ogg /tmp/chiptune-player.ppm
+```
 
-The Braiins Forge Deck uses a portrait LCD in landscape mode with specific framebuffer requirements. Our patches include:
+## Render dashboard screenshots
 
-- 90-degree rotation support
-- RGB555 to framebuffer format conversion
-- Display offset configuration for proper centering
-- TTY-based keyboard input (same as fbDOOM)
+Copy the persistent cover cache from a Deck, then run the native renderer:
 
-These modifications are in `src/InfoNES_System_Deck.cpp` and `src/joypad_input.cpp`.
+```sh
+scp -r root@10.0.0.10:/mnt/data/nes-deck/covers /tmp/deck-covers
+ops/deck-menu/render-screenshots.sh deploy/menu/games.tsv \
+  /tmp/deck-covers "$HOME/retro-deck-screens"
+```
 
-The Deck framebuffer is 600x1280 RGB565 with a 1280-byte pitch (80 bytes of
-padding per row). The port reads `line_length` and `smem_len` from
-`FBIOGET_FSCREENINFO`; do not replace the pitch with `xres * bytes_per_pixel`.
-Only physical columns 0 through 479 are visible. The menu maps that exact
-region to a 1280x480 logical surface. fbterm validates the same geometry and
-uses a 16-pixel safe area for the rounded panel, leaving a 1248x448 terminal
-viewport. Both reject unexpected geometry or RGB channel offsets instead of
+The output contains every game selection, settings variants, the Wi-Fi
+keyboard, reboot confirmation, timer, and a contact sheet.
+
+## Platform details
+
+The Deck CPU is ARMv7 Cortex-A7 hard-float. Its panel is a portrait 600x1280
+RGB565 framebuffer used as a 1280x480 logical landscape display. The physical
+pitch is 1280 bytes, including 80 bytes of padding per row, and only physical
+columns 0 through 479 are visible. Code must use the stride reported by
+`FBIOGET_FSCREENINFO`, not `xres * bytes_per_pixel`.
+
+The menu fills the complete 1280x480 logical surface. Emulators and the
+chiptune player use the shared scaler with a 16-pixel safe inset for the
+rounded display. fbterm uses a 1248x448 viewport for the same reason. Every
+frontend rejects unexpected geometry or color channel layouts rather than
 guessing.
 
-Audio uses `/dev/dsp`, backed by ALSA's OSS compatibility plugin. The physical
-I2S device is S16_LE stereo; the emulators supply S16_LE mono and the plugin
-duplicates it to the hardware channels. InfoNES, Fuse, and CHIP-8 use 44100 Hz.
+Audio uses `/dev/dsp` through the Deck's ALSA OSS bridge. The hardware stream
+is S16_LE stereo. NES, ZX, CHIP-8, the timer, menu cues, and chiptunes use
+44.1 kHz. Gambatte produces 32768 Hz and is explicitly resampled to the Deck's
+verified 32000 Hz OSS rate. Gain is applied in the native mixer because the
+kernel OSS path bypasses ALSA userspace soft volume.
 
-InfoNES builds each rotated 512x480 image in a cacheable staging buffer and
-then publishes contiguous framebuffer rows. Set `INFONES_RUNTIME_DIAGNOSTICS=1`
-for 120-frame FPS and render-time windows. `INFONES_VSYNC=1` enables the
-driver's blocking fbdev synchronization for experiments; it is disabled by
-default because live Mario measurements showed audio/panel phase stalls.
-Gambatte produces 32768 Hz, but this Deck's OSS layer falsely echoes that rate
-while the live ALSA stream runs at 32000 Hz. The shared runtime therefore
-requests the real 32000 Hz rate and explicitly resamples Gambatte audio. The
-port requests eight 1024-byte periods. PCM gain is intentionally set in the
-mixer because the kernel OSS path bypasses ALSA's userspace softvol.
-The touch launcher persists an exact volume from 0 through 100 in
-`menu-volume.state` and passes it through both `INFONES_VOLUME_PERCENT` and
-`RETRO_DECK_VOLUME_PERCENT`. The settings minus and plus actions move in
-5-point steps; 0 is mute. Settings also persists display brightness in
-`menu-brightness.state` as a 10-point step from 10 through 100 and maps it onto
-the Deck backlight's current maximum. `VOLUME_ON` in
-`deploy/menu/deck-menu-launcher` and `deploy/menu/nes-deck.init` is the initial
-value and the migration value for the former `on` sound state.
+The framebuffer has no page-flip API. Frontends build complete frames in
+cacheable memory and copy finished rows to fb0 to reduce tearing and protect
+audio timing. `INFONES_RUNTIME_DIAGNOSTICS=1` logs 120-frame timing windows.
+`INFONES_VSYNC=1` remains an experimental opt-in because the audited driver can
+stall sound and frame pacing.
 
-## Project Structure
+## Source layout
 
-```
-deck-infones/
-├── flake.nix              # Nix build configuration
+```text
+nes-deck/
+├── chiptunes/                  CC0 seed tracks and provenance
+├── deploy/
+│   ├── menu/                   catalog, launcher, and procd service
+│   └── terminal/               fbterm wrapper, fontconfig, and keymaps
+├── nix/                        ECL and runtime-specific Nix expressions
+├── ops/
+│   ├── deck-menu/              covers, screenshots, and FOSS CHIP-8 fetcher
+│   ├── deck-wifi/              profile-only Wi-Fi helper
+│   └── deploy.sh               complete staged deployment
+├── patches/                    pinned upstream fixes
+├── roms/                       private canonical ROM library and checksums
 ├── src/
-│   ├── InfoNES_System_Deck.cpp  # Deck framebuffer/display code
-│   ├── libretro_deck.cpp        # FCEUmm, Gambatte, and Fuse host
-│   ├── chip8_deck.cpp           # CHIP-8 Deck frontend
-│   ├── chip8_core.c             # c-octo adaptation boundary
-│   ├── deck_runtime.cpp         # Shared framebuffer/audio/frame clock
-│   ├── deck_menu.cpp            # Games, settings, keymap, Wi-Fi, and terminal
-│   ├── joypad_input.cpp         # Two THEGamepads plus keyboard fallback
-│   ├── nes_audio_mixer.h        # Mixer, DC blocker, and rate conversion
-│   ├── nes_apu_noise.h          # Tested 15-bit noise clock helpers
-│   └── nes_sram.h               # Tested NES battery-save codec
-├── patches/
-│   ├── infones-apu-register.patch # Fixes out-of-bounds APU status access
-│   ├── infones-apu.patch          # Frame/envelope corrections
-│   ├── infones-apu-quality.patch  # Event, noise, triangle, and DPCM fixes
-│   └── infones-apu-noise.patch    # Exact noise clocks/length and pulse guard
-├── tests/
-│   ├── deck_menu_test.cpp      # Menu, Wi-Fi UI, child, state, and geometry
-│   ├── deck_wifi_profile_add_test.sh # Atomic profile replacement checks
-│   ├── retro_terminal_test.sh   # Scoped layout load and restoration checks
-│   ├── joypad_input_test.cpp    # THEGamepad mapping and two-player state
-│   ├── chip8_core_test.c        # CHIP-8 pitch and real-ROM core smoke checks
-│   ├── nes_audio_test.cpp       # Host-side mixer/resampler checks
-│   ├── nes_apu_noise_test.cpp   # LFSR period and high-rate clock checks
-│   └── nes_sram_test.cpp        # Battery-save round-trip and damage checks
-├── deploy/menu/                 # Catalog compiler, fallback, and S99 service
-├── deploy/terminal/             # Terminal launcher and private fontconfig
-├── terminal/                    # Vendored GPL-2 fbterm source and provenance
-├── nix/ecl-arm-static.nix       # Minimal static ARM ECL 26.5.5 runtime
-├── ops/deck-menu/               # Pinned FOSS ROM/license fetcher
-├── FOSS_GAMES.md                # Homebrew provenance, licenses, and hashes
-├── README.md
-└── BUILD.md
+│   ├── deck_menu.cpp           dashboard, settings, and child supervision
+│   ├── deck_runtime.cpp        framebuffer, audio, and frame clock
+│   ├── libretro_deck.cpp       NES, GB/GBC, and ZX host
+│   ├── chip8_deck.cpp          CHIP-8 frontend
+│   ├── chiptune_deck.cpp       GME and Ogg native music player
+│   ├── ten_seconds_deck.cpp    native timing game
+│   └── joypad_input.cpp        stable two-controller input
+├── terminal/                   vendored fbterm source and provenance
+├── tests/                      host regression suite
+├── flake.nix                   pinned cross-build definitions
+└── README.md                   deployment and operation guide
 ```
+
+The exact on-device file contract and strict catalog schema are documented in
+[deploy/menu/README.md](deploy/menu/README.md).
