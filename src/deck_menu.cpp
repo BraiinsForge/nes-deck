@@ -97,9 +97,15 @@ const unsigned int kMenuPadUp = 1u << 2;
 const unsigned int kMenuPadDown = 1u << 3;
 const unsigned int kMenuPadLeft = 1u << 4;
 const unsigned int kMenuPadRight = 1u << 5;
+const unsigned int kMenuPadVolumeDown = 1u << 6;
+const unsigned int kMenuPadVolumeUp = 1u << 7;
 const unsigned short kTheGamepadVendor = 0x1c59;
 const unsigned short kTheGamepadProduct = 0x0026;
 const size_t kMaximumMenuGamepads = 2;
+const int64_t kMenuSoundInputTailMs = 60;
+const unsigned int kMenuControllerBurstLimit = 12;
+const int64_t kMenuControllerBurstWindowMs = 1000;
+const int64_t kMenuControllerQuietResetMs = 1000;
 
 volatile sig_atomic_t g_shutdown_requested = 0;
 
@@ -903,17 +909,107 @@ bool load_keymap_state(const std::string &path, std::string *keymap,
   return false;
 }
 
-bool play_sound_confirmation(unsigned int volume_percent, std::string *error) {
+struct ChiptuneNote {
+  int frequency;
+  int duration_ms;
+};
+
+enum MenuSoundCue {
+  MenuSoundCueVolume,
+  MenuSoundCuePrevious,
+  MenuSoundCueNext,
+  MenuSoundCueConfirm,
+  MenuSoundCueBack
+};
+
+std::vector<ChiptuneNote> menu_sound_notes(MenuSoundCue cue) {
+  std::vector<ChiptuneNote> notes;
+  if (cue == MenuSoundCueVolume) {
+    notes.push_back(ChiptuneNote{660, 60});
+    notes.push_back(ChiptuneNote{880, 60});
+  } else if (cue == MenuSoundCuePrevious) {
+    notes.push_back(ChiptuneNote{523, 35});
+  } else if (cue == MenuSoundCueNext) {
+    notes.push_back(ChiptuneNote{659, 35});
+  } else if (cue == MenuSoundCueConfirm) {
+    notes.push_back(ChiptuneNote{659, 25});
+    notes.push_back(ChiptuneNote{880, 30});
+  } else {
+    notes.push_back(ChiptuneNote{659, 25});
+    notes.push_back(ChiptuneNote{440, 30});
+  }
+  return notes;
+}
+
+int chiptune_duration_ms(const std::vector<ChiptuneNote> &notes) {
+  int duration = 0;
+  for (size_t i = 0; i < notes.size(); ++i)
+    duration += std::max(0, notes[i].duration_ms);
+  return duration;
+}
+
+bool render_chiptune(const std::vector<ChiptuneNote> &notes, int rate,
+                     unsigned int volume_percent, std::vector<int16_t> *tone,
+                     std::string *error) {
+  if (!tone || notes.empty()) {
+    if (error)
+      *error = "chiptune notes and output are required";
+    return false;
+  }
   if (volume_percent == 0 || volume_percent > 100) {
     if (error)
-      *error = "enabled volume must be between 1 and 100 for the test tone";
+      *error = "chiptune volume must be between 1 and 100";
+    return false;
+  }
+  if (rate <= 0) {
+    if (error)
+      *error = "chiptune sample rate must be positive";
     return false;
   }
 
+  const int amplitude =
+      std::max(256, static_cast<int>(5000 * volume_percent / 100));
+  const size_t ramp_samples = std::max<size_t>(1, static_cast<size_t>(rate) / 200);
+  tone->clear();
+  tone->reserve(static_cast<size_t>(rate) * chiptune_duration_ms(notes) /
+                1000);
+  for (size_t note_index = 0; note_index < notes.size(); ++note_index) {
+    const ChiptuneNote &note = notes[note_index];
+    if (note.frequency <= 0 || note.duration_ms <= 0) {
+      if (error)
+        *error = "chiptune notes must have positive frequency and duration";
+      return false;
+    }
+    const size_t note_samples = std::max<size_t>(
+        1, static_cast<size_t>(rate) * note.duration_ms / 1000);
+    const size_t period = std::max<size_t>(
+        2, static_cast<size_t>(rate / note.frequency));
+    const size_t start = tone->size();
+    tone->resize(start + note_samples, 0);
+    for (size_t i = 0; i < note_samples; ++i) {
+      int sample = (i % period) < period / 2 ? amplitude : -amplitude;
+      const size_t remaining = note_samples - i;
+      const size_t envelope =
+          std::min(ramp_samples, std::min(i + 1, remaining));
+      sample = static_cast<int>(sample * static_cast<int64_t>(envelope) /
+                                static_cast<int64_t>(ramp_samples));
+      (*tone)[start + i] = static_cast<int16_t>(sample);
+    }
+  }
+  return true;
+}
+
+bool menu_input_quarantined(int64_t quarantine_until, int64_t now) {
+  return quarantine_until > now;
+}
+
+bool play_chiptune_blocking(const std::vector<ChiptuneNote> &notes,
+                            unsigned int volume_percent,
+                            std::string *error) {
   const int fd = open("/dev/dsp", O_WRONLY | O_CLOEXEC);
   if (fd < 0) {
     if (error)
-      *error = errno_message("cannot open /dev/dsp for sound confirmation");
+      *error = errno_message("cannot open /dev/dsp for menu sound");
     return false;
   }
 
@@ -929,28 +1025,15 @@ bool play_sound_confirmation(unsigned int volume_percent, std::string *error) {
     close(fd);
     errno = saved_errno;
     if (error)
-      *error = errno_message("cannot configure sound confirmation");
+      *error = errno_message("cannot configure menu sound");
     return false;
   }
 
-  const size_t total_samples = static_cast<size_t>(rate) * 6 / 25;
-  const size_t midpoint = total_samples / 2;
-  const int amplitude =
-      std::max(256, static_cast<int>(5000 * volume_percent / 100));
-  const size_t ramp_samples = std::max<size_t>(1, static_cast<size_t>(rate) / 200);
-  std::vector<int16_t> tone(total_samples, 0);
-  for (size_t i = 0; i < total_samples; ++i) {
-    const int frequency = i < midpoint ? 660 : 880;
-    const size_t period = std::max<size_t>(2, static_cast<size_t>(rate / frequency));
-    int sample = (i % period) < period / 2 ? amplitude : -amplitude;
-    const size_t remaining = total_samples - i;
-    const size_t envelope =
-        std::min(ramp_samples, std::min(i + 1, remaining));
-    sample = static_cast<int>(sample * static_cast<int64_t>(envelope) /
-                              static_cast<int64_t>(ramp_samples));
-    tone[i] = static_cast<int16_t>(sample);
+  std::vector<int16_t> tone;
+  if (!render_chiptune(notes, rate, volume_percent, &tone, error)) {
+    close(fd);
+    return false;
   }
-
   const bool wrote =
       write_all(fd, reinterpret_cast<const char *>(&tone[0]),
                 tone.size() * sizeof(tone[0]));
@@ -961,11 +1044,89 @@ bool play_sound_confirmation(unsigned int volume_percent, std::string *error) {
   if (!wrote || close_result != 0) {
     errno = wrote ? errno : write_errno;
     if (error)
-      *error = errno_message("cannot play sound confirmation");
+      *error = errno_message("cannot play menu sound");
     return false;
   }
   return true;
 }
+
+class MenuSoundPlayer {
+public:
+  MenuSoundPlayer()
+      : child_pid_(-1), input_quarantine_until_(0) {}
+  ~MenuSoundPlayer() { stop(); }
+
+  bool play(MenuSoundCue cue, unsigned int volume_percent,
+            std::string *error) {
+    if (volume_percent == 0 || volume_percent > 100) {
+      if (error)
+        *error = "menu sound volume must be between 1 and 100";
+      return false;
+    }
+    reap_finished();
+    const int64_t now = monotonic_ms();
+    if (child_pid_ > 0)
+      return true;
+    const std::vector<ChiptuneNote> notes = menu_sound_notes(cue);
+    const pid_t child = fork();
+    if (child < 0) {
+      if (error)
+        *error = errno_message("cannot start menu sound worker");
+      return false;
+    }
+    if (child == 0) {
+      signal(SIGTERM, SIG_DFL);
+      signal(SIGINT, SIG_DFL);
+      signal(SIGHUP, SIG_DFL);
+      g_shutdown_requested = 0;
+      std::string child_error;
+      const bool played =
+          play_chiptune_blocking(notes, volume_percent, &child_error);
+      if (!played)
+        std::cerr << "deck-menu: " << child_error << std::endl;
+      _exit(played ? 0 : 1);
+    }
+    child_pid_ = child;
+    input_quarantine_until_ =
+        now + chiptune_duration_ms(notes) + kMenuSoundInputTailMs;
+    return true;
+  }
+
+  void reap_finished() {
+    if (child_pid_ <= 0)
+      return;
+    int status = 0;
+    const pid_t result = waitpid(child_pid_, &status, WNOHANG);
+    if (result == child_pid_) {
+      if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        std::cerr << "deck-menu: menu sound worker failed" << std::endl;
+      child_pid_ = -1;
+    }
+  }
+
+  bool quarantines_input(int64_t now) const {
+    return child_pid_ > 0 ||
+           menu_input_quarantined(input_quarantine_until_, now);
+  }
+
+  void stop() {
+    if (child_pid_ > 0) {
+      kill(child_pid_, SIGTERM);
+      int status = 0;
+      while (waitpid(child_pid_, &status, 0) < 0 && errno == EINTR) {
+      }
+    }
+    child_pid_ = -1;
+    input_quarantine_until_ = 0;
+  }
+
+private:
+  MenuSoundPlayer(const MenuSoundPlayer &);
+  MenuSoundPlayer &operator=(const MenuSoundPlayer &);
+
+  pid_t child_pid_;
+  int64_t input_quarantine_until_;
+};
 
 struct Rect {
   int x;
@@ -2436,6 +2597,10 @@ unsigned int menu_gamepad_key_to_button(unsigned short code) {
   case BTN_THUMB:
   case BTN_TRIGGER:
     return kMenuPadBack;
+  case BTN_TOP2:
+    return kMenuPadVolumeDown;
+  case BTN_PINKIE:
+    return kMenuPadVolumeUp;
   default:
     return 0;
   }
@@ -2728,7 +2893,9 @@ enum MenuGamepadCommand {
   MenuGamepadCommandPrevious,
   MenuGamepadCommandNext,
   MenuGamepadCommandConfirm,
-  MenuGamepadCommandBack
+  MenuGamepadCommandBack,
+  MenuGamepadCommandVolumeDown,
+  MenuGamepadCommandVolumeUp
 };
 
 MenuGamepadCommand menu_gamepad_command(unsigned int pressed, bool wifi_view,
@@ -2737,6 +2904,10 @@ MenuGamepadCommand menu_gamepad_command(unsigned int pressed, bool wifi_view,
     return MenuGamepadCommandBack;
   if (wifi_view)
     return MenuGamepadCommandNone;
+  if (pressed & kMenuPadVolumeDown)
+    return MenuGamepadCommandVolumeDown;
+  if (pressed & kMenuPadVolumeUp)
+    return MenuGamepadCommandVolumeUp;
   if (game_view) {
     if (pressed & kMenuPadLeft)
       return MenuGamepadCommandPrevious;
@@ -2752,6 +2923,45 @@ MenuGamepadCommand menu_gamepad_command(unsigned int pressed, bool wifi_view,
     return MenuGamepadCommandConfirm;
   return MenuGamepadCommandNone;
 }
+
+class MenuControllerInputGuard {
+public:
+  MenuControllerInputGuard()
+      : suspended_(false), last_edge_at_(-1) {}
+
+  bool accept_edge(int64_t now) {
+    last_edge_at_ = now;
+    if (suspended_)
+      return false;
+    while (!edge_times_.empty() &&
+           now - edge_times_.front() >= kMenuControllerBurstWindowMs) {
+      edge_times_.erase(edge_times_.begin());
+    }
+    edge_times_.push_back(now);
+    if (edge_times_.size() <= kMenuControllerBurstLimit)
+      return true;
+    suspended_ = true;
+    return false;
+  }
+
+  bool recover_if_quiet(int64_t now) {
+    if (!suspended_ || last_edge_at_ < 0 ||
+        now - last_edge_at_ < kMenuControllerQuietResetMs) {
+      return false;
+    }
+    edge_times_.clear();
+    suspended_ = false;
+    last_edge_at_ = -1;
+    return true;
+  }
+
+  bool suspended() const { return suspended_; }
+
+private:
+  std::vector<int64_t> edge_times_;
+  bool suspended_;
+  int64_t last_edge_at_;
+};
 
 class TtySnapshot {
 public:
@@ -3570,6 +3780,8 @@ int application_main(const Options &options) {
   }
 
   MenuGamepads menu_gamepads;
+  MenuSoundPlayer menu_sound_player;
+  MenuControllerInputGuard controller_input_guard;
   std::string gamepad_error;
   if (!menu_gamepads.scan_if_due(true, &gamepad_error)) {
     std::cerr << "deck-menu: controller navigation unavailable: "
@@ -3608,6 +3820,11 @@ int application_main(const Options &options) {
   std::string last_gamepad_error = gamepad_error;
 
   while (!g_shutdown_requested) {
+    menu_sound_player.reap_finished();
+    if (controller_input_guard.recover_if_quiet(monotonic_ms())) {
+      std::cerr << "deck-menu: controller input resumed after quiet period"
+                << std::endl;
+    }
     if (touch.fd() < 0) {
       if (reconnect_touch(&touch, &reconnect_attempt, &last_touch_error)) {
         if (wifi_view) {
@@ -3661,7 +3878,7 @@ int application_main(const Options &options) {
     if (poll_result == 0)
       continue;
 
-    const unsigned int controller_pressed =
+    unsigned int controller_pressed =
         menu_gamepads.read_ready(descriptors, first_gamepad_descriptor);
     const bool touch_ready =
         descriptors[0].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL);
@@ -3681,6 +3898,24 @@ int application_main(const Options &options) {
         render_current_menu();
       }
       framebuffer.present(canvas, NULL);
+    }
+
+    const int64_t input_time = monotonic_ms();
+    if (controller_pressed != 0) {
+      const bool was_suspended = controller_input_guard.suspended();
+      if (!controller_input_guard.accept_edge(input_time)) {
+        controller_pressed = 0;
+        if (!was_suspended) {
+          std::cerr << "deck-menu: controller input suspended after burst; "
+                       "waiting for quiet"
+                    << std::endl;
+        }
+      }
+    }
+    if (menu_sound_player.quarantines_input(input_time)) {
+      controller_pressed = 0;
+      reports.clear();
+      pressed_target = MenuTargetNone;
     }
 
     int selected_game = -1;
@@ -3712,11 +3947,52 @@ int application_main(const Options &options) {
         selected_game = game_index;
       }
     };
+    const auto play_controller_sound = [&](MenuSoundCue cue) {
+      if (volume == 0)
+        return;
+      std::string sound_error;
+      if (!menu_sound_player.play(cue, volume, &sound_error))
+        std::cerr << "deck-menu: " << sound_error << std::endl;
+    };
+    const auto apply_volume_target = [&](int target) {
+      const unsigned int requested =
+          volume_after_menu_target(target, volume, last_audible_volume);
+      std::string state_error;
+      if (save_volume_state(options.volume_state, requested, &state_error)) {
+        volume = requested;
+        if (volume != 0)
+          last_audible_volume = volume;
+        status = volume == 0
+                     ? "GAME VOLUME MUTED"
+                     : "GAME VOLUME " + std::to_string(volume) + "%";
+        render_current_menu();
+        framebuffer.present(canvas, NULL);
+        if (volume == 0) {
+          menu_sound_player.stop();
+        } else {
+          std::string sound_error;
+          if (!menu_sound_player.play(MenuSoundCueVolume, volume,
+                                      &sound_error)) {
+            status = "VOLUME SAVED; CONFIRMATION TONE FAILED";
+            std::cerr << "deck-menu: " << sound_error << std::endl;
+            render_current_menu();
+            framebuffer.present(canvas, NULL);
+          }
+        }
+      } else {
+        status = "VOLUME STATE ERROR";
+        std::cerr << "deck-menu: " << state_error << std::endl;
+        render_current_menu();
+        framebuffer.present(canvas, NULL);
+      }
+    };
 
     const MenuGamepadCommand controller_command =
         menu_gamepad_command(controller_pressed, wifi_view, game_view);
-    if (controller_command != MenuGamepadCommandNone)
+    if (controller_command != MenuGamepadCommandNone) {
       pressed_target = MenuTargetNone;
+      reports.clear();
+    }
     if (controller_command == MenuGamepadCommandBack) {
       cancel_reboot_confirmation();
       if (wifi_view) {
@@ -3728,9 +4004,17 @@ int application_main(const Options &options) {
       }
       render_current_menu();
       framebuffer.present(canvas, NULL);
+      play_controller_sound(MenuSoundCueBack);
+    } else if (controller_command == MenuGamepadCommandVolumeDown ||
+               controller_command == MenuGamepadCommandVolumeUp) {
+      cancel_reboot_confirmation();
+      apply_volume_target(controller_command == MenuGamepadCommandVolumeDown
+                              ? MenuTargetVolumeDown
+                              : MenuTargetVolumeUp);
     } else if (controller_command == MenuGamepadCommandPrevious ||
                controller_command == MenuGamepadCommandNext) {
       cancel_reboot_confirmation();
+      bool moved = false;
       if (game_view && !layout.game_indices.empty()) {
         if (controller_command == MenuGamepadCommandPrevious) {
           game_position = game_position == 0
@@ -3739,15 +4023,23 @@ int application_main(const Options &options) {
         } else {
           game_position = (game_position + 1) % layout.game_indices.size();
         }
+        moved = true;
       } else if (!game_view) {
         active_system = adjacent_system(
             layout.systems, active_system,
             controller_command == MenuGamepadCommandPrevious ? -1 : 1);
         game_position = 0;
+        moved = !layout.systems.empty();
       }
       status.clear();
       render_current_menu();
       framebuffer.present(canvas, NULL);
+      if (moved) {
+        play_controller_sound(controller_command ==
+                                      MenuGamepadCommandPrevious
+                                  ? MenuSoundCuePrevious
+                                  : MenuSoundCueNext);
+      }
     } else if (controller_command == MenuGamepadCommandConfirm) {
       if (!game_view) {
         cancel_reboot_confirmation();
@@ -3756,10 +4048,12 @@ int application_main(const Options &options) {
         status.clear();
         render_current_menu();
         framebuffer.present(canvas, NULL);
+        play_controller_sound(MenuSoundCueConfirm);
       } else if (layout.shown_game_index < games.size()) {
         if (!is_built_in_reboot(games[layout.shown_game_index]))
           cancel_reboot_confirmation();
         request_game(static_cast<int>(layout.shown_game_index));
+        play_controller_sound(MenuSoundCueConfirm);
       }
     }
 
@@ -3848,29 +4142,9 @@ int application_main(const Options &options) {
                   pressed_target == MenuTargetVolumeUp ||
                   pressed_target == MenuTargetVolumeToggle) &&
                  pressed_target == released_target) {
-        const unsigned int requested = volume_after_menu_target(
-            pressed_target, volume, last_audible_volume);
-        std::string state_error;
-        if (save_volume_state(options.volume_state, requested, &state_error)) {
-          volume = requested;
-          if (volume != 0)
-            last_audible_volume = volume;
-          status = volume == 0
-                       ? "GAME VOLUME MUTED"
-                       : "GAME VOLUME " + std::to_string(volume) + "%";
-          if (volume != 0) {
-            std::string tone_error;
-            if (!play_sound_confirmation(volume, &tone_error)) {
-              status = "VOLUME SAVED; CONFIRMATION TONE FAILED";
-              std::cerr << "deck-menu: " << tone_error << std::endl;
-            }
-          }
-        } else {
-          status = "VOLUME STATE ERROR";
-          std::cerr << "deck-menu: " << state_error << std::endl;
-        }
-        render_current_menu();
-        framebuffer.present(canvas, NULL);
+        apply_volume_target(pressed_target);
+        pressed_target = MenuTargetNone;
+        break;
       } else if (!wifi_view && pressed_target == MenuTargetWifi &&
                  released_target == MenuTargetWifi) {
         wifi_view = true;
@@ -3915,6 +4189,7 @@ int application_main(const Options &options) {
 
     // Close dashboard readers so the launched program gets a fresh controller
     // queue and the menu cannot accumulate gameplay events while it waits.
+    menu_sound_player.stop();
     menu_gamepads.close_for_child();
     const ChildResult child =
         terminal_requested

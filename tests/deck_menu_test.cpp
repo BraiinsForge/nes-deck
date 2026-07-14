@@ -80,8 +80,10 @@ int main() {
   expect(menu_gamepad_key_to_button(BTN_THUMB2) == kMenuPadConfirm &&
              menu_gamepad_key_to_button(BTN_TOP) == kMenuPadConfirm &&
              menu_gamepad_key_to_button(BTN_THUMB) == kMenuPadBack &&
-             menu_gamepad_key_to_button(BTN_TRIGGER) == kMenuPadBack,
-         "dashboard maps physical A/X to confirm and B/Y to back");
+             menu_gamepad_key_to_button(BTN_TRIGGER) == kMenuPadBack &&
+             menu_gamepad_key_to_button(BTN_TOP2) == kMenuPadVolumeDown &&
+             menu_gamepad_key_to_button(BTN_PINKIE) == kMenuPadVolumeUp,
+         "dashboard maps face and shoulder buttons to menu actions");
   expect(menu_gamepad_axis_to_button(0, 0, 255, kMenuPadLeft,
                                      kMenuPadRight) == kMenuPadLeft &&
              menu_gamepad_axis_to_button(127, 0, 255, kMenuPadLeft,
@@ -113,8 +115,58 @@ int main() {
              menu_gamepad_command(kMenuPadBack, false, true) ==
                  MenuGamepadCommandBack &&
              menu_gamepad_command(kMenuPadBack, true, false) ==
-                 MenuGamepadCommandBack,
+                 MenuGamepadCommandBack &&
+             menu_gamepad_command(kMenuPadVolumeDown, false, false) ==
+                 MenuGamepadCommandVolumeDown &&
+             menu_gamepad_command(kMenuPadVolumeUp, false, true) ==
+                 MenuGamepadCommandVolumeUp &&
+             menu_gamepad_command(kMenuPadVolumeUp, true, false) ==
+                 MenuGamepadCommandNone,
          "dashboard controller commands follow console and game view axes");
+
+  const std::vector<ChiptuneNote> volume_notes =
+      menu_sound_notes(MenuSoundCueVolume);
+  const std::vector<ChiptuneNote> previous_notes =
+      menu_sound_notes(MenuSoundCuePrevious);
+  const std::vector<ChiptuneNote> next_notes =
+      menu_sound_notes(MenuSoundCueNext);
+  const std::vector<ChiptuneNote> confirm_notes =
+      menu_sound_notes(MenuSoundCueConfirm);
+  const std::vector<ChiptuneNote> back_notes =
+      menu_sound_notes(MenuSoundCueBack);
+  expect(volume_notes.size() == 2 &&
+             volume_notes[0].frequency < volume_notes[1].frequency &&
+             chiptune_duration_ms(volume_notes) == 120 &&
+             previous_notes.size() == 1 && next_notes.size() == 1 &&
+             previous_notes[0].frequency < next_notes[0].frequency &&
+             chiptune_duration_ms(previous_notes) == 35 &&
+             chiptune_duration_ms(confirm_notes) == 55 &&
+             confirm_notes[0].frequency < confirm_notes[1].frequency &&
+             chiptune_duration_ms(back_notes) == 55 &&
+             back_notes[0].frequency > back_notes[1].frequency,
+         "dashboard sound cues stay short and directionally distinct");
+  std::vector<int16_t> rendered_tone;
+  std::string sound_error;
+  expect(render_chiptune(volume_notes, 44100, 42, &rendered_tone,
+                         &sound_error) &&
+             rendered_tone.size() == 5292 &&
+             !menu_input_quarantined(100, 100) &&
+             menu_input_quarantined(101, 100),
+         "dashboard renders bounded tones and exact input quarantine");
+
+  MenuControllerInputGuard controller_guard;
+  bool accepted_human_rate = true;
+  for (int64_t edge = 0; edge < 12; ++edge)
+    accepted_human_rate =
+        accepted_human_rate && controller_guard.accept_edge(edge * 50);
+  expect(accepted_human_rate && !controller_guard.suspended() &&
+             !controller_guard.accept_edge(600) &&
+             controller_guard.suspended() &&
+             !controller_guard.recover_if_quiet(1599) &&
+             controller_guard.recover_if_quiet(1600) &&
+             !controller_guard.suspended() &&
+             controller_guard.accept_edge(1601),
+         "dashboard suspends impossible controller bursts until quiet");
 
   unsigned char ines[16] = {};
   std::memcpy(ines, "NES\x1a", 4);
