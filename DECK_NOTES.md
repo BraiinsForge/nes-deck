@@ -134,6 +134,10 @@ passphrases, WireGuard private keys, or ROM data.
   0.998306 seconds per 60 frames with audio enabled, held its software queue at
   786 to 788 frames, and dropped no samples. Follow-up GB and CHIP-8 probes held
   their native 59.728 and 60.000 FPS clocks with zero dropped samples.
+  A post-deployment 90-second Mario attract-mode soak then averaged 0.998178
+  seconds across 90 consecutive 60-frame windows, stayed between 0.992 and
+  1.006 seconds, produced changing framebuffer hashes through the final
+  90-second sample, and dropped no audio samples.
 - The pinned InfoNES code also indexed a 24-byte `APU_Reg` array with the full
   address `0x4015`, corrupting memory from the core and mapper-0 IRQ paths.
   The repository patches use the correct register offset `0x15`, repair the
