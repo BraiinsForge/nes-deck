@@ -1194,11 +1194,6 @@ void draw_close_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
   }
 }
 
-void draw_icon_panel(Canvas *canvas, const Rect &rect, bool selected,
-                     uint16_t background, uint16_t active, uint16_t orange) {
-  draw_pixel_panel(canvas, rect, selected ? active : background, orange);
-}
-
 void draw_pixel_line(Canvas *canvas, int from_x, int from_y, int to_x,
                      int to_y, int thickness, uint16_t color) {
   const int delta_x = std::abs(to_x - from_x);
@@ -1225,17 +1220,17 @@ void draw_pixel_line(Canvas *canvas, int from_x, int from_y, int to_x,
 void draw_arrow_head(Canvas *canvas, int point_x, int point_y,
                      bool points_right, uint16_t color) {
   const int direction = points_right ? -1 : 1;
-  draw_pixel_line(canvas, point_x, point_y, point_x + direction * 6,
-                  point_y - 6, 2, color);
-  draw_pixel_line(canvas, point_x, point_y, point_x + direction * 6,
-                  point_y + 6, 2, color);
+  draw_pixel_line(canvas, point_x, point_y, point_x + direction * 4,
+                  point_y - 4, 1, color);
+  draw_pixel_line(canvas, point_x, point_y, point_x + direction * 4,
+                  point_y + 4, 1, color);
 }
 
 void draw_transport_triangle(Canvas *canvas, int center_x, int center_y,
                              bool points_right, uint16_t color) {
-  for (int row = -8; row <= 8; row += 2) {
-    const int width = 18 - std::abs(row) * 2;
-    const int left = points_right ? center_x - 8 : center_x + 8 - width;
+  for (int row = -6; row <= 6; row += 2) {
+    const int width = 14 - std::abs(row) * 2;
+    const int left = points_right ? center_x - 6 : center_x + 6 - width;
     fill_rect(canvas, Rect{left, center_y + row, width, 2}, color);
   }
 }
@@ -1243,15 +1238,15 @@ void draw_transport_triangle(Canvas *canvas, int center_x, int center_y,
 void draw_previous_icon(Canvas *canvas, const Rect &rect, uint16_t color) {
   const int center_x = rect.x + rect.width / 2;
   const int center_y = rect.y + rect.height / 2;
-  fill_rect(canvas, Rect{center_x - 13, center_y - 9, 3, 18}, color);
-  draw_transport_triangle(canvas, center_x + 3, center_y, false, color);
+  fill_rect(canvas, Rect{center_x - 10, center_y - 7, 2, 14}, color);
+  draw_transport_triangle(canvas, center_x + 1, center_y, false, color);
 }
 
 void draw_next_icon(Canvas *canvas, const Rect &rect, uint16_t color) {
   const int center_x = rect.x + rect.width / 2;
   const int center_y = rect.y + rect.height / 2;
-  draw_transport_triangle(canvas, center_x - 3, center_y, true, color);
-  fill_rect(canvas, Rect{center_x + 10, center_y - 9, 3, 18}, color);
+  draw_transport_triangle(canvas, center_x - 1, center_y, true, color);
+  fill_rect(canvas, Rect{center_x + 8, center_y - 7, 2, 14}, color);
 }
 
 void draw_pause_icon(Canvas *canvas, const Rect &rect, bool paused,
@@ -1259,44 +1254,44 @@ void draw_pause_icon(Canvas *canvas, const Rect &rect, bool paused,
   const int center_x = rect.x + rect.width / 2;
   const int center_y = rect.y + rect.height / 2;
   if (paused) {
-    draw_transport_triangle(canvas, center_x, center_y, true, color);
+    draw_transport_triangle(canvas, center_x - 1, center_y, true, color);
     return;
   }
-  fill_rect(canvas, Rect{center_x - 7, center_y - 9, 4, 18}, color);
-  fill_rect(canvas, Rect{center_x + 3, center_y - 9, 4, 18}, color);
+  fill_rect(canvas, Rect{center_x - 5, center_y - 7, 3, 14}, color);
+  fill_rect(canvas, Rect{center_x + 2, center_y - 7, 3, 14}, color);
 }
 
 void draw_loop_icon(Canvas *canvas, const Rect &rect, bool one,
                     uint16_t color) {
   const int center_x = rect.x + rect.width / 2;
   const int center_y = rect.y + rect.height / 2;
-  draw_pixel_line(canvas, center_x - 14, center_y - 7, center_x + 12,
-                  center_y - 7, 2, color);
-  draw_arrow_head(canvas, center_x + 14, center_y - 7, true, color);
-  draw_pixel_line(canvas, center_x + 14, center_y + 7, center_x - 12,
-                  center_y + 7, 2, color);
-  draw_arrow_head(canvas, center_x - 14, center_y + 7, false, color);
+  draw_pixel_line(canvas, center_x - 11, center_y - 5, center_x + 9,
+                  center_y - 5, 1, color);
+  draw_arrow_head(canvas, center_x + 11, center_y - 5, true, color);
+  draw_pixel_line(canvas, center_x + 11, center_y + 5, center_x - 9,
+                  center_y + 5, 1, color);
+  draw_arrow_head(canvas, center_x - 11, center_y + 5, false, color);
   if (one)
-    draw_text(canvas, center_x - 2, center_y - 4, "1", 1, color);
+    draw_text(canvas, center_x - 2, center_y - 3, "1", 1, color);
 }
 
 void draw_shuffle_icon(Canvas *canvas, const Rect &rect, uint16_t color) {
   const int center_x = rect.x + rect.width / 2;
   const int center_y = rect.y + rect.height / 2;
-  draw_pixel_line(canvas, center_x - 15, center_y - 7, center_x - 9,
-                  center_y - 7, 2, color);
-  draw_pixel_line(canvas, center_x - 9, center_y - 7, center_x + 8,
-                  center_y + 7, 2, color);
-  draw_pixel_line(canvas, center_x - 15, center_y + 7, center_x - 9,
-                  center_y + 7, 2, color);
-  draw_pixel_line(canvas, center_x - 9, center_y + 7, center_x + 8,
-                  center_y - 7, 2, color);
-  draw_pixel_line(canvas, center_x + 8, center_y - 7, center_x + 13,
-                  center_y - 7, 2, color);
-  draw_pixel_line(canvas, center_x + 8, center_y + 7, center_x + 13,
-                  center_y + 7, 2, color);
-  draw_arrow_head(canvas, center_x + 15, center_y - 7, true, color);
-  draw_arrow_head(canvas, center_x + 15, center_y + 7, true, color);
+  draw_pixel_line(canvas, center_x - 12, center_y - 5, center_x - 7,
+                  center_y - 5, 1, color);
+  draw_pixel_line(canvas, center_x - 7, center_y - 5, center_x + 6,
+                  center_y + 5, 1, color);
+  draw_pixel_line(canvas, center_x - 12, center_y + 5, center_x - 7,
+                  center_y + 5, 1, color);
+  draw_pixel_line(canvas, center_x - 7, center_y + 5, center_x + 6,
+                  center_y - 5, 1, color);
+  draw_pixel_line(canvas, center_x + 6, center_y - 5, center_x + 10,
+                  center_y - 5, 1, color);
+  draw_pixel_line(canvas, center_x + 6, center_y + 5, center_x + 10,
+                  center_y + 5, 1, color);
+  draw_arrow_head(canvas, center_x + 12, center_y - 5, true, color);
+  draw_arrow_head(canvas, center_x + 12, center_y + 5, true, color);
 }
 
 void draw_playback_mode_icon(Canvas *canvas, const Rect &rect,
@@ -1405,16 +1400,10 @@ void render_player(Canvas *canvas, const ChiptunePlayer &player,
 
   draw_outline_arrow(canvas, kPreviousFileButton, true, orange);
   draw_outline_arrow(canvas, kNextFileButton, false, orange);
-  draw_icon_panel(canvas, kPlaybackModeButton, true, background, active,
-                  orange);
   draw_playback_mode_icon(canvas, kPlaybackModeButton, player.playback_mode(),
-                          background);
-  draw_icon_panel(canvas, kPreviousTrackButton, false, background, active,
-                  orange);
+                          text);
   draw_previous_icon(canvas, kPreviousTrackButton, text);
-  draw_icon_panel(canvas, kPauseButton, true, background, active, orange);
-  draw_pause_icon(canvas, kPauseButton, player.paused(), background);
-  draw_icon_panel(canvas, kNextTrackButton, false, background, active, orange);
+  draw_pause_icon(canvas, kPauseButton, player.paused(), text);
   draw_next_icon(canvas, kNextTrackButton, text);
 }
 
