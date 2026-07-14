@@ -195,5 +195,6 @@ int main(int argc, char **argv) {
   if (!save_canvas(output, number++, "wifi-symbols", canvas, &error))
     return 1;
 
+  std::printf("%zu\n", number);
   return 0;
 }
