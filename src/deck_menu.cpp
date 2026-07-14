@@ -1162,6 +1162,25 @@ public:
     input_quarantine_until_ = 0;
   }
 
+  void finish() {
+    if (child_pid_ > 0) {
+      int status = 0;
+      pid_t result = -1;
+      do {
+        result = waitpid(child_pid_, &status, 0);
+      } while (result < 0 && errno == EINTR);
+      if (result == child_pid_ &&
+          (!WIFEXITED(status) || WEXITSTATUS(status) != 0)) {
+        std::cerr << "deck-menu: menu sound worker failed" << std::endl;
+      } else if (result < 0 && errno != ECHILD) {
+        std::cerr << "deck-menu: cannot finish menu sound worker: "
+                  << std::strerror(errno) << std::endl;
+      }
+    }
+    child_pid_ = -1;
+    input_quarantine_until_ = 0;
+  }
+
 private:
   MenuSoundPlayer(const MenuSoundPlayer &);
   MenuSoundPlayer &operator=(const MenuSoundPlayer &);
@@ -4000,7 +4019,7 @@ int application_main(const Options &options) {
         selected_game = game_index;
       }
     };
-    const auto play_controller_sound = [&](MenuSoundCue cue) {
+    const auto play_menu_sound = [&](MenuSoundCue cue) {
       if (volume == 0)
         return;
       std::string sound_error;
@@ -4057,7 +4076,7 @@ int application_main(const Options &options) {
       }
       render_current_menu();
       framebuffer.present(canvas, NULL);
-      play_controller_sound(MenuSoundCueBack);
+      play_menu_sound(MenuSoundCueBack);
     } else if (controller_command == MenuGamepadCommandVolumeDown ||
                controller_command == MenuGamepadCommandVolumeUp) {
       cancel_reboot_confirmation();
@@ -4088,10 +4107,9 @@ int application_main(const Options &options) {
       render_current_menu();
       framebuffer.present(canvas, NULL);
       if (moved) {
-        play_controller_sound(controller_command ==
-                                      MenuGamepadCommandPrevious
-                                  ? MenuSoundCuePrevious
-                                  : MenuSoundCueNext);
+        play_menu_sound(controller_command == MenuGamepadCommandPrevious
+                            ? MenuSoundCuePrevious
+                            : MenuSoundCueNext);
       }
     } else if (controller_command == MenuGamepadCommandConfirm) {
       if (!game_view) {
@@ -4101,12 +4119,12 @@ int application_main(const Options &options) {
         status.clear();
         render_current_menu();
         framebuffer.present(canvas, NULL);
-        play_controller_sound(MenuSoundCueConfirm);
+        play_menu_sound(MenuSoundCueConfirm);
       } else if (layout.shown_game_index < games.size()) {
         if (!is_built_in_reboot(games[layout.shown_game_index]))
           cancel_reboot_confirmation();
         request_game(static_cast<int>(layout.shown_game_index));
-        play_controller_sound(MenuSoundCueConfirm);
+        play_menu_sound(MenuSoundCueConfirm);
       }
     }
 
@@ -4135,6 +4153,7 @@ int application_main(const Options &options) {
           wifi_view = false;
           status = "WIFI EDITOR CLOSED";
           render_current_menu();
+          play_menu_sound(MenuSoundCueBack);
         } else if (released_target == WifiTargetSave) {
           std::string wifi_error;
           if (save_wifi_profile(options.wifi_helper, wifi_state.ssid,
@@ -4146,9 +4165,11 @@ int application_main(const Options &options) {
             wifi_state.status = wifi_error;
           }
           render_wifi(wifi_state, &canvas, &wifi_layout);
+          play_menu_sound(MenuSoundCueConfirm);
         } else if (apply_wifi_target(released_target, wifi_layout,
                                      &wifi_state)) {
           render_wifi(wifi_state, &canvas, &wifi_layout);
+          play_menu_sound(MenuSoundCueNext);
         }
         framebuffer.present(canvas, NULL);
       } else if (!wifi_view && pressed_target == released_target &&
@@ -4161,6 +4182,9 @@ int application_main(const Options &options) {
         status.clear();
         render_current_menu();
         framebuffer.present(canvas, NULL);
+        play_menu_sound(pressed_target == MenuTargetSystemUp
+                            ? MenuSoundCuePrevious
+                            : MenuSoundCueNext);
       } else if (!wifi_view &&
                  pressed_target == MenuTargetSystemOpen &&
                  released_target == MenuTargetSystemOpen) {
@@ -4169,6 +4193,7 @@ int application_main(const Options &options) {
         status.clear();
         render_current_menu();
         framebuffer.present(canvas, NULL);
+        play_menu_sound(MenuSoundCueConfirm);
       } else if (!wifi_view &&
                  pressed_target == MenuTargetSystemBack &&
                  released_target == MenuTargetSystemBack) {
@@ -4176,6 +4201,7 @@ int application_main(const Options &options) {
         status.clear();
         render_current_menu();
         framebuffer.present(canvas, NULL);
+        play_menu_sound(MenuSoundCueBack);
       } else if (!wifi_view && pressed_target == released_target &&
                  (pressed_target == MenuTargetGamePrevious ||
                   pressed_target == MenuTargetGameNext) &&
@@ -4190,6 +4216,9 @@ int application_main(const Options &options) {
         status.clear();
         render_current_menu();
         framebuffer.present(canvas, NULL);
+        play_menu_sound(pressed_target == MenuTargetGamePrevious
+                            ? MenuSoundCuePrevious
+                            : MenuSoundCueNext);
       } else if (!wifi_view &&
                  (pressed_target == MenuTargetVolumeDown ||
                   pressed_target == MenuTargetVolumeUp ||
@@ -4204,9 +4233,11 @@ int application_main(const Options &options) {
         wifi_state.status.clear();
         render_wifi(wifi_state, &canvas, &wifi_layout);
         framebuffer.present(canvas, NULL);
+        play_menu_sound(MenuSoundCueConfirm);
       } else if (!wifi_view && pressed_target == MenuTargetTerminal &&
                  released_target == MenuTargetTerminal) {
         terminal_requested = true;
+        play_menu_sound(MenuSoundCueConfirm);
       } else if (!wifi_view && pressed_target == MenuTargetKeymap &&
                  released_target == MenuTargetKeymap) {
         const std::string requested = keymap == "cz" ? "us" : "cz";
@@ -4221,10 +4252,12 @@ int application_main(const Options &options) {
         }
         render_current_menu();
         framebuffer.present(canvas, NULL);
+        play_menu_sound(MenuSoundCueConfirm);
       } else if (!wifi_view && pressed_target >= 0 &&
                  pressed_target == released_target &&
                  pressed_target < static_cast<int>(games.size())) {
         request_game(pressed_target);
+        play_menu_sound(MenuSoundCueConfirm);
       }
       pressed_target = MenuTargetNone;
     }
@@ -4242,7 +4275,7 @@ int application_main(const Options &options) {
 
     // Close dashboard readers so the launched program gets a fresh controller
     // queue and the menu cannot accumulate gameplay events while it waits.
-    menu_sound_player.stop();
+    menu_sound_player.finish();
     menu_gamepads.close_for_child();
     const ChildResult child =
         terminal_requested

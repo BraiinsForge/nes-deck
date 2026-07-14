@@ -55,9 +55,10 @@ At runtime, use Up/Down on the orange console selector, then tap it to open the
 active console's carousel. Either THEGamepad controller provides the same
 navigation: Up/Down switches consoles, A opens one, Left/Right selects a game,
 A launches it, B returns to the console selector, and L/R changes volume in
-5-point steps. Successful controller navigation plays a short directional,
-enter, or back chiptune while volume is audible. An isolated sound worker
-keeps input responsive, and input arriving during a cue is discarded. Each game
+5-point steps. Successful controller and touchscreen navigation plays a short
+directional, enter, or back chiptune while volume is audible. An isolated
+sound worker keeps input responsive, and input arriving during a cue is
+discarded. Each game
 retains its original catalog index for launch routing. Descriptions and license
 labels
 stay out of the launcher; redistribution and license details remain in
