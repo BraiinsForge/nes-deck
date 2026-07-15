@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -46,7 +45,7 @@ var dashboardPaletteSpecs = []paletteSpec{
 type paletteField struct {
 	Name  string
 	Label string
-	Value int
+	Value string
 }
 
 type paletteStore struct {
@@ -93,7 +92,22 @@ func validPaletteName(name string) bool {
 	return false
 }
 
-func validatePalette(values map[string]int) error {
+func normalizeRGB(value string) (string, bool) {
+	if len(value) != 7 || value[0] != '#' {
+		return "", false
+	}
+	for index := 1; index < len(value); index++ {
+		character := value[index]
+		if !((character >= '0' && character <= '9') ||
+			(character >= 'a' && character <= 'f') ||
+			(character >= 'A' && character <= 'F')) {
+			return "", false
+		}
+	}
+	return strings.ToUpper(value), true
+}
+
+func validatePalette(values map[string]string) error {
 	if len(values) != len(dashboardPaletteSpecs) {
 		return errors.New("palette must contain every dashboard color exactly once")
 	}
@@ -102,15 +116,15 @@ func validatePalette(values map[string]int) error {
 		if !ok {
 			return fmt.Errorf("palette is missing %s", spec.name)
 		}
-		if value < 0 || value > 255 {
-			return fmt.Errorf("palette %s must be from 0 through 255", spec.name)
+		if normalized, valid := normalizeRGB(value); !valid || normalized != value {
+			return fmt.Errorf("palette %s must use canonical #RRGGBB", spec.name)
 		}
 	}
 	return nil
 }
 
-func parsePaletteTSV(contents []byte) (map[string]int, error) {
-	values := make(map[string]int, len(dashboardPaletteSpecs))
+func parsePaletteTSV(contents []byte) (map[string]string, error) {
+	values := make(map[string]string, len(dashboardPaletteSpecs))
 	scanner := bufio.NewScanner(strings.NewReader(string(contents)))
 	scanner.Buffer(make([]byte, maximumPaletteBytes), maximumPaletteBytes+1)
 	for scanner.Scan() {
@@ -122,9 +136,9 @@ func parsePaletteTSV(contents []byte) (map[string]int, error) {
 		if _, exists := values[fields[0]]; exists {
 			return nil, fmt.Errorf("palette repeats %s", fields[0])
 		}
-		value, err := strconv.Atoi(fields[1])
-		if err != nil {
-			return nil, fmt.Errorf("palette %s is not an integer", fields[0])
+		value, valid := normalizeRGB(fields[1])
+		if !valid {
+			return nil, fmt.Errorf("palette %s is not a full RGB color", fields[0])
 		}
 		values[fields[0]] = value
 	}
@@ -176,15 +190,15 @@ func paletteTokens(contents []byte) ([]string, error) {
 	return tokens, nil
 }
 
-func parsePaletteOverride(contents []byte) (map[string]int, error) {
+func parsePaletteOverride(contents []byte) (map[string]string, error) {
 	tokens, err := paletteTokens(contents)
 	if err != nil {
 		return nil, err
 	}
-	if len(tokens) != 2*len(dashboardPaletteSpecs)+7 || tokens[0] != "(" || tokens[1] != ":version" || tokens[2] != "1" || tokens[3] != ":palette" || tokens[4] != "(" || tokens[len(tokens)-2] != ")" || tokens[len(tokens)-1] != ")" {
-		return nil, errors.New("palette override must use schema version 1")
+	if len(tokens) != 2*len(dashboardPaletteSpecs)+7 || tokens[0] != "(" || tokens[1] != ":version" || tokens[2] != "2" || tokens[3] != ":palette" || tokens[4] != "(" || tokens[len(tokens)-2] != ")" || tokens[len(tokens)-1] != ")" {
+		return nil, errors.New("palette override must use schema version 2")
 	}
-	values := make(map[string]int, len(dashboardPaletteSpecs))
+	values := make(map[string]string, len(dashboardPaletteSpecs))
 	for index := 5; index < len(tokens)-2; index += 2 {
 		key := tokens[index]
 		if !strings.HasPrefix(key, ":") || !validPaletteName(key[1:]) {
@@ -194,9 +208,13 @@ func parsePaletteOverride(contents []byte) (map[string]int, error) {
 		if _, exists := values[name]; exists {
 			return nil, fmt.Errorf("palette override repeats %s", name)
 		}
-		value, err := strconv.Atoi(tokens[index+1])
-		if err != nil {
-			return nil, fmt.Errorf("palette override %s is not an integer", name)
+		encoded := tokens[index+1]
+		if len(encoded) != 9 || encoded[0] != '"' || encoded[8] != '"' {
+			return nil, fmt.Errorf("palette override %s is not a quoted RGB color", name)
+		}
+		value, valid := normalizeRGB(encoded[1:8])
+		if !valid {
+			return nil, fmt.Errorf("palette override %s is not a full RGB color", name)
 		}
 		values[name] = value
 	}
@@ -206,20 +224,20 @@ func parsePaletteOverride(contents []byte) (map[string]int, error) {
 	return values, nil
 }
 
-func encodePaletteOverride(values map[string]int) []byte {
+func encodePaletteOverride(values map[string]string) []byte {
 	var builder strings.Builder
-	builder.WriteString("(:version 1\n :palette\n  (")
+	builder.WriteString("(:version 2\n :palette\n  (")
 	for index, spec := range dashboardPaletteSpecs {
 		if index > 0 {
 			builder.WriteString("\n   ")
 		}
-		fmt.Fprintf(&builder, ":%s %d", spec.name, values[spec.name])
+		fmt.Fprintf(&builder, ":%s \"%s\"", spec.name, values[spec.name])
 	}
 	builder.WriteString("))\n")
 	return []byte(builder.String())
 }
 
-func paletteFields(values map[string]int) []paletteField {
+func paletteFields(values map[string]string) []paletteField {
 	fields := make([]paletteField, 0, len(dashboardPaletteSpecs))
 	for _, spec := range dashboardPaletteSpecs {
 		fields = append(fields, paletteField{Name: spec.name, Label: spec.label, Value: values[spec.name]})
@@ -228,7 +246,7 @@ func paletteFields(values map[string]int) []paletteField {
 }
 
 func (store *paletteStore) currentLocked() ([]paletteField, error) {
-	var values map[string]int
+	var values map[string]string
 	var baseError error
 	// The launcher deliberately chooses the checked-in palette when an override
 	// fails. Prefer that same source here so an older generated file cannot make
@@ -265,7 +283,7 @@ func (store *paletteStore) current() ([]paletteField, error) {
 	return store.currentLocked()
 }
 
-func (store *paletteStore) save(values map[string]int) error {
+func (store *paletteStore) save(values map[string]string) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if err := validatePalette(values); err != nil {

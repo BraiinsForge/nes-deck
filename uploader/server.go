@@ -15,7 +15,6 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -130,7 +129,7 @@ func wireGuardPeer(host string) bool {
 
 func (app *application) securityHeaders(response http.ResponseWriter) {
 	response.Header().Set("Cache-Control", "no-store")
-	response.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	response.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 	response.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 	response.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	response.Header().Set("Referrer-Policy", "no-referrer")
@@ -432,7 +431,7 @@ func (app *application) handlePalette(response http.ResponseWriter, request *htt
 		http.Error(response, "Request rejected", http.StatusForbidden)
 		return
 	}
-	values := make(map[string]int, len(dashboardPaletteSpecs))
+	values := make(map[string]string, len(dashboardPaletteSpecs))
 	for key, fields := range request.PostForm {
 		if key == "csrf" {
 			if len(fields) != 1 {
@@ -445,9 +444,9 @@ func (app *application) handlePalette(response http.ResponseWriter, request *htt
 			app.render(response, http.StatusBadRequest, app.dashboardData(session, "The color form contains an unknown or repeated field.", ""))
 			return
 		}
-		value, parseErr := strconv.Atoi(fields[0])
-		if parseErr != nil || value < 0 || value > 255 {
-			app.render(response, http.StatusBadRequest, app.dashboardData(session, "Every color must be an xterm-256 index from 0 through 255.", ""))
+		value, valid := normalizeRGB(fields[0])
+		if !valid {
+			app.render(response, http.StatusBadRequest, app.dashboardData(session, "Every color must be a full RGB value like #12ABEF.", ""))
 			return
 		}
 		values[key] = value
@@ -483,6 +482,13 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		}
 		response.Header().Set("Content-Type", "text/css; charset=utf-8")
 		_, _ = response.Write([]byte(paperCSS))
+	case "/assets/palette.js":
+		if request.Method != http.MethodGet {
+			http.Error(response, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		_, _ = response.Write([]byte(paletteJS))
 	default:
 		http.NotFound(response, request)
 	}

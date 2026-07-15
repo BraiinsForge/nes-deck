@@ -8,6 +8,7 @@ const pageTemplate = `{{define "page"}}<!doctype html>
   <meta name="robots" content="noindex, nofollow">
   <title>Retro Deck ROM uploader</title>
   <link rel="stylesheet" href="/assets/paper.css">
+  <script src="/assets/palette.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -49,14 +50,17 @@ const pageTemplate = `{{define "page"}}<!doctype html>
       {{if .Palette}}
         <section class="palette-section">
           <h2>Dashboard colors</h2>
-          <p class="hint">xterm-256 indexes</p>
+          <p class="hint">#RRGGBB</p>
           <form action="/palette" method="post">
             <input type="hidden" name="csrf" value="{{.CSRF}}">
             <div class="palette-grid">
               {{range .Palette}}
                 <label>
                   <span>{{.Label}}</span>
-                  <input type="number" name="{{.Name}}" value="{{.Value}}" min="0" max="255" inputmode="numeric" required>
+                  <span class="palette-inputs">
+                    <input class="palette-picker" type="color" value="{{.Value}}" data-palette-picker="palette-{{.Name}}" aria-label="Choose {{.Label}}">
+                    <input class="palette-hex" id="palette-{{.Name}}" type="text" name="{{.Name}}" value="{{.Value}}" pattern="#[0-9A-Fa-f]{6}" minlength="7" maxlength="7" spellcheck="false" autocomplete="off" required>
+                  </span>
                 </label>
               {{end}}
             </div>
@@ -238,11 +242,51 @@ input:focus, select:focus, button:focus, .skip-link:focus {
   font-size: 0.86rem;
 }
 
-.palette-grid input { min-height: 40px; }
+.palette-inputs {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 7px;
+}
+
+.palette-grid input { min-height: 44px; }
+
+.palette-picker {
+  width: 46px;
+  padding: 3px;
+}
+
+.palette-hex {
+  font-family: "Courier New", Courier, monospace;
+  letter-spacing: 0.04em;
+}
 
 @media (max-width: 480px) {
   main { width: min(100% - 24px, 520px); }
   header { align-items: flex-start; flex-direction: column; gap: 16px; }
   .palette-grid { grid-template-columns: 1fr; }
 }
+`
+
+const paletteJS = `
+(function () {
+  "use strict";
+  var pickers = document.querySelectorAll("[data-palette-picker]");
+  for (var index = 0; index < pickers.length; index += 1) {
+    (function (picker) {
+      var text = document.getElementById(picker.getAttribute("data-palette-picker"));
+      if (!text) return;
+      picker.addEventListener("input", function () {
+        text.value = picker.value.toUpperCase();
+      });
+      text.addEventListener("input", function () {
+        if (/^#[0-9A-Fa-f]{6}$/.test(text.value)) {
+          picker.value = text.value;
+        }
+      });
+      text.addEventListener("blur", function () {
+        text.value = text.value.toUpperCase();
+      });
+    }(pickers[index]));
+  }
+}());
 `

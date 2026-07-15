@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -11,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -165,7 +165,7 @@ func testPalette(t *testing.T) (*paletteStore, string) {
 	for index, spec := range dashboardPaletteSpecs {
 		contents.WriteString(spec.name)
 		contents.WriteByte('\t')
-		contents.WriteString(strconv.Itoa(16 + index))
+		contents.WriteString(testRGB(index))
 		contents.WriteByte('\n')
 	}
 	if err := os.WriteFile(base, []byte(contents.String()), 0600); err != nil {
@@ -179,31 +179,35 @@ func testPalette(t *testing.T) (*paletteStore, string) {
 	}, override
 }
 
+func testRGB(index int) string {
+	return fmt.Sprintf("#%02X%02X%02X", index*3+1, index*3+2, index*3+3)
+}
+
 func TestDashboardPaletteConfiguration(t *testing.T) {
 	store, overridePath := testPalette(t)
 	fields, err := store.current()
-	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != 16 {
+	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" {
 		t.Fatalf("fallback palette did not load: %#v %v", fields, err)
 	}
 	var stale strings.Builder
 	for index, spec := range dashboardPaletteSpecs {
 		stale.WriteString(spec.name)
 		stale.WriteByte('\t')
-		stale.WriteString(strconv.Itoa(96 + index))
+		stale.WriteString(testRGB(index + 32))
 		stale.WriteByte('\n')
 	}
 	if err := os.WriteFile(store.activePath, []byte(stale.String()), 0600); err != nil {
 		t.Fatal(err)
 	}
 	fields, err = store.current()
-	if err != nil || fields[0].Value != 16 {
+	if err != nil || fields[0].Value != "#010203" {
 		t.Fatalf("stale generated palette overrode the checked-in fallback: %#v %v", fields, err)
 	}
-	values := make(map[string]int, len(fields))
+	values := make(map[string]string, len(fields))
 	for _, field := range fields {
 		values[field.Name] = field.Value
 	}
-	values["accent"] = 202
+	values["accent"] = "#123456"
 	restarts := 0
 	store.restartDashboard = func() error {
 		restarts++
@@ -220,7 +224,7 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed, err := parsePaletteOverride(contents)
-	if err != nil || parsed["accent"] != 202 {
+	if err != nil || parsed["accent"] != "#123456" {
 		t.Fatalf("palette override did not round-trip: %#v %v", parsed, err)
 	}
 	fields, err = store.current()
@@ -228,20 +232,20 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, field := range fields {
-		if field.Name == "accent" && field.Value != 202 {
+		if field.Name == "accent" && field.Value != "#123456" {
 			t.Fatalf("valid override was not displayed: %#v", fields)
 		}
 	}
-	if err := os.WriteFile(overridePath, []byte("(:version 1 :palette (:background 999))\n"), 0600); err != nil {
+	if err := os.WriteFile(overridePath, []byte("(:version 2 :palette (:background \"#12345G\"))\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	fields, err = store.current()
-	if err != nil || fields[0].Value != 16 {
+	if err != nil || fields[0].Value != "#010203" {
 		t.Fatalf("bad optional override hid the fallback palette: %#v %v", fields, err)
 	}
-	values["accent"] = 256
+	values["accent"] = "#12345G"
 	if err := store.save(values); err == nil {
-		t.Fatal("out-of-range palette value was accepted")
+		t.Fatal("malformed palette value was accepted")
 	}
 }
 
@@ -351,7 +355,7 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 
 	paletteForm := url.Values{"csrf": {session.csrf}}
 	for index, spec := range dashboardPaletteSpecs {
-		paletteForm.Set(spec.name, strconv.Itoa(32+index))
+		paletteForm.Set(spec.name, strings.ToLower(testRGB(index+32)))
 	}
 	paletteRequest := requestFor(http.MethodPost, testServiceOrigin+"/palette", strings.NewReader(paletteForm.Encode()))
 	paletteRequest.Header.Set("Origin", testServiceOrigin)
@@ -362,11 +366,30 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	if paletteResponse.Code != http.StatusOK || !strings.Contains(paletteResponse.Body.String(), "saved and applied") {
 		t.Fatalf("palette update returned %d: %s", paletteResponse.Code, paletteResponse.Body.String())
 	}
+	if !strings.Contains(paletteResponse.Body.String(), `type="color"`) ||
+		!strings.Contains(paletteResponse.Body.String(), `value="#616263"`) ||
+		!strings.Contains(paletteResponse.Body.String(), `/assets/palette.js`) {
+		t.Fatal("palette response does not expose synchronized full RGB controls")
+	}
 	if paletteRestarts != 1 {
 		t.Fatalf("palette update restarted dashboard %d times", paletteRestarts)
 	}
-	if _, err := os.Stat(overridePath); err != nil {
+	overrideContents, err := os.ReadFile(overridePath)
+	if err != nil {
 		t.Fatalf("palette update was not persisted: %v", err)
+	}
+	installedPalette, err := parsePaletteOverride(overrideContents)
+	if err != nil || installedPalette[dashboardPaletteSpecs[0].name] != "#616263" {
+		t.Fatalf("HTTP palette was not normalized and persisted: %#v %v", installedPalette, err)
+	}
+
+	scriptRequest := requestFor(http.MethodGet, testServiceOrigin+"/assets/palette.js", nil)
+	scriptResponse := httptest.NewRecorder()
+	app.ServeHTTP(scriptResponse, scriptRequest)
+	if scriptResponse.Code != http.StatusOK ||
+		!strings.Contains(scriptResponse.Body.String(), "toUpperCase") ||
+		scriptResponse.Header().Get("Content-Type") != "text/javascript; charset=utf-8" {
+		t.Fatalf("palette synchronization asset returned %d", scriptResponse.Code)
 	}
 }
 
