@@ -7,14 +7,22 @@
 
 (in-package #:nes-deck-catalog)
 
-(defconstant +schema-version+ 3)
+(defconstant +schema-version+ 4)
+(defconstant +palette-override-version+ 1)
 (defconstant +maximum-games+ 64)
 (defconstant +maximum-catalog-bytes+ 65536)
 (defconstant +console-rom-root+ "/mnt/data/roms/")
 (defconstant +deck-game-root+ "/mnt/data/nes-deck/games/")
-(defparameter +catalog-keys+ '(:version :games))
+(defparameter +catalog-keys+ '(:version :palette :games))
 (defparameter +game-keys+
   '(:id :title :system :rom :color))
+(defparameter +palette-keys+
+  '(:background :text-dark :field :surface :inactive-border
+    :control-border :footer :inactive-text :text :white :title
+    :volume-off :volume-on :selected :wifi-active :wifi-focus
+    :wifi-active-border :field-label :accent :active :control-surface
+    :muted))
+(defparameter +palette-override-keys+ '(:version :palette))
 
 (defun catalog-error (control &rest arguments)
   (error "Catalog error: ~?" control arguments))
@@ -185,6 +193,18 @@
     (catalog-error "game :color must be from the xterm-256 palette"))
   (string-upcase value))
 
+(defun validate-palette-index (value key)
+  (unless (and (integerp value) (<= 0 value 255))
+    (catalog-error "palette ~S must be an integer from 0 through 255" key))
+  value)
+
+(defun validate-palette (form context)
+  (let ((pairs (decode-plist form +palette-keys+ context)))
+    (loop for key in +palette-keys+
+          collect
+          (list (string-downcase (symbol-name key))
+                (validate-palette-index (required-value key pairs) key)))))
+
 (defun validate-game (form position)
   (let* ((context (format nil "game ~D" position))
          (pairs (decode-plist form +game-keys+ context))
@@ -208,6 +228,8 @@
 (defun validate-catalog (form)
   (let* ((pairs (decode-plist form +catalog-keys+ "catalog"))
          (version (required-value :version pairs))
+         (palette (validate-palette (required-value :palette pairs)
+                                    "catalog :palette"))
          (raw-games
            (bounded-list-elements
             (required-value :games pairs) +maximum-games+ "catalog :games"))
@@ -222,7 +244,17 @@
       (let ((duplicate (duplicate-field games (car field))))
         (when duplicate
           (catalog-error "duplicate game ~A ~S" (cdr field) duplicate))))
-    games))
+    (values games palette)))
+
+(defun validate-palette-override (form)
+  (let* ((pairs (decode-plist form +palette-override-keys+
+                              "palette override"))
+         (version (required-value :version pairs)))
+    (unless (eql version +palette-override-version+)
+      (catalog-error "unsupported palette override :version ~S; expected ~D"
+                     version +palette-override-version+))
+    (validate-palette (required-value :palette pairs)
+                      "palette override :palette")))
 
 (defun read-catalog (source)
   (with-open-file (stream source :direction :input)
@@ -247,42 +279,76 @@
              (write-string field stream))
     (terpri stream)))
 
-(defun emit-tsv-atomically (games output)
-  ;; TEMP is in OUTPUT's directory, making the final POSIX rename atomic.
-  (let* ((temporary (format nil "~A.tmp.~D" output (ext:getpid)))
-         (committed nil))
+(defun write-palette-tsv (palette stream)
+  (dolist (entry palette)
+    (write-string (first entry) stream)
+    (write-char #\Tab stream)
+    (write-string (write-to-string (second entry) :base 10 :radix nil)
+                  stream)
+    (terpri stream)))
+
+(defun emit-outputs-atomically (games palette games-output palette-output)
+  ;; Temporary files remain beside their outputs so both final renames are
+  ;; atomic on the Deck's persistent filesystem.
+  (let* ((games-temporary
+           (format nil "~A.tmp.~D" games-output (ext:getpid)))
+         (palette-temporary
+           (format nil "~A.tmp.~D" palette-output (ext:getpid)))
+         (games-committed nil)
+         (palette-committed nil))
     (unwind-protect
          (progn
-           (with-open-file (stream temporary
+           (with-open-file (stream games-temporary
                                    :direction :output
                                    :if-exists :supersede
                                    :if-does-not-exist :create)
              (write-tsv games stream)
              (finish-output stream))
-           ;; ECL's :IF-EXISTS :SUPERSEDE maps to one POSIX rename(2), unlike
-           ;; deleting OUTPUT first (which would create a missing-file window).
-           (rename-file temporary output :if-exists :supersede)
-           (setf committed t))
-      (unless committed
-        (when (probe-file temporary)
-          (ignore-errors (delete-file temporary)))))))
+           (with-open-file (stream palette-temporary
+                                   :direction :output
+                                   :if-exists :supersede
+                                   :if-does-not-exist :create)
+             (write-palette-tsv palette stream)
+             (finish-output stream))
+           (rename-file palette-temporary palette-output
+                        :if-exists :supersede)
+           (setf palette-committed t)
+           (rename-file games-temporary games-output :if-exists :supersede)
+           (setf games-committed t))
+      (unless games-committed
+        (when (probe-file games-temporary)
+          (ignore-errors (delete-file games-temporary))))
+      (unless palette-committed
+        (when (probe-file palette-temporary)
+          (ignore-errors (delete-file palette-temporary)))))))
 
-(defun last-two-command-arguments ()
-  ;; ECL includes its own options in EXT:COMMAND-ARGS.  The two fixed launcher
-  ;; arguments are intentionally taken from the tail so this works both with
-  ;; --shell and with ECL builds that omit processed options from the result.
+(defun last-four-command-arguments ()
+  ;; ECL includes its own options in EXT:COMMAND-ARGS.  The four fixed launcher
+  ;; arguments are intentionally taken from the tail.
   (let* ((arguments (ext:command-args))
          (count (length arguments)))
-    (when (< count 2)
-      (catalog-error "usage: ecl --norc --shell compile-catalog.lisp SOURCE OUTPUT"))
-    (values (nth (- count 2) arguments)
+    (when (< count 4)
+      (catalog-error
+       "usage: ecl --norc --shell compile-catalog.lisp SOURCE GAMES-OUTPUT PALETTE-OUTPUT PALETTE-OVERRIDE"))
+    (values (nth (- count 4) arguments)
+            (nth (- count 3) arguments)
+            (nth (- count 2) arguments)
             (nth (1- count) arguments))))
 
 (defun main ()
-  (multiple-value-bind (source output) (last-two-command-arguments)
-    (let ((games (validate-catalog (read-catalog source))))
-      (emit-tsv-atomically games output)
-      (format t "catalog: wrote ~D games to ~A~%" (length games) output))))
+  (multiple-value-bind
+        (source games-output palette-output palette-override)
+      (last-four-command-arguments)
+    (multiple-value-bind (games base-palette)
+        (validate-catalog (read-catalog source))
+      (let ((palette
+              (if (probe-file palette-override)
+                  (validate-palette-override
+                   (read-catalog palette-override))
+                  base-palette)))
+        (emit-outputs-atomically games palette games-output palette-output)
+        (format t "catalog: wrote ~D games and ~D palette roles~%"
+                (length games) (length palette))))))
 
 (handler-case
     (progn

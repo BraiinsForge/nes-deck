@@ -26,6 +26,9 @@ CHIPTUNE_DIRECTORY=/mnt/data/chiptunes
 CATALOG=$MENU_DIR/games.sexp
 FALLBACK_MANIFEST=$MENU_DIR/games.tsv
 GENERATED_MANIFEST=$STATE_DIR/games.tsv
+FALLBACK_PALETTE=$MENU_DIR/palette.tsv
+GENERATED_PALETTE=$STATE_DIR/palette.tsv
+PALETTE_OVERRIDE=$STATE_DIR/dashboard-palette.sexp
 UPLOAD_DIR=$BASE/uploads
 UPLOAD_MANIFEST=$UPLOAD_DIR/games.tsv
 COMBINED_MANIFEST=$STATE_DIR/combined-games.tsv
@@ -44,6 +47,7 @@ PYTHON=$BASE/langs/python
 SCHEME=$BASE/langs/chibi/chibi-scheme
 CHIBI_MODULE_PATH=$BASE/langs/chibi/lib
 WIFI_HELPER=/usr/sbin/deck-wifi-profile-add
+WIFI_STATUS=/var/run/deck-wifi/status
 KEYBOARD_QUIRKS=/usr/sbin/deck-keyboard-quirks
 COMPILER=$MENU_DIR/compile-catalog.lisp
 ECL=$BASE/ecl/bin/ecl.bin
@@ -176,6 +180,9 @@ if [ ! -r "$FALLBACK_MANIFEST" ] || [ ! -s "$FALLBACK_MANIFEST" ]; then
 	log_message "checked-in fallback manifest is missing or empty: $FALLBACK_MANIFEST"
 	exit 1
 fi
+if [ ! -r "$FALLBACK_PALETTE" ] || [ ! -s "$FALLBACK_PALETTE" ]; then
+	log_message "warning: checked-in palette is unavailable; deck-menu will use built-in colors"
+fi
 
 volume_value=
 volume_size=0
@@ -232,18 +239,22 @@ case $keymap_value:$keymap_size in
 esac
 
 manifest=$FALLBACK_MANIFEST
+palette=$FALLBACK_PALETTE
 if [ -x "$ECL" ] && [ -r "$COMPILER" ] && [ -r "$CATALOG" ]; then
 	log_message "validating menu catalog with ECL"
-	if "$ECL" --norc --shell "$COMPILER" "$CATALOG" "$GENERATED_MANIFEST" \
+	if "$ECL" --norc --shell "$COMPILER" "$CATALOG" \
+		"$GENERATED_MANIFEST" "$GENERATED_PALETTE" "$PALETTE_OVERRIDE" \
 		>> "$LOG_FILE" 2>&1 &&
-		[ -r "$GENERATED_MANIFEST" ] && [ -s "$GENERATED_MANIFEST" ]; then
+		[ -r "$GENERATED_MANIFEST" ] && [ -s "$GENERATED_MANIFEST" ] &&
+		[ -r "$GENERATED_PALETTE" ] && [ -s "$GENERATED_PALETTE" ]; then
 		manifest=$GENERATED_MANIFEST
-		log_message "using generated manifest: $manifest"
+		palette=$GENERATED_PALETTE
+		log_message "using generated manifest and dashboard palette"
 	else
-		log_message "catalog generation failed; using checked-in manifest: $FALLBACK_MANIFEST"
+		log_message "catalog generation failed; using checked-in manifest and built-in palette"
 	fi
 else
-	log_message "ECL catalog compiler unavailable; using checked-in manifest: $FALLBACK_MANIFEST"
+	log_message "ECL catalog compiler unavailable; using checked-in manifest and palette"
 fi
 
 if [ -s "$UPLOAD_MANIFEST" ] && [ ! -L "$UPLOAD_MANIFEST" ]; then
@@ -283,6 +294,8 @@ exec "$MENU" \
 	--keymap-state "$KEYMAP_STATE" \
 	--terminal "$TERMINAL" \
 	--wifi-helper "$WIFI_HELPER" \
+	--wifi-status "$WIFI_STATUS" \
 	--manifest "$manifest" \
+	--palette "$palette" \
 	--cover-directory "$COVER_DIR" \
 	>> "$LOG_FILE" 2>&1

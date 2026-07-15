@@ -153,20 +153,25 @@ int main(int argc, char **argv) {
   }
 
   SettingsLayout settings_layout;
+  NetworkStatus network;
+  network.ssid = "net1";
+  network.wlan_ipv4 = "10.249.110.248";
+  network.wireguard_ipv4 = "10.0.0.10";
+  network.selector = "CONNECTED";
   render_settings(42, 60, "us", SettingsTargetVolumeDown, std::string(),
-                  &canvas, &settings_layout);
+                  network, &canvas, &settings_layout);
   if (!save_canvas(output, number++, "settings", canvas, &error))
     return 1;
-  render_settings(0, 60, "us", SettingsTargetVolumeUp, std::string(), &canvas,
-                  &settings_layout);
+  render_settings(0, 60, "us", SettingsTargetVolumeUp, std::string(), network,
+                  &canvas, &settings_layout);
   if (!save_canvas(output, number++, "volume-off", canvas, &error))
     return 1;
   render_settings(42, 100, "us", SettingsTargetBrightnessUp, std::string(),
-                  &canvas, &settings_layout);
+                  network, &canvas, &settings_layout);
   if (!save_canvas(output, number++, "brightness-100", canvas, &error))
     return 1;
-  render_settings(42, 60, "cz", SettingsTargetKeymap, std::string(), &canvas,
-                  &settings_layout);
+  render_settings(42, 60, "cz", SettingsTargetKeymap, std::string(), network,
+                  &canvas, &settings_layout);
   if (!save_canvas(output, number++, "czech-keymap", canvas, &error))
     return 1;
   render_menu(games, "deck", 7, kRebootConfirmationText, &canvas,
@@ -176,22 +181,22 @@ int main(int argc, char **argv) {
 
   WifiState wifi;
   WifiLayout wifi_layout;
-  render_wifi(wifi, &canvas, &wifi_layout);
+  render_wifi(wifi, network, &canvas, &wifi_layout);
   if (!save_canvas(output, number++, "wifi-lowercase", canvas, &error))
     return 1;
   wifi.uppercase = true;
-  render_wifi(wifi, &canvas, &wifi_layout);
+  render_wifi(wifi, network, &canvas, &wifi_layout);
   if (!save_canvas(output, number++, "wifi-uppercase", canvas, &error))
     return 1;
   wifi.field = WifiPassphrase;
   wifi.ssid = "NETWORK";
   wifi.passphrase = "password";
-  render_wifi(wifi, &canvas, &wifi_layout);
+  render_wifi(wifi, network, &canvas, &wifi_layout);
   if (!save_canvas(output, number++, "wifi-password", canvas, &error))
     return 1;
   wifi.symbols = true;
   wifi.uppercase = false;
-  render_wifi(wifi, &canvas, &wifi_layout);
+  render_wifi(wifi, network, &canvas, &wifi_layout);
   if (!save_canvas(output, number++, "wifi-symbols", canvas, &error))
     return 1;
 

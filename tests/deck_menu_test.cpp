@@ -80,6 +80,33 @@ int main() {
   const std::string brightness_max_file = directory + "/max_brightness";
   const std::string brightness_state = directory + "/brightness.state";
   const std::string keymap_state = directory + "/keymap.state";
+  const std::string palette_path = directory + "/palette.tsv";
+  const std::string bad_palette_path = directory + "/bad-palette.tsv";
+  std::string error;
+
+  const std::string palette_fixture =
+      "background\t16\ntext-dark\t233\nfield\t233\nsurface\t234\n"
+      "inactive-border\t59\ncontrol-border\t242\nfooter\t250\n"
+      "inactive-text\t253\ntext\t255\nwhite\t231\ntitle\t229\n"
+      "volume-off\t138\nvolume-on\t108\nselected\t109\n"
+      "wifi-active\t67\nwifi-focus\t111\nwifi-active-border\t147\n"
+      "field-label\t145\naccent\t202\nactive\t237\n"
+      "control-surface\t236\nmuted\t246\n";
+  expect(write_file(palette_path, palette_fixture.data(),
+                    palette_fixture.size()),
+         "write complete dashboard palette fixture");
+  error.clear();
+  expect(load_dashboard_palette(palette_path, &error) &&
+             kColorAccent == 202 && kColorMuted == 246,
+         "complete xterm dashboard palette loads");
+  const std::string bad_palette = "background\t999\n";
+  expect(write_file(bad_palette_path, bad_palette.data(), bad_palette.size()),
+         "write invalid dashboard palette fixture");
+  error.clear();
+  expect(!load_dashboard_palette(bad_palette_path, &error) &&
+             kColorAccent == 202,
+         "invalid palette is rejected without partially changing colors");
+  reset_dashboard_palette();
 
   expect(menu_gamepad_key_to_button(BTN_THUMB2) == kMenuPadConfirm &&
              menu_gamepad_key_to_button(BTN_TOP) == kMenuPadConfirm &&
@@ -285,7 +312,6 @@ int main() {
   expect(write_file(manifest, row.data(), row.size()), "write manifest fixture");
 
   std::vector<GameEntry> games;
-  std::string error;
   expect(load_manifest(manifest, &games, &error), "load valid manifest");
   expect(games.size() == 1, "manifest contains one game");
   if (games.size() == 1) {
@@ -696,9 +722,9 @@ int main() {
                     active_tab.x] == xterm_pixel(kColorBackground) &&
              canvas[static_cast<size_t>(active_tab.y) * kLogicalWidth +
                     active_tab.x + kPixelStroke] ==
-                 kInterfaceOrange.pixel() &&
+                 xterm_pixel(kColorAccent) &&
              canvas[static_cast<size_t>(active_tab.y + 12) * kLogicalWidth +
-                    active_tab.x + 6] == kInterfaceActive.pixel() &&
+                    active_tab.x + 6] == xterm_pixel(kColorActive) &&
              canvas[static_cast<size_t>(inactive_tab.y + 12) * kLogicalWidth +
                     inactive_tab.x + 6] == xterm_pixel(kColorBackground),
          "tabs use cut orange borders and the translucent active fill");
@@ -716,7 +742,7 @@ int main() {
              menu_layout.settings_button.y == 412 &&
              rect_contains_color(canvas, menu_layout.settings_button,
                                  xterm_pixel(kColorFooter)),
-         "dim retro settings sliders sit at the bottom-right inset");
+         "dim retro cog sits at the bottom-right inset");
   expect(menu_layout.game_buttons.size() == 3 &&
              menu_layout.game_indices.size() == 4 &&
              menu_layout.visible_game_indices.size() == 3 &&
@@ -731,9 +757,9 @@ int main() {
                     selected_card.x] == xterm_pixel(kColorBackground) &&
              canvas[static_cast<size_t>(selected_card.y) * kLogicalWidth +
                     selected_card.x + kPixelStroke] ==
-                 kInterfaceOrange.pixel() &&
+                 xterm_pixel(kColorAccent) &&
              canvas[static_cast<size_t>(selected_card.y + 12) * kLogicalWidth +
-                    selected_card.x + 6] == kInterfaceActive.pixel() &&
+                    selected_card.x + 6] == xterm_pixel(kColorActive) &&
              canvas[static_cast<size_t>(inactive_card.y + 12) * kLogicalWidth +
                     inactive_card.x + 6] == xterm_pixel(kColorBackground),
          "selected game card reuses the active tab fill");
@@ -797,7 +823,7 @@ int main() {
              canvas[static_cast<size_t>(menu_layout.game_buttons[1].y + 12) *
                         kLogicalWidth +
                     menu_layout.game_buttons[1].x + 6] ==
-                 kInterfaceActive.pixel(),
+                 xterm_pixel(kColorActive),
          "carousel window follows and fills the centered selected game");
   expect(menu_layout.game_position_indicators.size() == 4 &&
              canvas[static_cast<size_t>(
@@ -899,8 +925,13 @@ int main() {
          "terminal icon is vertically centered and names its login shell");
 
   SettingsLayout settings_layout;
+  NetworkStatus network_status;
+  network_status.ssid = "net1";
+  network_status.wlan_ipv4 = "10.249.110.248";
+  network_status.wireguard_ipv4 = "10.0.0.10";
+  network_status.selector = "CONNECTED";
   render_settings(42, 60, "us", SettingsTargetVolumeDown, std::string(),
-                  &canvas, &settings_layout);
+                  network_status, &canvas, &settings_layout);
   expect(settings_layout.close_button.x == 1212 &&
              settings_layout.close_button.y == 12 &&
              settings_target_at(settings_layout,
@@ -940,26 +971,26 @@ int main() {
   expect(canvas[static_cast<size_t>(settings_layout.volume_down_button.y + 12) *
                         kLogicalWidth +
                     settings_layout.volume_down_button.x + 6] ==
-                 kInterfaceActive.pixel() &&
+                 xterm_pixel(kColorActive) &&
              canvas[static_cast<size_t>(settings_layout.volume_up_button.y +
                                         12) *
                         kLogicalWidth +
                     settings_layout.volume_up_button.x + 6] ==
-                 kInterfaceSurface.pixel(),
+                 xterm_pixel(kColorControlSurface),
          "controller-selected setting uses the active fill");
-  render_settings(0, 100, "cz", SettingsTargetWifi, std::string(), &canvas,
-                  &settings_layout);
+  render_settings(0, 100, "cz", SettingsTargetWifi, std::string(),
+                  network_status, &canvas, &settings_layout);
   expect(canvas[static_cast<size_t>(settings_layout.wifi_button.y + 12) *
                         kLogicalWidth +
                     settings_layout.wifi_button.x + 6] ==
-                 kInterfaceActive.pixel() &&
+                 xterm_pixel(kColorActive) &&
              rect_contains_color(canvas, settings_layout.keymap_button,
                                  xterm_pixel(kColorText)),
          "settings renders muted volume, full brightness, and Czech keys");
 
   WifiState wifi_state;
   WifiLayout wifi_layout;
-  render_wifi(wifi_state, &canvas, &wifi_layout);
+  render_wifi(wifi_state, network_status, &canvas, &wifi_layout);
   expect(wifi_layout.keys.size() == 30,
          "alphabet keyboard exposes all letter and common SSID keys");
   expect(wifi_layout.keys[0].value == 'q' &&
@@ -967,11 +998,11 @@ int main() {
          "lowercase Wi-Fi keys use distinct lowercase bitmap glyphs");
   const Canvas lowercase_wifi = canvas;
   wifi_state.uppercase = true;
-  render_wifi(wifi_state, &canvas, &wifi_layout);
+  render_wifi(wifi_state, network_status, &canvas, &wifi_layout);
   expect(wifi_layout.keys[0].value == 'Q' && canvas != lowercase_wifi,
          "uppercase mode visibly changes the keyboard and its case control");
   wifi_state.uppercase = false;
-  render_wifi(wifi_state, &canvas, &wifi_layout);
+  render_wifi(wifi_state, network_status, &canvas, &wifi_layout);
   expect(apply_wifi_target(WifiTargetKeyBase, wifi_layout, &wifi_state),
          "keyboard character target applies");
   expect(wifi_state.ssid == "q", "keyboard enters into selected SSID field");
@@ -986,7 +1017,7 @@ int main() {
   expect(apply_wifi_target(WifiTargetMode, wifi_layout, &wifi_state) &&
              wifi_state.symbols,
          "symbol keyboard can be selected");
-  render_wifi(wifi_state, &canvas, &wifi_layout);
+  render_wifi(wifi_state, network_status, &canvas, &wifi_layout);
   expect(wifi_layout.keys.size() == 42,
          "symbol keyboard exposes every printable punctuation key");
 
@@ -1019,12 +1050,14 @@ int main() {
       "--chiptune-player", "/bin/sleep", "--chiptune-directory",
       "/tmp/chiptunes",
       "--manifest",     "/tmp/games",
+      "--palette",      "/tmp/palette",
       "--cover-directory", "/tmp/covers",
       "--volume-state", "/tmp/volume",      "--brightness",
       "/tmp/brightness", "--brightness-max", "/tmp/max-brightness",
       "--brightness-state", "/tmp/brightness-state", "--keymap-state",
       "/tmp/keymap",    "--terminal",       "/bin/false",
-      "--wifi-helper",  "/bin/echo"};
+      "--wifi-helper",  "/bin/echo",        "--wifi-status",
+      "/var/run/deck-wifi/status"};
   char *option_argv[sizeof(option_values) / sizeof(option_values[0])];
   for (size_t index = 0; index < sizeof(option_values) / sizeof(option_values[0]);
        ++index)
@@ -1036,6 +1069,8 @@ int main() {
          "terminal and wifi helper options parse");
   expect(options.terminal == "/bin/false" &&
              options.wifi_helper == "/bin/echo" &&
+             options.palette == "/tmp/palette" &&
+             options.wifi_status == "/var/run/deck-wifi/status" &&
              options.chiptune_player == "/bin/sleep" &&
              options.chiptune_directory == "/tmp/chiptunes" &&
              options.cover_directory == "/tmp/covers" &&

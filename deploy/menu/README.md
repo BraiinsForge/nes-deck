@@ -12,6 +12,7 @@ Copy these files to the Deck without changing their basenames:
 | --- | --- |
 | `games.sexp` | `/mnt/data/nes-deck/menu/games.sexp` |
 | `games.tsv` | `/mnt/data/nes-deck/menu/games.tsv` |
+| `palette.tsv` | `/mnt/data/nes-deck/menu/palette.tsv` |
 | `compile-catalog.lisp` | `/mnt/data/nes-deck/menu/compile-catalog.lisp` |
 | `deck-menu-launcher` | `/mnt/data/nes-deck/menu/deck-menu-launcher` |
 | `deck-keyboard-quirks` | `/usr/sbin/deck-keyboard-quirks` |
@@ -93,7 +94,9 @@ device-specific hotplug quirk; its primary boot-keyboard interface remains
 active. This prevents repeated DWC2 USB resets from stalling both keyboard and
 gamepad input on the shared host controller.
 
-The top-right gear or controller Select opens settings. D-pad directions move
+The bottom-right cogwheel or controller Select opens settings. The settings
+screen shows the associated Wi-Fi name, `wlan0` address, WireGuard address,
+and automatic Wi-Fi state without changing the network. D-pad directions move
 among volume down/up, brightness down/up, terminal, keymap, and Wi-Fi; A
 activates the selected control and B or the cross closes the screen. Volume is
 atomically persisted in 5-point steps from 0 through 100. Plus while muted
@@ -165,17 +168,26 @@ xterm-256 palette. The output is headerless TSV in the field order above. It is
 written beside a process-specific temporary file and
 atomically renamed only after the complete catalog validates.
 
-The checked-in `games.tsv` is a known-good fallback.  If ECL, the source
-catalog, or generation is unavailable, the launcher uses that file and logs
-the reason.  No shell evaluates catalog content.
+The catalog also contains every dashboard color as a semantic xterm-256 index.
+The compiler writes these to `palette.tsv`. A complete version-1 override at
+`/mnt/data/nes-deck/state/dashboard-palette.sexp` replaces those values. The
+native dashboard validates all roles before applying any of them. If the
+override, generated palette, or checked-in palette is malformed or missing,
+startup continues with the last usable layer or built-in colors.
+
+The checked-in `games.tsv` and `palette.tsv` files are known-good fallbacks. If
+ECL, the source catalog, or generation is unavailable, the launcher uses those
+files and logs the reason. No shell evaluates catalog content.
 
 ## Pre-deployment check
 
 With ECL available on the build machine:
 
 ```sh
-ecl --norc --shell compile-catalog.lisp games.sexp /tmp/games.tsv
+ecl --norc --shell compile-catalog.lisp games.sexp \
+  /tmp/games.tsv /tmp/palette.tsv /tmp/missing-palette-override.sexp
 cmp games.tsv /tmp/games.tsv
+cmp palette.tsv /tmp/palette.tsv
 ```
 
 At deployment, make the launcher, menu, emulator, and init script executable.

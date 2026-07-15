@@ -38,6 +38,7 @@
  */
 
 #include <algorithm>
+#include <arpa/inet.h>
 #include <cerrno>
 #include <cctype>
 #include <climits>
@@ -48,11 +49,13 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
 #include <fstream>
 #include <iostream>
 #include <linux/fb.h>
 #include <linux/input.h>
 #include <linux/kd.h>
+#include <linux/wireless.h>
 #include <linux/soundcard.h>
 #include <poll.h>
 #include <png.h>
@@ -62,6 +65,7 @@
 #include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -79,6 +83,7 @@ const int kPhysicalWidth = 600;
 const int kPhysicalHeight = 1280;
 const int kMaxGames = 64;
 const off_t kMaximumManifestBytes = 65536;
+const off_t kMaximumPaletteBytes = 4096;
 const int kMaximumCoverWidth = 600;
 const int kMaximumCoverHeight = 378;
 const off_t kMaximumCoverBytes =
@@ -287,34 +292,64 @@ bool is_xterm_color(const RgbColor &color) {
 
 uint16_t xterm_pixel(unsigned int index) { return xterm_color(index).pixel(); }
 
-// The design-team orange is intentionally outside the older xterm-only
-// dashboard palette. RGB565 quantizes it only at final scanout. The active
-// fill is #ffb896 composited at 30% over black: round(0.3 * RGB).
-const RgbColor kInterfaceOrange = {254, 108, 39};
-const RgbColor kInterfaceActive = {77, 55, 45};
-const RgbColor kInterfaceSurface = {48, 48, 48};
-const RgbColor kInterfaceMuted = {150, 150, 150};
+// Every dashboard base color is a semantic xterm-256 index. The compiled
+// palette can replace these defaults before any framebuffer is opened.
+unsigned int kColorBackground = 16;
+unsigned int kColorTextDark = 233;
+unsigned int kColorField = 233;
+unsigned int kColorSurface = 234;
+unsigned int kColorInactiveBorder = 59;
+unsigned int kColorControlBorder = 242;
+unsigned int kColorFooter = 250;
+unsigned int kColorInactiveText = 253;
+unsigned int kColorText = 255;
+unsigned int kColorWhite = 231;
+unsigned int kColorTitle = 229;
+unsigned int kColorVolumeOff = 138;
+unsigned int kColorVolumeOn = 108;
+unsigned int kColorSelected = 109;
+unsigned int kColorWifiActive = 67;
+unsigned int kColorWifiFocus = 111;
+unsigned int kColorWifiActiveBorder = 147;
+unsigned int kColorFieldLabel = 145;
+unsigned int kColorAccent = 202;
+unsigned int kColorActive = 237;
+unsigned int kColorControlSurface = 236;
+unsigned int kColorMuted = 246;
 
-// Semantic colors are canonical xterm-256 indices. Catalog colors are
-// validated against the same palette before the framebuffer is opened.
-const unsigned int kColorBackground = 16;
-const unsigned int kColorTextDark = 233;
-const unsigned int kColorField = 233;
-const unsigned int kColorSurface = 234;
-const unsigned int kColorInactiveBorder = 59;
-const unsigned int kColorControlBorder = 242;
-const unsigned int kColorFooter = 250;
-const unsigned int kColorInactiveText = 253;
-const unsigned int kColorText = 255;
-const unsigned int kColorWhite = 231;
-const unsigned int kColorTitle = 229;
-const unsigned int kColorVolumeOff = 138;
-const unsigned int kColorVolumeOn = 108;
-const unsigned int kColorSelected = 109;
-const unsigned int kColorWifiActive = 67;
-const unsigned int kColorWifiFocus = 111;
-const unsigned int kColorWifiActiveBorder = 147;
-const unsigned int kColorFieldLabel = 145;
+struct PaletteToken {
+  const char *name;
+  unsigned int *value;
+  unsigned int default_value;
+};
+
+PaletteToken kPaletteTokens[] = {
+    {"background", &kColorBackground, 16},
+    {"text-dark", &kColorTextDark, 233},
+    {"field", &kColorField, 233},
+    {"surface", &kColorSurface, 234},
+    {"inactive-border", &kColorInactiveBorder, 59},
+    {"control-border", &kColorControlBorder, 242},
+    {"footer", &kColorFooter, 250},
+    {"inactive-text", &kColorInactiveText, 253},
+    {"text", &kColorText, 255},
+    {"white", &kColorWhite, 231},
+    {"title", &kColorTitle, 229},
+    {"volume-off", &kColorVolumeOff, 138},
+    {"volume-on", &kColorVolumeOn, 108},
+    {"selected", &kColorSelected, 109},
+    {"wifi-active", &kColorWifiActive, 67},
+    {"wifi-focus", &kColorWifiFocus, 111},
+    {"wifi-active-border", &kColorWifiActiveBorder, 147},
+    {"field-label", &kColorFieldLabel, 145},
+    {"accent", &kColorAccent, 202},
+    {"active", &kColorActive, 237},
+    {"control-surface", &kColorControlSurface, 236},
+    {"muted", &kColorMuted, 246},
+};
+
+const size_t kPaletteTokenCount =
+    sizeof(kPaletteTokens) / sizeof(kPaletteTokens[0]);
 
 bool parse_color(const std::string &text, RgbColor *color) {
   if (!color || text.size() != 7 || text[0] != '#')
@@ -643,6 +678,200 @@ std::vector<std::string> split_tabs(const std::string &line) {
     start = tab + 1;
   }
   return fields;
+}
+
+bool parse_palette_index(const std::string &text, unsigned int *value) {
+  if (!value || text.empty() || text.size() > 3)
+    return false;
+  unsigned int parsed = 0;
+  for (size_t index = 0; index < text.size(); ++index) {
+    if (text[index] < '0' || text[index] > '9')
+      return false;
+    parsed = parsed * 10 + static_cast<unsigned int>(text[index] - '0');
+  }
+  if (parsed > 255)
+    return false;
+  *value = parsed;
+  return true;
+}
+
+void reset_dashboard_palette() {
+  for (size_t index = 0; index < kPaletteTokenCount; ++index)
+    *kPaletteTokens[index].value = kPaletteTokens[index].default_value;
+}
+
+bool load_dashboard_palette(const std::string &path, std::string *error) {
+  if (!is_absolute_path(path)) {
+    if (error)
+      *error = "palette path must be absolute";
+    return false;
+  }
+  struct stat path_info;
+  if (lstat(path.c_str(), &path_info) != 0) {
+    if (error)
+      *error = errno_message("cannot stat palette " + path);
+    return false;
+  }
+  if (!S_ISREG(path_info.st_mode) || path_info.st_size < 0 ||
+      path_info.st_size > kMaximumPaletteBytes) {
+    if (error)
+      *error = "palette must be a regular file no larger than 4096 bytes";
+    return false;
+  }
+  std::ifstream input(path.c_str(), std::ios::in | std::ios::binary);
+  if (!input) {
+    if (error)
+      *error = errno_message("cannot open palette " + path);
+    return false;
+  }
+
+  std::vector<unsigned int> values(kPaletteTokenCount, 0);
+  std::vector<bool> seen(kPaletteTokenCount, false);
+  std::string line;
+  size_t line_number = 0;
+  while (std::getline(input, line)) {
+    ++line_number;
+    if (!line.empty() && line[line.size() - 1] == '\r')
+      line.erase(line.size() - 1);
+    if (line.empty() || line[0] == '#')
+      continue;
+    const std::vector<std::string> fields = split_tabs(line);
+    if (fields.size() != 2) {
+      if (error)
+        *error = "palette line " + std::to_string(line_number) +
+                 " must have exactly 2 TSV fields";
+      return false;
+    }
+    size_t token = 0;
+    while (token < kPaletteTokenCount &&
+           fields[0] != kPaletteTokens[token].name)
+      ++token;
+    if (token == kPaletteTokenCount) {
+      if (error)
+        *error = "unknown palette role on line " +
+                 std::to_string(line_number);
+      return false;
+    }
+    if (seen[token]) {
+      if (error)
+        *error = "duplicate palette role on line " +
+                 std::to_string(line_number);
+      return false;
+    }
+    if (!parse_palette_index(fields[1], &values[token])) {
+      if (error)
+        *error = "palette index on line " + std::to_string(line_number) +
+                 " must be 0 through 255";
+      return false;
+    }
+    seen[token] = true;
+  }
+  if (input.bad()) {
+    if (error)
+      *error = "error while reading palette " + path;
+    return false;
+  }
+  for (size_t token = 0; token < kPaletteTokenCount; ++token) {
+    if (!seen[token]) {
+      if (error)
+        *error = "palette is missing role " +
+                 std::string(kPaletteTokens[token].name);
+      return false;
+    }
+  }
+  for (size_t token = 0; token < kPaletteTokenCount; ++token)
+    *kPaletteTokens[token].value = values[token];
+  return true;
+}
+
+struct NetworkStatus {
+  std::string ssid;
+  std::string wlan_ipv4;
+  std::string wireguard_ipv4;
+  std::string selector;
+
+  bool operator==(const NetworkStatus &other) const {
+    return ssid == other.ssid && wlan_ipv4 == other.wlan_ipv4 &&
+           wireguard_ipv4 == other.wireguard_ipv4 &&
+           selector == other.selector;
+  }
+
+  bool operator!=(const NetworkStatus &other) const {
+    return !(*this == other);
+  }
+};
+
+std::string interface_ipv4(const char *interface_name) {
+  struct ifaddrs *addresses = NULL;
+  if (getifaddrs(&addresses) != 0)
+    return std::string();
+  std::string result;
+  for (const struct ifaddrs *entry = addresses; entry; entry = entry->ifa_next) {
+    if (!entry->ifa_addr || !entry->ifa_name ||
+        std::strcmp(entry->ifa_name, interface_name) != 0 ||
+        entry->ifa_addr->sa_family != AF_INET)
+      continue;
+    char text[INET_ADDRSTRLEN] = {};
+    const struct sockaddr_in *address =
+        reinterpret_cast<const struct sockaddr_in *>(entry->ifa_addr);
+    if (inet_ntop(AF_INET, &address->sin_addr, text, sizeof(text))) {
+      result = text;
+      break;
+    }
+  }
+  freeifaddrs(addresses);
+  return result;
+}
+
+std::string wireless_ssid(const char *interface_name) {
+  const int socket_fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+  if (socket_fd < 0)
+    return std::string();
+  struct iwreq request;
+  std::memset(&request, 0, sizeof(request));
+  std::strncpy(request.ifr_name, interface_name, IFNAMSIZ - 1);
+  char value[IW_ESSID_MAX_SIZE + 1] = {};
+  request.u.essid.pointer = value;
+  request.u.essid.length = IW_ESSID_MAX_SIZE;
+  request.u.essid.flags = 0;
+  const bool read = ioctl(socket_fd, SIOCGIWESSID, &request) == 0;
+  close(socket_fd);
+  if (!read)
+    return std::string();
+  const size_t length = std::min<size_t>(request.u.essid.length,
+                                         IW_ESSID_MAX_SIZE);
+  std::string ssid(value, value + length);
+  while (!ssid.empty() && ssid[ssid.size() - 1] == '\0')
+    ssid.erase(ssid.size() - 1);
+  return valid_utf8_text(ssid, 32, true) ? display_ascii(ssid)
+                                         : std::string("?");
+}
+
+std::string read_wifi_selector_status(const std::string &path) {
+  if (!is_absolute_path(path))
+    return "STATUS UNAVAILABLE";
+  struct stat info;
+  if (lstat(path.c_str(), &info) != 0 || !S_ISREG(info.st_mode) ||
+      info.st_size < 1 || info.st_size > 128)
+    return "STATUS UNAVAILABLE";
+  std::ifstream input(path.c_str(), std::ios::in | std::ios::binary);
+  std::string line;
+  if (!input || !std::getline(input, line) || input.bad())
+    return "STATUS UNAVAILABLE";
+  if (!line.empty() && line[line.size() - 1] == '\r')
+    line.erase(line.size() - 1);
+  if (trim_ascii_space(line) != line || !valid_utf8_text(line, 64, false))
+    return "STATUS INVALID";
+  return display_ascii(line);
+}
+
+NetworkStatus read_network_status(const std::string &selector_status_path) {
+  NetworkStatus status;
+  status.ssid = wireless_ssid("wlan0");
+  status.wlan_ipv4 = interface_ipv4("wlan0");
+  status.wireguard_ipv4 = interface_ipv4("wg0");
+  status.selector = read_wifi_selector_status(selector_status_path);
+  return status;
 }
 
 bool valid_id(const std::string &id) {
@@ -2204,12 +2433,19 @@ void draw_outline_arrow(Canvas *canvas, const Rect &bounds,
 void draw_settings_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
   const int center_x = bounds.x + bounds.width / 2;
   const int center_y = bounds.y + bounds.height / 2;
-  const int rows[3] = {center_y - 14, center_y, center_y + 14};
-  const int knobs[3] = {center_x - 10, center_x + 10, center_x - 4};
-  for (int index = 0; index < 3; ++index) {
-    fill_rect(canvas, Rect{center_x - 20, rows[index] - 2, 40, 4}, color);
-    fill_rect(canvas, Rect{knobs[index] - 4, rows[index] - 6, 8, 12}, color);
-  }
+  const uint16_t background = xterm_pixel(kColorBackground);
+  fill_pixel_cut_rect(canvas, Rect{center_x - 14, center_y - 14, 28, 28}, 5,
+                      color);
+  fill_rect(canvas, Rect{center_x - 4, center_y - 23, 8, 10}, color);
+  fill_rect(canvas, Rect{center_x - 4, center_y + 13, 8, 10}, color);
+  fill_rect(canvas, Rect{center_x - 23, center_y - 4, 10, 8}, color);
+  fill_rect(canvas, Rect{center_x + 13, center_y - 4, 10, 8}, color);
+  fill_rect(canvas, Rect{center_x - 19, center_y - 19, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x + 11, center_y - 19, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x - 19, center_y + 11, 8, 8}, color);
+  fill_rect(canvas, Rect{center_x + 11, center_y + 11, 8, 8}, color);
+  fill_pixel_cut_rect(canvas, Rect{center_x - 6, center_y - 6, 12, 12}, 3,
+                      background);
 }
 
 void draw_close_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
@@ -2350,9 +2586,9 @@ void draw_compact_cartridge(Canvas *canvas, const Rect &bounds,
 
 void draw_game_card(Canvas *canvas, const Rect &card, const GameEntry &game,
                     bool selected) {
-  const uint16_t fill = selected ? kInterfaceActive.pixel()
+  const uint16_t fill = selected ? xterm_pixel(kColorActive)
                                  : xterm_pixel(kColorBackground);
-  draw_pixel_panel(canvas, card, fill, kInterfaceOrange.pixel());
+  draw_pixel_panel(canvas, card, fill, xterm_pixel(kColorAccent));
   const Rect art{card.x + 8, card.y + 8, card.width - 16, card.width - 16};
   if (game.cover.available()) {
     draw_cover_square(canvas, art, game.cover);
@@ -2408,9 +2644,9 @@ void render_menu(const std::vector<GameEntry> &games,
     layout->system_buttons.push_back(tab);
     const bool active = layout->systems[index] == active_system;
     draw_pixel_panel(canvas, tab,
-                     active ? kInterfaceActive.pixel()
+                     active ? xterm_pixel(kColorActive)
                             : xterm_pixel(kColorBackground),
-                     kInterfaceOrange.pixel());
+                     xterm_pixel(kColorAccent));
     const std::string label = system_label(layout->systems[index]);
     draw_centered_text(canvas, tab, label,
                        fit_text_scale(label, tab.width - 16, 2, 1),
@@ -2489,15 +2725,16 @@ void render_menu(const std::vector<GameEntry> &games,
 
 void draw_settings_control(Canvas *canvas, const Rect &bounds, bool selected) {
   draw_pixel_panel(canvas, bounds,
-                   selected ? kInterfaceActive.pixel()
-                            : kInterfaceSurface.pixel(),
-                   selected ? kInterfaceOrange.pixel()
+                   selected ? xterm_pixel(kColorActive)
+                            : xterm_pixel(kColorControlSurface),
+                   selected ? xterm_pixel(kColorAccent)
                             : xterm_pixel(kColorControlBorder));
 }
 
 void render_settings(unsigned int volume, unsigned int brightness,
                      const std::string &keymap, int selected,
-                     const std::string &status, Canvas *canvas,
+                     const std::string &status,
+                     const NetworkStatus &network, Canvas *canvas,
                      SettingsLayout *layout) {
   if (!canvas || !layout)
     return;
@@ -2513,6 +2750,23 @@ void render_settings(unsigned int volume, unsigned int brightness,
   layout->keymap_button = Rect{1036, 208, 112, 104};
 
   draw_close_icon(canvas, layout->close_button, xterm_pixel(kColorText));
+  const std::string active_ssid =
+      network.ssid.empty() ? "NOT CONNECTED" : network.ssid;
+  const std::string wlan_address =
+      network.wlan_ipv4.empty() ? "NO ADDRESS" : network.wlan_ipv4;
+  const std::string wireguard_address =
+      network.wireguard_ipv4.empty() ? "NO ADDRESS" : network.wireguard_ipv4;
+  draw_text(canvas, 64, 22, "ACTIVE WIFI", 1, xterm_pixel(kColorMuted));
+  draw_text(canvas, 64, 44, fit_text_width(active_ssid, 300, 3), 3,
+            xterm_pixel(kColorText));
+  draw_text(canvas, 392, 22, "WLAN0", 1, xterm_pixel(kColorMuted));
+  draw_text(canvas, 392, 44, wlan_address, 2, xterm_pixel(kColorText));
+  draw_text(canvas, 620, 22, "WIREGUARD", 1, xterm_pixel(kColorMuted));
+  draw_text(canvas, 620, 44, wireguard_address, 2,
+            xterm_pixel(kColorText));
+  draw_text(canvas, 64, 88,
+            fit_text_width("AUTO WIFI: " + network.selector, 790, 1), 1,
+            xterm_pixel(kColorFooter));
   draw_settings_control(canvas, layout->wifi_button,
                         selected == SettingsTargetWifi);
   draw_wifi_icon(canvas,
@@ -2522,7 +2776,7 @@ void render_settings(unsigned int volume, unsigned int brightness,
   draw_text(canvas, layout->wifi_button.x + 78, layout->wifi_button.y + 28,
             "WIFI", 3, xterm_pixel(kColorText));
   draw_text(canvas, layout->wifi_button.x + 78, layout->wifi_button.y + 64,
-            "SETTINGS", 2, kInterfaceMuted.pixel());
+            "SETTINGS", 2, xterm_pixel(kColorMuted));
 
   draw_settings_control(canvas, layout->volume_down_button,
                         selected == SettingsTargetVolumeDown);
@@ -2556,21 +2810,21 @@ void render_settings(unsigned int volume, unsigned int brightness,
                      volume == 0 ? "OFF" : std::to_string(volume), 3,
                      xterm_pixel(kColorText));
   draw_centered_text(canvas, Rect{82, 366, 276, 28}, "VOLUME", 2,
-                     kInterfaceMuted.pixel());
+                     xterm_pixel(kColorMuted));
   draw_centered_text(canvas, Rect{412, 328, 276, 34},
                      std::to_string(brightness), 3,
                      xterm_pixel(kColorText));
   draw_centered_text(canvas, Rect{412, 366, 276, 28}, "BRIGHTNESS", 2,
-                     kInterfaceMuted.pixel());
+                     xterm_pixel(kColorMuted));
   draw_centered_text(canvas, Rect{750, 328, 196, 34}, "TERMINAL", 3,
                      xterm_pixel(kColorText));
   draw_centered_text(canvas, Rect{750, 366, 196, 28}, kTerminalLoginShell, 2,
-                     kInterfaceMuted.pixel());
+                     xterm_pixel(kColorMuted));
   draw_centered_text(canvas, Rect{994, 328, 196, 34}, "KEYS", 3,
                      xterm_pixel(kColorText));
   draw_centered_text(canvas, Rect{994, 366, 196, 28},
                      keymap == "cz" ? "CZECH" : "US ANSI", 2,
-                     kInterfaceMuted.pixel());
+                     xterm_pixel(kColorMuted));
 
   if (!status.empty()) {
     const int footer_scale = fit_text_scale(status, kLogicalWidth - 24, 2, 1);
@@ -2648,7 +2902,8 @@ void add_wifi_key_row(Canvas *canvas, const std::string &values, int y,
   }
 }
 
-void render_wifi(const WifiState &state, Canvas *canvas, WifiLayout *layout) {
+void render_wifi(const WifiState &state, const NetworkStatus &network,
+                 Canvas *canvas, WifiLayout *layout) {
   if (!canvas || !layout)
     return;
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
@@ -2712,9 +2967,24 @@ void render_wifi(const WifiState &state, Canvas *canvas, WifiLayout *layout) {
   const std::string footer = state.status.empty()
                                  ? "SAVING DOES NOT INTERRUPT CURRENT WIFI"
                                  : state.status;
-  const int scale = fit_text_scale(footer, kLogicalWidth - 24, 2, 1);
-  draw_centered_text(canvas, Rect{12, 442, kLogicalWidth - 24, 30}, footer,
-                     scale, xterm_pixel(kColorFooter));
+  draw_centered_text(canvas, Rect{12, 436, kLogicalWidth - 24, 10}, footer, 1,
+                     xterm_pixel(kColorFooter));
+  const std::string active_ssid =
+      network.ssid.empty() ? "NOT CONNECTED" : network.ssid;
+  const std::string wlan_address =
+      network.wlan_ipv4.empty() ? "NO ADDRESS" : network.wlan_ipv4;
+  const std::string wireguard_address =
+      network.wireguard_ipv4.empty() ? "NO ADDRESS" : network.wireguard_ipv4;
+  const std::string addresses =
+      "WIFI " + active_ssid + "  WLAN0 " + wlan_address + "  WG0 " +
+      wireguard_address;
+  draw_centered_text(canvas, Rect{12, 450, kLogicalWidth - 24, 10},
+                     fit_text_width(addresses, kLogicalWidth - 32, 1), 1,
+                     xterm_pixel(kColorText));
+  draw_centered_text(canvas, Rect{12, 464, kLogicalWidth - 24, 10},
+                     fit_text_width("AUTO WIFI: " + network.selector,
+                                    kLogicalWidth - 32, 1),
+                     1, xterm_pixel(kColorMuted));
 }
 
 class Framebuffer {
@@ -4410,6 +4680,7 @@ struct Options {
   std::string chiptune_player;
   std::string chiptune_directory;
   std::string manifest;
+  std::string palette;
   std::string cover_directory;
   std::string volume_state;
   std::string brightness;
@@ -4418,7 +4689,9 @@ struct Options {
   std::string keymap_state;
   std::string terminal;
   std::string wifi_helper;
+  std::string wifi_status;
   std::string validate_manifest;
+  std::string validate_palette;
   bool geometry_test;
   bool help;
 
@@ -4444,13 +4717,16 @@ void print_usage(const char *program) {
                "--zx-emulator PATH --chip8-emulator PATH "
                "--deck-game PATH --chiptune-player PATH "
                "--chiptune-directory PATH --manifest PATH "
+               "--palette PATH "
                "--cover-directory PATH "
                "--volume-state PATH "
                "--brightness PATH --brightness-max PATH "
                "--brightness-state PATH "
-               "--keymap-state PATH --terminal PATH --wifi-helper PATH\n  "
+               "--keymap-state PATH --terminal PATH --wifi-helper PATH "
+               "--wifi-status PATH\n  "
             << program << " --geometry-test\n";
   std::cerr << "  " << program << " --validate-manifest PATH\n";
+  std::cerr << "  " << program << " --validate-palette PATH\n";
 }
 
 bool parse_options(int argc, char **argv, Options *options,
@@ -4473,6 +4749,18 @@ bool parse_options(int argc, char **argv, Options *options,
         return false;
       }
       options->validate_manifest = argv[i];
+    } else if (argument == "--validate-palette") {
+      if (++i >= argc) {
+        if (error)
+          *error = "missing value for --validate-palette";
+        return false;
+      }
+      if (!options->validate_palette.empty()) {
+        if (error)
+          *error = "duplicate option --validate-palette";
+        return false;
+      }
+      options->validate_palette = argv[i];
     } else if (argument == "--help" || argument == "-h") {
       options->help = true;
     } else if (argument == "--nes-emulator" ||
@@ -4483,13 +4771,14 @@ bool parse_options(int argc, char **argv, Options *options,
                argument == "--chiptune-player" ||
                argument == "--chiptune-directory" ||
                argument == "--manifest" ||
+               argument == "--palette" ||
                argument == "--cover-directory" ||
                argument == "--volume-state" ||
                argument == "--brightness" ||
                argument == "--brightness-max" ||
                argument == "--brightness-state" ||
                argument == "--keymap-state" || argument == "--terminal" ||
-               argument == "--wifi-helper") {
+               argument == "--wifi-helper" || argument == "--wifi-status") {
       if (++i >= argc) {
         if (error)
           *error = "missing value for " + argument;
@@ -4512,6 +4801,8 @@ bool parse_options(int argc, char **argv, Options *options,
         destination = &options->chiptune_directory;
       else if (argument == "--manifest")
         destination = &options->manifest;
+      else if (argument == "--palette")
+        destination = &options->palette;
       else if (argument == "--cover-directory")
         destination = &options->cover_directory;
       else if (argument == "--volume-state")
@@ -4526,8 +4817,10 @@ bool parse_options(int argc, char **argv, Options *options,
         destination = &options->keymap_state;
       else if (argument == "--terminal")
         destination = &options->terminal;
-      else
+      else if (argument == "--wifi-helper")
         destination = &options->wifi_helper;
+      else
+        destination = &options->wifi_status;
       if (!destination->empty()) {
         if (error)
           *error = "duplicate option " + argument;
@@ -4559,22 +4852,34 @@ bool parse_options(int argc, char **argv, Options *options,
     }
     return true;
   }
+  if (!options->validate_palette.empty()) {
+    if (argc != 3) {
+      if (error)
+        *error = "--validate-palette must be used alone";
+      return false;
+    }
+    return true;
+  }
   if (options->nes_emulator.empty() || options->gb_emulator.empty() ||
       options->zx_emulator.empty() || options->chip8_emulator.empty() ||
       options->deck_game.empty() ||
       options->chiptune_player.empty() || options->chiptune_directory.empty() ||
-      options->manifest.empty() || options->cover_directory.empty() ||
+      options->manifest.empty() || options->palette.empty() ||
+      options->cover_directory.empty() ||
       options->volume_state.empty() || options->brightness.empty() ||
       options->brightness_max.empty() || options->brightness_state.empty() ||
       options->keymap_state.empty() ||
-      options->terminal.empty() || options->wifi_helper.empty()) {
+      options->terminal.empty() || options->wifi_helper.empty() ||
+      options->wifi_status.empty()) {
     if (error)
       *error = "--nes-emulator, --gb-emulator, --zx-emulator, "
                "--chip8-emulator, --deck-game, --chiptune-player, "
                "--chiptune-directory, --manifest, "
+               "--palette, "
                "--cover-directory, --volume-state, --brightness, "
                "--brightness-max, --brightness-state, "
-               "--keymap-state, --terminal, and --wifi-helper are required";
+               "--keymap-state, --terminal, --wifi-helper, and "
+               "--wifi-status are required";
     return false;
   }
   return true;
@@ -4582,6 +4887,13 @@ bool parse_options(int argc, char **argv, Options *options,
 
 int application_main(const Options &options) {
   std::string error;
+  reset_dashboard_palette();
+  if (!load_dashboard_palette(options.palette, &error)) {
+    std::cerr << "deck-menu: " << error
+              << "; using built-in dashboard palette" << std::endl;
+    reset_dashboard_palette();
+    error.clear();
+  }
   if (!validate_executable(options.nes_emulator, "NES emulator", &error) ||
       !validate_executable(options.gb_emulator, "GB/GBC emulator", &error) ||
       !validate_executable(options.zx_emulator, "ZX Spectrum emulator", &error) ||
@@ -4684,6 +4996,7 @@ int application_main(const Options &options) {
   SettingsLayout settings_layout;
   WifiLayout wifi_layout;
   WifiState wifi_state;
+  NetworkStatus network_status = read_network_status(options.wifi_status);
   bool wifi_view = false;
   bool settings_view = false;
   int settings_selection = SettingsTargetVolumeDown;
@@ -4692,10 +5005,10 @@ int application_main(const Options &options) {
   std::string status;
   const auto render_current_screen = [&]() {
     if (wifi_view) {
-      render_wifi(wifi_state, &canvas, &wifi_layout);
+      render_wifi(wifi_state, network_status, &canvas, &wifi_layout);
     } else if (settings_view) {
       render_settings(volume, brightness, keymap, settings_selection, status,
-                      &canvas, &settings_layout);
+                      network_status, &canvas, &settings_layout);
     } else {
       render_menu(games, active_system, game_position, status, &canvas,
                   &layout);
@@ -4709,6 +5022,7 @@ int application_main(const Options &options) {
 
   int pressed_target = MenuTargetNone;
   int64_t reconnect_attempt = 0;
+  int64_t network_refreshed_at = monotonic_ms();
   int64_t reboot_armed_until = 0;
   std::string last_touch_error;
   std::string last_gamepad_error = gamepad_error;
@@ -4777,6 +5091,17 @@ int application_main(const Options &options) {
       reboot_armed_until = 0;
       if (status == kRebootConfirmationText) {
         status.clear();
+        render_current_screen();
+        framebuffer.present(canvas, NULL);
+      }
+    }
+    const int64_t now = monotonic_ms();
+    if ((wifi_view || settings_view) &&
+        now - network_refreshed_at >= 2000) {
+      const NetworkStatus refreshed = read_network_status(options.wifi_status);
+      network_refreshed_at = now;
+      if (refreshed != network_status) {
+        network_status = refreshed;
         render_current_screen();
         framebuffer.present(canvas, NULL);
       }
@@ -5303,6 +5628,16 @@ int main(int argc, char **argv) {
     }
     std::cout << "deck-menu: manifest contains " << games.size()
               << " valid games" << std::endl;
+    return 0;
+  }
+  if (!options.validate_palette.empty()) {
+    reset_dashboard_palette();
+    if (!load_dashboard_palette(options.validate_palette, &error)) {
+      std::cerr << "deck-menu: " << error << std::endl;
+      return 1;
+    }
+    std::cout << "deck-menu: palette contains " << kPaletteTokenCount
+              << " valid roles" << std::endl;
     return 0;
   }
 
