@@ -1,29 +1,78 @@
 #!/bin/sh
 
-PATH=/usr/sbin:/usr/bin:/sbin:/bin
+PATH=${DECK_WIFI_PATH:-/usr/sbin:/usr/bin:/sbin:/bin}
 
-IFACE=wlan0
-BOOT_GRACE=240
-INTERVAL=15
-DISCONNECT_THRESHOLD=3
+IFACE=${DECK_WIFI_INTERFACE:-wlan0}
+WIRELESS_CONFIG=${DECK_WIFI_CONFIG:-/etc/config/wireless}
+RUNTIME_CONFIG=${DECK_WIFI_RUNTIME_CONFIG:-/var/run/wpa_supplicant-wlan0.conf}
+STATUS_FILE=${DECK_WIFI_STATUS_FILE:-/var/run/deck-wifi/status}
+SELECTOR=${DECK_WIFI_SELECTOR:-/usr/sbin/deck-wifi-select}
+BOOT_GRACE=${DECK_WIFI_BOOT_GRACE:-90}
+INTERVAL=${DECK_WIFI_WATCH_INTERVAL:-10}
+DISCONNECT_THRESHOLD=${DECK_WIFI_DISCONNECT_THRESHOLD:-2}
 misses=0
 
-/usr/sbin/deck-wifi-select --secure-only
+write_status() {
+	status=$1
+	status_directory=${STATUS_FILE%/*}
+	[ "$status_directory" != "$STATUS_FILE" ] || return 1
+	mkdir -p "$status_directory" 2>/dev/null || return 1
+	chmod 0700 "$status_directory" 2>/dev/null || true
+	current=
+	if [ -r "$STATUS_FILE" ]; then
+		IFS= read -r current < "$STATUS_FILE" || current=
+	fi
+	[ "$current" = "$status" ] && return 0
+	temporary_status=$STATUS_FILE.tmp.$$
+	if printf '%s\n' "$status" > "$temporary_status" &&
+		chmod 0600 "$temporary_status" &&
+		mv "$temporary_status" "$STATUS_FILE"; then
+		return 0
+	fi
+	rm -f "$temporary_status" 2>/dev/null || true
+	return 1
+}
 
-# OpenWrt starts wireless asynchronously.  Give the original UCI station four
-# minutes to associate and obtain DHCP before treating link misses as failures.
+is_associated() {
+	iw dev "$IFACE" link 2>/dev/null | grep -q '^Connected to '
+}
+
+has_ipv4() {
+	ip -4 address show dev "$IFACE" 2>/dev/null |
+		awk '$1 == "inet" { found=1 } END { exit !found }'
+}
+
+has_default_route() {
+	ip -4 route show default 2>/dev/null |
+		awk -v iface="$IFACE" '
+			{ for (i=1; i<=NF; i++) if ($i == "dev" && $(i+1) == iface) found=1 }
+			END { exit !found }
+		'
+}
+
+network_ready() {
+	is_associated && has_ipv4 && has_default_route
+}
+
+"$SELECTOR" --secure-only
+write_status "BOOT GRACE ${BOOT_GRACE} SECONDS" || true
+
+# netifd starts wireless asynchronously. Give the configured station one
+# bounded opportunity to associate and obtain DHCP before considering fallbacks.
 sleep "$BOOT_GRACE"
 
 while :; do
 	# netifd recreates the generated supplicant file with its default umask.
-	chmod 0600 /etc/config/wireless /var/run/wpa_supplicant-wlan0.conf 2>/dev/null || true
+	chmod 0600 "$WIRELESS_CONFIG" "$RUNTIME_CONFIG" 2>/dev/null || true
 
-	if iw dev "$IFACE" link 2>/dev/null | grep -q '^Connected to '; then
+	if network_ready; then
 		misses=0
+		write_status "CONNECTED" || true
 	else
 		misses=$((misses + 1))
+		write_status "DISCONNECTED CHECK $misses OF $DISCONNECT_THRESHOLD" || true
 		if [ "$misses" -ge "$DISCONNECT_THRESHOLD" ]; then
-			/usr/sbin/deck-wifi-select
+			"$SELECTOR" || true
 			misses=0
 		fi
 	fi

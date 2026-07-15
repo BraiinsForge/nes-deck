@@ -2,24 +2,33 @@
 
 The Deck radio supports only one managed interface, so creating one OpenWrt
 `wifi-iface` per saved network is not viable. These scripts retain the existing
-single station VIF. The watcher gives the original network a 240-second boot
-grace, then requires three consecutive disconnected checks before asking the
-selector to investigate.
+single station VIF. The watcher gives the configured network a 90-second boot
+grace, then requires two consecutive failures of complete network health before
+asking the selector to investigate. Complete health means association, an IPv4
+address on `wlan0`, and an IPv4 default route through `wlan0`.
 
 Canonical IWD `.psk` files live in `/etc/deck-wifi/profiles` with mode `0600`.
 The selector decodes IWD filenames, ignores profiles containing
-`AutoConnect=false`, and scans without logging SSIDs. It will switch only after
-the configured SSID is absent from three separate successful scans. Candidates
-must advertise a PSK authentication suite; SAE-only and unclassified BSSes are
-skipped. The strongest eligible PSK candidate from the confirming scan wins.
-A second association check immediately before commit prevents a scan/reconnect
-race, and a live association is never changed.
+`AutoConnect=false`, and scans without logging SSIDs. Candidates must advertise
+a PSK authentication suite; SAE-only and unclassified BSSes are skipped. After
+two successful scans, every visible known candidate is tried once in signal
+order, with alternatives ahead of the currently configured SSID. Both IWD
+`Passphrase` and 64-digit `PreSharedKey` profiles are supported. A complete
+network-health check immediately before every commit prevents a scan/reconnect
+race, and a healthy connection is never changed.
 
-Every switch is transactional. The previous UCI file is saved immediately
-before commit. The candidate gets up to 180 seconds to establish association,
-an IPv4 address, and an IPv4 default route. If it fails, the selector atomically
-restores that immediate backup, reloads wireless, and waits for the original
-configuration to recover before returning control to the watcher.
+Every selection run is transactional. The previous UCI file is saved once
+immediately before the first candidate. Each candidate gets up to 60 seconds to
+establish complete network health. If every candidate fails, the selector
+atomically restores that immediate backup, allows a bounded 20-second recovery
+grace, and returns control to the watcher even when the unavailable original
+network does not recover. It never waits forever after rollback.
+
+The watcher and selector atomically maintain the root-only runtime state file
+`/var/run/deck-wifi/status`. It contains short credential-free states such as
+`BOOT GRACE 90 SECONDS`, `SCANNING KNOWN WIFI`, `TRYING KNOWN WIFI 1 OF 3`,
+and `NO KNOWN WIFI CONNECTED`. The dashboard displays this state beside the
+active SSID and the `wlan0` and `wg0` IPv4 addresses.
 
 `/etc/config/wireless`, its pre-switch backups, and the generated supplicant
 configuration are forced to mode `0600`. The procd service starts after the
