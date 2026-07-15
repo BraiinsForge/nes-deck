@@ -58,6 +58,7 @@ png_flags=$(pkg-config --cflags --libs libpng)
 tests/rom_library_test.sh
 tests/fetch_covers_test.sh
 tests/deploy_config_test.sh
+tests/provision_config_test.sh
 tests/deck_wifi_profile_add_test.sh
 tests/deck_keyboard_quirks_test.sh
 tests/retro_terminal_test.sh

@@ -2,8 +2,8 @@
 
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 fetcher=$repo_root/deploy/menu/fetch-covers
 
 temporary=$(mktemp -d)
@@ -27,6 +27,19 @@ elite-alt.png	Elite (Europe) (Alt 1).png
 elite-europe.png	Elite (Europe).png
 knight-lore.png	Knight Lore (Europe).png
 EOF
+
+cat > "$temporary/index.html" <<'EOF'
+<a href="Kirby%27s%20Adventure%20%28USA%29.png">Kirby's Adventure (USA).png</a>
+<a href="Tetris%20%28World%29.png">Tetris (World).png</a>
+<a href="nested/Rejected.png">nested path</a>
+EOF
+
+$fetcher --decode-index "$temporary/index.html" "$temporary/decoded.tsv"
+cat > "$temporary/expected-decoded.tsv" <<'EOF'
+Kirby%27s%20Adventure%20%28USA%29.png	Kirby's Adventure (USA).png
+Tetris%20%28World%29.png	Tetris (World).png
+EOF
+cmp "$temporary/expected-decoded.tsv" "$temporary/decoded.tsv"
 
 assert_match() {
 	title=$1

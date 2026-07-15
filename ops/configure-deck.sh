@@ -62,4 +62,5 @@ mv "$temporary" "$config"
 trap - EXIT INT TERM HUP
 
 echo "Wrote private Deck configuration to $config"
-echo "Deploy with: $repo_root/ops/deploy.sh --config $config"
+echo "Provision a fresh Deck with: $repo_root/ops/provision-deck.sh --config $config"
+echo "Update an existing Deck with: $repo_root/ops/deploy.sh --config $config"

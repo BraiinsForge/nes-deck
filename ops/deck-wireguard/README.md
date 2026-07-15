@@ -35,12 +35,14 @@ Install the files as follows (the data partition is intentionally used for the
 ```
 
 Use modes `0755` for binaries/scripts, `0600` for all files under
-`/etc/wireguard`, and `0755` for the init script. At deployment time, generate
-the Deck private key locally on the Deck into `/etc/wireguard/wg0.key`, derive
-its public key, choose an unused address, write that address as a `/32` to
-`wg0.address`, and only then add the public key and `/32` as a server peer. On
-the audited Deck those steps have been completed and verified across reboot;
-the private key remains only on that Deck and is intentionally absent here.
+`/etc/wireguard`, and `0755` for the init script.
+`ops/provision-deck.sh` performs the per-Deck steps in a guarded order: it
+generates the private key on the Deck, refuses to replace an existing address
+or private key, checks the requested address and public key for collisions in
+both the server's persistent configuration and live interface, adds the peer,
+and only then starts the client tunnel. The private key never leaves the Deck;
+only its derived public key is sent to the server. The network-only path is
+idempotent and is suitable for verifying an existing installation.
 
 The procd service starts at priority 96, after `/mnt/data` is mounted at 90.
 It supervises `wireguard-go --foreground`, configures the address in

@@ -16,21 +16,39 @@ You need:
 - this private repository, including the owner-supplied `roms/` library
 - stable power during activation
 
-Clone the repository, create its private setup configuration, and deploy:
+Clone the repository, create its private per-Deck configuration, validate the
+fresh-install plan, and provision:
 
 ```sh
 git clone git@github.com:BraiinsForge/nes-deck.git
 cd nes-deck
 ./ops/configure-deck.sh
-./ops/deploy.sh
+./ops/provision-deck.sh --check
+./ops/provision-deck.sh
 ```
 
 The setup command asks for the Deck's current SSH address, its unique
 WireGuard address, and the ROM uploader password. It writes `deck.conf` with
 mode `0600`; the file is ignored by Git.
-Use `--config PATH` with both commands to keep separate configurations for
-multiple Decks. A positional `root@DECK-IP` passed to `deploy.sh` temporarily
-overrides the configured SSH target.
+Pass a positional path to `configure-deck.sh`, then use `--config PATH` with
+the provisioner or deployer to keep separate configurations for multiple
+Decks.
+
+The fresh-Deck provisioner defaults to the WireGuard server at
+`root@10.0.0.1` and the development machine's IWD profiles in
+`/var/lib/iwd`. Override those with `--wireguard-server` or
+`--wifi-profiles`. It imports only regular `.psk` files; open and enterprise
+profiles are counted and deliberately ignored. Verify the fresh Deck's SSH
+host key before running it—the script keeps normal SSH host-key checking
+enabled.
+
+Provisioning snapshots `/etc/config/wireless`, the current `wlan0` address,
+and the complete default route before changing anything. It installs the
+guarded profile selector without reloading Wi-Fi, preserves a private
+WireGuard key already present on the Deck, refuses server address/key
+collisions, and checks that the Wi-Fi snapshot is byte-for-byte unchanged
+before invoking the application deployer. `--network-only` performs just this
+idempotent network preparation.
 
 The first build downloads the pinned ARM toolchain and can take several
 minutes. The script builds every static runtime, verifies the staged payload,
@@ -42,6 +60,9 @@ service is stopped, the script attempts to restart it before exiting.
 The deployment script does not edit, reload, or disconnect Wi-Fi. It merges
 the tracked ROMs and CC0 chiptunes into persistent storage without deleting
 additional files, save games, or user programs already on the Deck.
+On a fresh Deck, its readiness check allows the bounded first Libretro cover
+cache fill to finish. Large cover indexes are decoded in one process rather
+than spawning a process per filename.
 
 Verify the result:
 
@@ -51,8 +72,9 @@ ssh root@10.0.0.10 '/etc/init.d/nes-deck status; \
   tail -n 40 /mnt/data/nes-deck/log/deck-menu.log'
 ```
 
-To update an existing Deck, pull the repository and run the same deploy
-command again.
+To update an already-provisioned Deck, pull the repository and run
+`./ops/deploy.sh --config PATH`. A positional `root@DECK-IP` temporarily
+overrides that configuration's SSH target.
 
 If Nix is not installed, follow the
 [official installation instructions](https://nixos.org/download/). Detailed

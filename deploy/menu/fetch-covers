@@ -25,15 +25,13 @@ decode_index() {
 	input=$1
 	output=$2
 	temporary=$output.tmp.$$
-	if ! sed -n 's/.*href="\([^"]*\.png\)".*/\1/p' "$input" |
-		while IFS= read -r href; do
-			case $href in
-				*/*|*\\*) continue ;;
-			esac
-			escaped=$(printf '%s' "$href" | sed 's/%/\\x/g')
-			decoded=$(printf '%b' "$escaped")
-			printf '%s\t%s\n' "$href" "$decoded"
-		done > "$temporary"; then
+	separator=$(printf '\t')
+	# Libretro already places the decoded filename in each link's label. A
+	# single sed pass preserves the encoded download path in field one and
+	# avoids tens of thousands of subprocesses on the Deck's small CPU.
+	if ! sed -n \
+		"s#.*href=\"\\([^\"/]*\\.png\\)\">\\([^<]*\\.png\\)</a>.*#\\1${separator}\\2#p" \
+		"$input" > "$temporary"; then
 		rm -f "$temporary"
 		return 1
 	fi
@@ -122,6 +120,15 @@ best_match() {
 	' "$names"
 }
 
+if [ "$#" -gt 0 ] && [ "$1" = --decode-index ]; then
+	if [ "$#" -ne 3 ] || [ ! -r "$2" ]; then
+		echo "cover-cache: usage: fetch-covers --decode-index INPUT OUTPUT" >&2
+		exit 1
+	fi
+	decode_index "$2" "$3"
+	exit $?
+fi
+
 if [ "${1:-}" = --best-match ]; then
 	if [ "$#" -ne 3 ] || [ ! -r "$3" ]; then
 		echo "cover-cache: usage: fetch-covers --best-match TITLE INDEX" >&2
@@ -150,7 +157,7 @@ if ! mkdir -p "$cover_dir" "$index_dir" "$missing_dir"; then
 fi
 
 tab=$(printf '\t')
-while IFS="$tab" read -r id title system rom color extra; do
+while IFS="$tab" read -r id title system _rom _color _extra; do
 	[ -n "$id" ] || continue
 	case $id in \#*) continue ;; esac
 	case $id in

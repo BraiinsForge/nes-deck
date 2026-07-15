@@ -267,8 +267,14 @@ echo "Uploading staged payload to $target..."
 # shellcheck disable=SC2029
 ssh "$target" "rm -rf '$remote_stage'; mkdir -p '$remote_stage'; chmod 700 '$remote_stage'"
 # shellcheck disable=SC2029
-tar -C "$payload" -czf - . | ssh "$target" \
-  "gzip -dc | tar -C '$remote_stage' -xf -"
+if ! tar -C "$payload" -czf - . | ssh "$target" \
+  "gzip -dc | tar -C '$remote_stage' -xf -"; then
+  # The generated staging path is constrained above and contains only digits.
+  # shellcheck disable=SC2029
+  ssh "$target" "rm -rf '$remote_stage'" >/dev/null 2>&1 || :
+  echo "Payload transfer failed; removed the remote staging directory" >&2
+  exit 1
+fi
 
 echo "Validating and activating payload..."
 ssh "$target" sh -s -- "$remote_stage" <<'REMOTE'
@@ -306,6 +312,7 @@ restore_service_after_failure() {
     echo "Activation failed; restarting ROM uploader" >&2
     /etc/init.d/nes-deck-uploader start >/dev/null 2>&1 || :
   fi
+  rm -rf "$stage" 2>/dev/null || :
   exit "$result"
 }
 trap restore_service_after_failure EXIT
@@ -444,8 +451,11 @@ fi
 /etc/init.d/nes-deck-uploader enable
 /etc/init.d/nes-deck-uploader start
 
+# A fresh Deck may need to download and decode the persistent Libretro indexes
+# before deck-menu starts. Keep this bounded, but allow the first fill to
+# finish on the target CPU instead of rolling back a healthy installation.
 attempt=0
-while [ "$attempt" -lt 30 ]; do
+while [ "$attempt" -lt 120 ]; do
   if /etc/init.d/nes-deck status >/dev/null 2>&1 && \
      pidof deck-menu >/dev/null 2>&1 && \
      /etc/init.d/nes-deck-uploader status >/dev/null 2>&1 && \

@@ -26,6 +26,12 @@ configuration are forced to mode `0600`. The procd service starts after the
 OpenWrt network service and keeps the generated file private when netifd
 recreates it.
 
+For a fresh Deck, `ops/provision-deck.sh` copies regular `.psk` files from the
+development machine's `/var/lib/iwd` directory by default. It never imports
+`.open` or `.8021x` profiles. Before and after installation it compares the
+live UCI file hash, `wlan0` address, and full default route, and refuses to
+continue to application deployment if any of them changed.
+
 `deck-wifi-profile-add` is the write-only companion used by the Retro Deck
 menu. It reads exactly two lines from stdin (SSID and PSK passphrase), validates
 printable-ASCII PSK limits, and atomically writes a mode-0600 canonical IWD
