@@ -85,26 +85,31 @@ int main() {
   std::string error;
 
   const std::string palette_fixture =
-      "background\t16\ntext-dark\t233\nfield\t233\nsurface\t234\n"
-      "inactive-border\t59\ncontrol-border\t242\nfooter\t250\n"
-      "inactive-text\t253\ntext\t255\nwhite\t231\ntitle\t229\n"
-      "volume-off\t138\nvolume-on\t108\nselected\t109\n"
-      "wifi-active\t67\nwifi-focus\t111\nwifi-active-border\t147\n"
-      "field-label\t145\naccent\t202\nactive\t237\n"
-      "control-surface\t236\nmuted\t246\n";
+      "background\t#000000\ntext-dark\t#121212\nfield\t#121212\n"
+      "surface\t#1C1C1C\ninactive-border\t#5F5F5F\n"
+      "control-border\t#6C6C6C\nfooter\t#BCBCBC\n"
+      "inactive-text\t#DADADA\ntext\t#EEEEEE\nwhite\t#FFFFFF\n"
+      "title\t#FFFFAF\nvolume-off\t#AF8787\nvolume-on\t#87AF87\n"
+      "selected\t#87AFAF\nwifi-active\t#5F87AF\n"
+      "wifi-focus\t#87AFFF\nwifi-active-border\t#AFAFFF\n"
+      "field-label\t#AFAFAF\naccent\t#123456\nactive\t#3A3A3A\n"
+      "control-surface\t#303030\nmuted\t#654321\n";
   expect(write_file(palette_path, palette_fixture.data(),
                     palette_fixture.size()),
          "write complete dashboard palette fixture");
   error.clear();
   expect(load_dashboard_palette(palette_path, &error) &&
-             kColorAccent == 202 && kColorMuted == 246,
-         "complete xterm dashboard palette loads");
-  const std::string bad_palette = "background\t999\n";
+             kColorAccent.red == 0x12 && kColorAccent.green == 0x34 &&
+             kColorAccent.blue == 0x56 && kColorMuted.red == 0x65 &&
+             kColorMuted.green == 0x43 && kColorMuted.blue == 0x21,
+         "complete full RGB dashboard palette loads");
+  const std::string bad_palette = "background\t#12345G\n";
   expect(write_file(bad_palette_path, bad_palette.data(), bad_palette.size()),
          "write invalid dashboard palette fixture");
   error.clear();
   expect(!load_dashboard_palette(bad_palette_path, &error) &&
-             kColorAccent == 202,
+             kColorAccent.red == 0x12 && kColorAccent.green == 0x34 &&
+             kColorAccent.blue == 0x56,
          "invalid palette is rejected without partially changing colors");
   reset_dashboard_palette();
 
@@ -706,7 +711,7 @@ int main() {
   render_menu(tab_games, "nes", 0, std::string(), &canvas, &menu_layout);
   expect(canvas.size() == static_cast<size_t>(kLogicalWidth * kLogicalHeight),
          "menu renders a complete logical canvas");
-  expect(canvas[0] == xterm_pixel(kColorBackground),
+  expect(canvas[0] == color_pixel(kColorBackground),
          "menu background stays black");
   expect(menu_layout.systems.size() == 6 &&
              menu_layout.system_buttons.size() == 6,
@@ -719,14 +724,14 @@ int main() {
   const Rect &active_tab = menu_layout.system_buttons[0];
   const Rect &inactive_tab = menu_layout.system_buttons[1];
   expect(canvas[static_cast<size_t>(active_tab.y) * kLogicalWidth +
-                    active_tab.x] == xterm_pixel(kColorBackground) &&
+                    active_tab.x] == color_pixel(kColorBackground) &&
              canvas[static_cast<size_t>(active_tab.y) * kLogicalWidth +
                     active_tab.x + kPixelStroke] ==
-                 xterm_pixel(kColorAccent) &&
+                 color_pixel(kColorAccent) &&
              canvas[static_cast<size_t>(active_tab.y + 12) * kLogicalWidth +
-                    active_tab.x + 6] == xterm_pixel(kColorActive) &&
+                    active_tab.x + 6] == color_pixel(kColorActive) &&
              canvas[static_cast<size_t>(inactive_tab.y + 12) * kLogicalWidth +
-                    inactive_tab.x + 6] == xterm_pixel(kColorBackground),
+                    inactive_tab.x + 6] == color_pixel(kColorBackground),
          "tabs use cut orange borders and the translucent active fill");
   expect(target_at(menu_layout, active_tab.x + active_tab.width / 2,
                    active_tab.y + active_tab.height / 2) ==
@@ -741,7 +746,7 @@ int main() {
   expect(menu_layout.settings_button.x == 1212 &&
              menu_layout.settings_button.y == 412 &&
              rect_contains_color(canvas, menu_layout.settings_button,
-                                 xterm_pixel(kColorFooter)),
+                                 color_pixel(kColorFooter)),
          "dim retro cog sits at the bottom-right inset");
   expect(menu_layout.game_buttons.size() == 3 &&
              menu_layout.game_indices.size() == 4 &&
@@ -754,14 +759,14 @@ int main() {
   const Rect &selected_card = menu_layout.game_buttons[0];
   const Rect &inactive_card = menu_layout.game_buttons[1];
   expect(canvas[static_cast<size_t>(selected_card.y) * kLogicalWidth +
-                    selected_card.x] == xterm_pixel(kColorBackground) &&
+                    selected_card.x] == color_pixel(kColorBackground) &&
              canvas[static_cast<size_t>(selected_card.y) * kLogicalWidth +
                     selected_card.x + kPixelStroke] ==
-                 xterm_pixel(kColorAccent) &&
+                 color_pixel(kColorAccent) &&
              canvas[static_cast<size_t>(selected_card.y + 12) * kLogicalWidth +
-                    selected_card.x + 6] == xterm_pixel(kColorActive) &&
+                    selected_card.x + 6] == color_pixel(kColorActive) &&
              canvas[static_cast<size_t>(inactive_card.y + 12) * kLogicalWidth +
-                    inactive_card.x + 6] == xterm_pixel(kColorBackground),
+                    inactive_card.x + 6] == color_pixel(kColorBackground),
          "selected game card reuses the active tab fill");
   expect(canvas[static_cast<size_t>(selected_card.y + 8) * kLogicalWidth +
                     selected_card.x + 8] == cover_color.pixel(),
@@ -774,16 +779,16 @@ int main() {
   expect(canvas[static_cast<size_t>(menu_layout.game_previous_button.y) *
                         kLogicalWidth +
                     menu_layout.game_previous_button.x] ==
-                 xterm_pixel(kColorBackground) &&
+                 color_pixel(kColorBackground) &&
              canvas[static_cast<size_t>(menu_layout.game_next_button.y) *
                         kLogicalWidth +
                     menu_layout.game_next_button.x] ==
-                 xterm_pixel(kColorBackground),
+                 color_pixel(kColorBackground),
          "carousel arrows do not have background rectangles");
   expect(rect_contains_color(canvas, menu_layout.game_previous_button,
-                             xterm_pixel(kColorFooter)) &&
+                             color_pixel(kColorFooter)) &&
              rect_contains_color(canvas, menu_layout.game_next_button,
-                                 xterm_pixel(kColorFooter)),
+                                 color_pixel(kColorFooter)),
          "carousel arrow glyphs use dim outlines");
   expect(rects_are_horizontal_mirrors(canvas,
                                       menu_layout.game_previous_button,
@@ -795,17 +800,17 @@ int main() {
                         menu_layout.game_position_indicators[0].y) *
                             kLogicalWidth +
                     menu_layout.game_position_indicators[0].x] ==
-                 xterm_pixel(kColorFooter) &&
+                 color_pixel(kColorFooter) &&
              canvas[static_cast<size_t>(
                         menu_layout.game_position_indicators[1].y) *
                             kLogicalWidth +
                     menu_layout.game_position_indicators[1].x] ==
-                 xterm_pixel(kColorControlBorder) &&
+                 color_pixel(kColorControlBorder) &&
              canvas[static_cast<size_t>(
                         menu_layout.game_position_indicators[0].y + 3) *
                             kLogicalWidth +
                     menu_layout.game_position_indicators[0].x + 3] ==
-                 xterm_pixel(kColorBackground),
+                 color_pixel(kColorBackground),
          "indicator row keeps one hollow marker per game");
   expect(target_at(menu_layout, menu_layout.game_previous_button.x + 1,
                        menu_layout.game_previous_button.y + 1) ==
@@ -823,19 +828,19 @@ int main() {
              canvas[static_cast<size_t>(menu_layout.game_buttons[1].y + 12) *
                         kLogicalWidth +
                     menu_layout.game_buttons[1].x + 6] ==
-                 xterm_pixel(kColorActive),
+                 color_pixel(kColorActive),
          "carousel window follows and fills the centered selected game");
   expect(menu_layout.game_position_indicators.size() == 4 &&
              canvas[static_cast<size_t>(
                         menu_layout.game_position_indicators[0].y) *
                             kLogicalWidth +
                     menu_layout.game_position_indicators[0].x] ==
-                 xterm_pixel(kColorControlBorder) &&
+                 color_pixel(kColorControlBorder) &&
              canvas[static_cast<size_t>(
                         menu_layout.game_position_indicators[2].y) *
                             kLogicalWidth +
                     menu_layout.game_position_indicators[2].x] ==
-                 xterm_pixel(kColorFooter),
+                 color_pixel(kColorFooter),
          "carousel marker follows the selected game");
 
   render_menu(tab_games, "chip8", 0, std::string(), &canvas, &menu_layout);
@@ -855,20 +860,21 @@ int main() {
   }
 
   Canvas crop_canvas(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
-                     xterm_pixel(kColorBackground));
+                     color_pixel(kColorBackground));
   CoverImage wide_cover;
   wide_cover.width = 4;
   wide_cover.height = 2;
-  wide_cover.pixels = {xterm_pixel(1), xterm_pixel(2), xterm_pixel(3),
-                       xterm_pixel(4), xterm_pixel(5), xterm_pixel(6),
-                       xterm_pixel(7), xterm_pixel(8)};
+  wide_cover.pixels = {xterm_color(1).pixel(), xterm_color(2).pixel(),
+                       xterm_color(3).pixel(), xterm_color(4).pixel(),
+                       xterm_color(5).pixel(), xterm_color(6).pixel(),
+                       xterm_color(7).pixel(), xterm_color(8).pixel()};
   draw_cover_square(&crop_canvas, Rect{10, 10, 2, 2}, wide_cover);
   expect(crop_canvas[static_cast<size_t>(10) * kLogicalWidth + 10] ==
-                 xterm_pixel(2) &&
+                 xterm_color(2).pixel() &&
              crop_canvas[static_cast<size_t>(10) * kLogicalWidth + 11] ==
-                 xterm_pixel(3) &&
+                 xterm_color(3).pixel() &&
              crop_canvas[static_cast<size_t>(11) * kLogicalWidth + 10] ==
-                 xterm_pixel(6),
+                 xterm_color(6).pixel(),
          "square covers use a centered crop instead of distortion");
 
   render_menu(tab_games, "deck", 0, std::string(), &canvas, &menu_layout);
@@ -902,10 +908,10 @@ int main() {
 
   Canvas terminal_icon_canvas(
       static_cast<size_t>(kLogicalWidth * kLogicalHeight),
-      xterm_pixel(kColorBackground));
+      color_pixel(kColorBackground));
   const Rect terminal_icon_bounds{100, 100, 112, 104};
   draw_terminal_icon(&terminal_icon_canvas, terminal_icon_bounds,
-                     xterm_pixel(kColorText));
+                     color_pixel(kColorText));
   int terminal_icon_top = kLogicalHeight;
   int terminal_icon_bottom = -1;
   for (int y = terminal_icon_bounds.y;
@@ -913,7 +919,7 @@ int main() {
     for (int x = terminal_icon_bounds.x;
          x < terminal_icon_bounds.x + terminal_icon_bounds.width; ++x) {
       if (terminal_icon_canvas[static_cast<size_t>(y) * kLogicalWidth + x] ==
-          xterm_pixel(kColorText)) {
+          color_pixel(kColorText)) {
         terminal_icon_top = std::min(terminal_icon_top, y);
         terminal_icon_bottom = std::max(terminal_icon_bottom, y);
       }
@@ -971,21 +977,21 @@ int main() {
   expect(canvas[static_cast<size_t>(settings_layout.volume_down_button.y + 12) *
                         kLogicalWidth +
                     settings_layout.volume_down_button.x + 6] ==
-                 xterm_pixel(kColorActive) &&
+                 color_pixel(kColorActive) &&
              canvas[static_cast<size_t>(settings_layout.volume_up_button.y +
                                         12) *
                         kLogicalWidth +
                     settings_layout.volume_up_button.x + 6] ==
-                 xterm_pixel(kColorControlSurface),
+                 color_pixel(kColorControlSurface),
          "controller-selected setting uses the active fill");
   render_settings(0, 100, "cz", SettingsTargetWifi, std::string(),
                   network_status, &canvas, &settings_layout);
   expect(canvas[static_cast<size_t>(settings_layout.wifi_button.y + 12) *
                         kLogicalWidth +
                     settings_layout.wifi_button.x + 6] ==
-                 xterm_pixel(kColorActive) &&
+                 color_pixel(kColorActive) &&
              rect_contains_color(canvas, settings_layout.keymap_button,
-                                 xterm_pixel(kColorText)),
+                                 color_pixel(kColorText)),
          "settings renders muted volume, full brightness, and Czech keys");
 
   WifiState wifi_state;

@@ -290,62 +290,62 @@ bool is_xterm_color(const RgbColor &color) {
   return false;
 }
 
-uint16_t xterm_pixel(unsigned int index) { return xterm_color(index).pixel(); }
+uint16_t color_pixel(const RgbColor &color) { return color.pixel(); }
 
-// Every dashboard base color is a semantic xterm-256 index. The compiled
+// Every dashboard base color is a semantic 24-bit RGB value. The compiled
 // palette can replace these defaults before any framebuffer is opened.
-unsigned int kColorBackground = 16;
-unsigned int kColorTextDark = 233;
-unsigned int kColorField = 233;
-unsigned int kColorSurface = 234;
-unsigned int kColorInactiveBorder = 59;
-unsigned int kColorControlBorder = 242;
-unsigned int kColorFooter = 250;
-unsigned int kColorInactiveText = 253;
-unsigned int kColorText = 255;
-unsigned int kColorWhite = 231;
-unsigned int kColorTitle = 229;
-unsigned int kColorVolumeOff = 138;
-unsigned int kColorVolumeOn = 108;
-unsigned int kColorSelected = 109;
-unsigned int kColorWifiActive = 67;
-unsigned int kColorWifiFocus = 111;
-unsigned int kColorWifiActiveBorder = 147;
-unsigned int kColorFieldLabel = 145;
-unsigned int kColorAccent = 202;
-unsigned int kColorActive = 237;
-unsigned int kColorControlSurface = 236;
-unsigned int kColorMuted = 246;
+RgbColor kColorBackground = {0x00, 0x00, 0x00};
+RgbColor kColorTextDark = {0x12, 0x12, 0x12};
+RgbColor kColorField = {0x12, 0x12, 0x12};
+RgbColor kColorSurface = {0x1c, 0x1c, 0x1c};
+RgbColor kColorInactiveBorder = {0x5f, 0x5f, 0x5f};
+RgbColor kColorControlBorder = {0x6c, 0x6c, 0x6c};
+RgbColor kColorFooter = {0xbc, 0xbc, 0xbc};
+RgbColor kColorInactiveText = {0xda, 0xda, 0xda};
+RgbColor kColorText = {0xee, 0xee, 0xee};
+RgbColor kColorWhite = {0xff, 0xff, 0xff};
+RgbColor kColorTitle = {0xff, 0xff, 0xaf};
+RgbColor kColorVolumeOff = {0xaf, 0x87, 0x87};
+RgbColor kColorVolumeOn = {0x87, 0xaf, 0x87};
+RgbColor kColorSelected = {0x87, 0xaf, 0xaf};
+RgbColor kColorWifiActive = {0x5f, 0x87, 0xaf};
+RgbColor kColorWifiFocus = {0x87, 0xaf, 0xff};
+RgbColor kColorWifiActiveBorder = {0xaf, 0xaf, 0xff};
+RgbColor kColorFieldLabel = {0xaf, 0xaf, 0xaf};
+RgbColor kColorAccent = {0xff, 0x5f, 0x00};
+RgbColor kColorActive = {0x3a, 0x3a, 0x3a};
+RgbColor kColorControlSurface = {0x30, 0x30, 0x30};
+RgbColor kColorMuted = {0x94, 0x94, 0x94};
 
 struct PaletteToken {
   const char *name;
-  unsigned int *value;
-  unsigned int default_value;
+  RgbColor *value;
+  RgbColor default_value;
 };
 
 PaletteToken kPaletteTokens[] = {
-    {"background", &kColorBackground, 16},
-    {"text-dark", &kColorTextDark, 233},
-    {"field", &kColorField, 233},
-    {"surface", &kColorSurface, 234},
-    {"inactive-border", &kColorInactiveBorder, 59},
-    {"control-border", &kColorControlBorder, 242},
-    {"footer", &kColorFooter, 250},
-    {"inactive-text", &kColorInactiveText, 253},
-    {"text", &kColorText, 255},
-    {"white", &kColorWhite, 231},
-    {"title", &kColorTitle, 229},
-    {"volume-off", &kColorVolumeOff, 138},
-    {"volume-on", &kColorVolumeOn, 108},
-    {"selected", &kColorSelected, 109},
-    {"wifi-active", &kColorWifiActive, 67},
-    {"wifi-focus", &kColorWifiFocus, 111},
-    {"wifi-active-border", &kColorWifiActiveBorder, 147},
-    {"field-label", &kColorFieldLabel, 145},
-    {"accent", &kColorAccent, 202},
-    {"active", &kColorActive, 237},
-    {"control-surface", &kColorControlSurface, 236},
-    {"muted", &kColorMuted, 246},
+    {"background", &kColorBackground, {0x00, 0x00, 0x00}},
+    {"text-dark", &kColorTextDark, {0x12, 0x12, 0x12}},
+    {"field", &kColorField, {0x12, 0x12, 0x12}},
+    {"surface", &kColorSurface, {0x1c, 0x1c, 0x1c}},
+    {"inactive-border", &kColorInactiveBorder, {0x5f, 0x5f, 0x5f}},
+    {"control-border", &kColorControlBorder, {0x6c, 0x6c, 0x6c}},
+    {"footer", &kColorFooter, {0xbc, 0xbc, 0xbc}},
+    {"inactive-text", &kColorInactiveText, {0xda, 0xda, 0xda}},
+    {"text", &kColorText, {0xee, 0xee, 0xee}},
+    {"white", &kColorWhite, {0xff, 0xff, 0xff}},
+    {"title", &kColorTitle, {0xff, 0xff, 0xaf}},
+    {"volume-off", &kColorVolumeOff, {0xaf, 0x87, 0x87}},
+    {"volume-on", &kColorVolumeOn, {0x87, 0xaf, 0x87}},
+    {"selected", &kColorSelected, {0x87, 0xaf, 0xaf}},
+    {"wifi-active", &kColorWifiActive, {0x5f, 0x87, 0xaf}},
+    {"wifi-focus", &kColorWifiFocus, {0x87, 0xaf, 0xff}},
+    {"wifi-active-border", &kColorWifiActiveBorder, {0xaf, 0xaf, 0xff}},
+    {"field-label", &kColorFieldLabel, {0xaf, 0xaf, 0xaf}},
+    {"accent", &kColorAccent, {0xff, 0x5f, 0x00}},
+    {"active", &kColorActive, {0x3a, 0x3a, 0x3a}},
+    {"control-surface", &kColorControlSurface, {0x30, 0x30, 0x30}},
+    {"muted", &kColorMuted, {0x94, 0x94, 0x94}},
 };
 
 const size_t kPaletteTokenCount =
@@ -680,21 +680,6 @@ std::vector<std::string> split_tabs(const std::string &line) {
   return fields;
 }
 
-bool parse_palette_index(const std::string &text, unsigned int *value) {
-  if (!value || text.empty() || text.size() > 3)
-    return false;
-  unsigned int parsed = 0;
-  for (size_t index = 0; index < text.size(); ++index) {
-    if (text[index] < '0' || text[index] > '9')
-      return false;
-    parsed = parsed * 10 + static_cast<unsigned int>(text[index] - '0');
-  }
-  if (parsed > 255)
-    return false;
-  *value = parsed;
-  return true;
-}
-
 void reset_dashboard_palette() {
   for (size_t index = 0; index < kPaletteTokenCount; ++index)
     *kPaletteTokens[index].value = kPaletteTokens[index].default_value;
@@ -725,7 +710,7 @@ bool load_dashboard_palette(const std::string &path, std::string *error) {
     return false;
   }
 
-  std::vector<unsigned int> values(kPaletteTokenCount, 0);
+  std::vector<RgbColor> values(kPaletteTokenCount, RgbColor{0, 0, 0});
   std::vector<bool> seen(kPaletteTokenCount, false);
   std::string line;
   size_t line_number = 0;
@@ -758,10 +743,10 @@ bool load_dashboard_palette(const std::string &path, std::string *error) {
                  std::to_string(line_number);
       return false;
     }
-    if (!parse_palette_index(fields[1], &values[token])) {
+    if (!parse_color(fields[1], &values[token])) {
       if (error)
-        *error = "palette index on line " + std::to_string(line_number) +
-                 " must be 0 through 255";
+        *error = "palette color on line " + std::to_string(line_number) +
+                 " must have the form #RRGGBB";
       return false;
     }
     seen[token] = true;
@@ -2433,7 +2418,7 @@ void draw_outline_arrow(Canvas *canvas, const Rect &bounds,
 void draw_settings_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
   const int center_x = bounds.x + bounds.width / 2;
   const int center_y = bounds.y + bounds.height / 2;
-  const uint16_t background = xterm_pixel(kColorBackground);
+  const uint16_t background = color_pixel(kColorBackground);
   fill_pixel_cut_rect(canvas, Rect{center_x - 14, center_y - 14, 28, 28}, 5,
                       color);
   fill_rect(canvas, Rect{center_x - 4, center_y - 23, 8, 10}, color);
@@ -2519,7 +2504,7 @@ bool draw_compact_deck_logo(Canvas *canvas, const Rect &bounds,
     draw_pixel_panel(canvas,
                      Rect{bounds.x + 24, bounds.y + 46,
                           bounds.width - 48, bounds.height - 92},
-                     xterm_pixel(kColorBackground), accent, 4);
+                     color_pixel(kColorBackground), accent, 4);
     draw_centered_text(canvas, bounds, "LUA>", 4, accent);
   } else if (is_built_in_lisp(game)) {
     draw_centered_text(canvas, bounds, "(LISP)", 4, accent);
@@ -2548,7 +2533,7 @@ bool draw_compact_deck_logo(Canvas *canvas, const Rect &bounds,
   } else if (is_built_in_terminal(game)) {
     const Rect screen{bounds.x + 30, bounds.y + 44, bounds.width - 60, 96};
     stroke_rect(canvas, screen, 4, accent);
-    draw_centered_text(canvas, screen, ">_", 5, xterm_pixel(kColorText));
+    draw_centered_text(canvas, screen, ">_", 5, color_pixel(kColorText));
     fill_rect(canvas,
               Rect{bounds.x + bounds.width / 2 - 6, screen.y + screen.height,
                    12, 18},
@@ -2569,7 +2554,7 @@ void draw_compact_cartridge(Canvas *canvas, const Rect &bounds,
                             uint16_t color) {
   const Rect cartridge{bounds.x + 34, bounds.y + 28, bounds.width - 68,
                        bounds.height - 56};
-  draw_pixel_panel(canvas, cartridge, xterm_pixel(kColorBackground), color, 4);
+  draw_pixel_panel(canvas, cartridge, color_pixel(kColorBackground), color, 4);
   fill_rect(canvas,
             Rect{cartridge.x + 24, cartridge.y + 26,
                  cartridge.width - 48, 8},
@@ -2586,9 +2571,9 @@ void draw_compact_cartridge(Canvas *canvas, const Rect &bounds,
 
 void draw_game_card(Canvas *canvas, const Rect &card, const GameEntry &game,
                     bool selected) {
-  const uint16_t fill = selected ? xterm_pixel(kColorActive)
-                                 : xterm_pixel(kColorBackground);
-  draw_pixel_panel(canvas, card, fill, xterm_pixel(kColorAccent));
+  const uint16_t fill = selected ? color_pixel(kColorActive)
+                                 : color_pixel(kColorBackground);
+  draw_pixel_panel(canvas, card, fill, color_pixel(kColorAccent));
   const Rect art{card.x + 8, card.y + 8, card.width - 16, card.width - 16};
   if (game.cover.available()) {
     draw_cover_square(canvas, art, game.cover);
@@ -2600,7 +2585,7 @@ void draw_game_card(Canvas *canvas, const Rect &card, const GameEntry &game,
   const std::string title =
       fit_text_width(game.title, label.width - 12, kGameTitleScale);
   draw_centered_text(canvas, label, title, kGameTitleScale,
-                     xterm_pixel(kColorText));
+                     color_pixel(kColorText));
 }
 
 void render_menu(const std::vector<GameEntry> &games,
@@ -2610,7 +2595,7 @@ void render_menu(const std::vector<GameEntry> &games,
   if (!canvas || !layout)
     return;
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
-                 xterm_pixel(kColorBackground));
+                 color_pixel(kColorBackground));
   layout->settings_button = Rect{1212, 412, 56, 56};
   layout->game_previous_button = Rect{156, 232, 80, 100};
   layout->game_next_button = Rect{1044, 232, 80, 100};
@@ -2623,7 +2608,7 @@ void render_menu(const std::vector<GameEntry> &games,
   layout->shown_game_index = games.size();
 
   draw_settings_icon(canvas, layout->settings_button,
-                     xterm_pixel(kColorFooter));
+                     color_pixel(kColorFooter));
 
   for (size_t definition = 0;
        definition < sizeof(kSystemDefinitions) / sizeof(kSystemDefinitions[0]);
@@ -2644,13 +2629,13 @@ void render_menu(const std::vector<GameEntry> &games,
     layout->system_buttons.push_back(tab);
     const bool active = layout->systems[index] == active_system;
     draw_pixel_panel(canvas, tab,
-                     active ? xterm_pixel(kColorActive)
-                            : xterm_pixel(kColorBackground),
-                     xterm_pixel(kColorAccent));
+                     active ? color_pixel(kColorActive)
+                            : color_pixel(kColorBackground),
+                     color_pixel(kColorAccent));
     const std::string label = system_label(layout->systems[index]);
     draw_centered_text(canvas, tab, label,
                        fit_text_scale(label, tab.width - 16, 2, 1),
-                       xterm_pixel(kColorText));
+                       color_pixel(kColorText));
   }
 
   for (size_t index = 0; index < games.size(); ++index) {
@@ -2689,9 +2674,9 @@ void render_menu(const std::vector<GameEntry> &games,
 
     if (layout->game_indices.size() > 1) {
       draw_outline_arrow(canvas, layout->game_previous_button, ArrowLeft,
-                         xterm_pixel(kColorFooter));
+                         color_pixel(kColorFooter));
       draw_outline_arrow(canvas, layout->game_next_button, ArrowRight,
-                         xterm_pixel(kColorFooter));
+                         color_pixel(kColorFooter));
     } else {
       layout->game_previous_button = Rect{0, 0, 0, 0};
       layout->game_next_button = Rect{0, 0, 0, 0};
@@ -2709,7 +2694,7 @@ void render_menu(const std::vector<GameEntry> &games,
       const Rect bounds{indicator_x, 438, indicator_width, indicator_height};
       layout->game_position_indicators.push_back(bounds);
       stroke_rect(canvas, bounds, 2,
-                  xterm_pixel(static_cast<size_t>(indicator) == selected_position
+                  color_pixel(static_cast<size_t>(indicator) == selected_position
                                   ? kColorFooter
                                   : kColorControlBorder));
       indicator_x += indicator_width + indicator_gap;
@@ -2719,16 +2704,16 @@ void render_menu(const std::vector<GameEntry> &games,
   if (!status.empty()) {
     const int footer_scale = fit_text_scale(status, kLogicalWidth - 100, 2, 1);
     draw_centered_text(canvas, Rect{12, 452, kLogicalWidth - 100, 24}, status,
-                       footer_scale, xterm_pixel(kColorFooter));
+                       footer_scale, color_pixel(kColorFooter));
   }
 }
 
 void draw_settings_control(Canvas *canvas, const Rect &bounds, bool selected) {
   draw_pixel_panel(canvas, bounds,
-                   selected ? xterm_pixel(kColorActive)
-                            : xterm_pixel(kColorControlSurface),
-                   selected ? xterm_pixel(kColorAccent)
-                            : xterm_pixel(kColorControlBorder));
+                   selected ? color_pixel(kColorActive)
+                            : color_pixel(kColorControlSurface),
+                   selected ? color_pixel(kColorAccent)
+                            : color_pixel(kColorControlBorder));
 }
 
 void render_settings(unsigned int volume, unsigned int brightness,
@@ -2739,7 +2724,7 @@ void render_settings(unsigned int volume, unsigned int brightness,
   if (!canvas || !layout)
     return;
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
-                 xterm_pixel(kColorBackground));
+                 color_pixel(kColorBackground));
   layout->close_button = Rect{1212, 12, 56, 56};
   layout->wifi_button = Rect{926, 20, 262, 108};
   layout->volume_down_button = Rect{108, 208, 104, 104};
@@ -2749,87 +2734,87 @@ void render_settings(unsigned int volume, unsigned int brightness,
   layout->terminal_button = Rect{792, 208, 112, 104};
   layout->keymap_button = Rect{1036, 208, 112, 104};
 
-  draw_close_icon(canvas, layout->close_button, xterm_pixel(kColorText));
+  draw_close_icon(canvas, layout->close_button, color_pixel(kColorText));
   const std::string active_ssid =
       network.ssid.empty() ? "NOT CONNECTED" : network.ssid;
   const std::string wlan_address =
       network.wlan_ipv4.empty() ? "NO ADDRESS" : network.wlan_ipv4;
   const std::string wireguard_address =
       network.wireguard_ipv4.empty() ? "NO ADDRESS" : network.wireguard_ipv4;
-  draw_text(canvas, 64, 22, "ACTIVE WIFI", 1, xterm_pixel(kColorMuted));
+  draw_text(canvas, 64, 22, "ACTIVE WIFI", 1, color_pixel(kColorMuted));
   draw_text(canvas, 64, 44, fit_text_width(active_ssid, 300, 3), 3,
-            xterm_pixel(kColorText));
-  draw_text(canvas, 392, 22, "WLAN0", 1, xterm_pixel(kColorMuted));
-  draw_text(canvas, 392, 44, wlan_address, 2, xterm_pixel(kColorText));
-  draw_text(canvas, 620, 22, "WIREGUARD", 1, xterm_pixel(kColorMuted));
+            color_pixel(kColorText));
+  draw_text(canvas, 392, 22, "WLAN0", 1, color_pixel(kColorMuted));
+  draw_text(canvas, 392, 44, wlan_address, 2, color_pixel(kColorText));
+  draw_text(canvas, 620, 22, "WIREGUARD", 1, color_pixel(kColorMuted));
   draw_text(canvas, 620, 44, wireguard_address, 2,
-            xterm_pixel(kColorText));
+            color_pixel(kColorText));
   draw_text(canvas, 64, 88,
             fit_text_width("AUTO WIFI: " + network.selector, 790, 1), 1,
-            xterm_pixel(kColorFooter));
+            color_pixel(kColorFooter));
   draw_settings_control(canvas, layout->wifi_button,
                         selected == SettingsTargetWifi);
   draw_wifi_icon(canvas,
                  Rect{layout->wifi_button.x + 12, layout->wifi_button.y + 24,
                       54, 54},
-                 xterm_pixel(kColorText));
+                 color_pixel(kColorText));
   draw_text(canvas, layout->wifi_button.x + 78, layout->wifi_button.y + 28,
-            "WIFI", 3, xterm_pixel(kColorText));
+            "WIFI", 3, color_pixel(kColorText));
   draw_text(canvas, layout->wifi_button.x + 78, layout->wifi_button.y + 64,
-            "SETTINGS", 2, xterm_pixel(kColorMuted));
+            "SETTINGS", 2, color_pixel(kColorMuted));
 
   draw_settings_control(canvas, layout->volume_down_button,
                         selected == SettingsTargetVolumeDown);
   draw_settings_control(canvas, layout->volume_up_button,
                         selected == SettingsTargetVolumeUp);
   draw_speaker_icon(canvas, layout->volume_down_button, false,
-                    xterm_pixel(kColorText));
+                    color_pixel(kColorText));
   draw_speaker_icon(canvas, layout->volume_up_button, true,
-                    xterm_pixel(kColorText));
+                    color_pixel(kColorText));
 
   draw_settings_control(canvas, layout->brightness_down_button,
                         selected == SettingsTargetBrightnessDown);
   draw_settings_control(canvas, layout->brightness_up_button,
                         selected == SettingsTargetBrightnessUp);
   draw_sun_icon(canvas, layout->brightness_down_button, false,
-                xterm_pixel(kColorText));
+                color_pixel(kColorText));
   draw_sun_icon(canvas, layout->brightness_up_button, true,
-                xterm_pixel(kColorText));
+                color_pixel(kColorText));
 
   draw_settings_control(canvas, layout->terminal_button,
                         selected == SettingsTargetTerminal);
   draw_terminal_icon(canvas, layout->terminal_button,
-                     xterm_pixel(kColorText));
+                     color_pixel(kColorText));
   draw_settings_control(canvas, layout->keymap_button,
                         selected == SettingsTargetKeymap);
   draw_centered_text(canvas, layout->keymap_button,
                      keymap == "cz" ? "CZ" : "EN", 4,
-                     xterm_pixel(kColorText));
+                     color_pixel(kColorText));
 
   draw_centered_text(canvas, Rect{82, 328, 276, 34},
                      volume == 0 ? "OFF" : std::to_string(volume), 3,
-                     xterm_pixel(kColorText));
+                     color_pixel(kColorText));
   draw_centered_text(canvas, Rect{82, 366, 276, 28}, "VOLUME", 2,
-                     xterm_pixel(kColorMuted));
+                     color_pixel(kColorMuted));
   draw_centered_text(canvas, Rect{412, 328, 276, 34},
                      std::to_string(brightness), 3,
-                     xterm_pixel(kColorText));
+                     color_pixel(kColorText));
   draw_centered_text(canvas, Rect{412, 366, 276, 28}, "BRIGHTNESS", 2,
-                     xterm_pixel(kColorMuted));
+                     color_pixel(kColorMuted));
   draw_centered_text(canvas, Rect{750, 328, 196, 34}, "TERMINAL", 3,
-                     xterm_pixel(kColorText));
+                     color_pixel(kColorText));
   draw_centered_text(canvas, Rect{750, 366, 196, 28}, kTerminalLoginShell, 2,
-                     xterm_pixel(kColorMuted));
+                     color_pixel(kColorMuted));
   draw_centered_text(canvas, Rect{994, 328, 196, 34}, "KEYS", 3,
-                     xterm_pixel(kColorText));
+                     color_pixel(kColorText));
   draw_centered_text(canvas, Rect{994, 366, 196, 28},
                      keymap == "cz" ? "CZECH" : "US ANSI", 2,
-                     xterm_pixel(kColorMuted));
+                     color_pixel(kColorMuted));
 
   if (!status.empty()) {
     const int footer_scale = fit_text_scale(status, kLogicalWidth - 24, 2, 1);
     draw_centered_text(canvas, Rect{12, 440, kLogicalWidth - 24, 28}, status,
-                       footer_scale, xterm_pixel(kColorFooter));
+                       footer_scale, color_pixel(kColorFooter));
   }
 }
 
@@ -2873,14 +2858,14 @@ std::string tail_for_field(const std::string &value, size_t maximum) {
 
 void draw_wifi_button(Canvas *canvas, const Rect &bounds,
                       const std::string &label, bool active) {
-  const uint16_t background = xterm_pixel(active ? kColorWifiActive
+  const uint16_t background = color_pixel(active ? kColorWifiActive
                                                  : kColorSurface);
   fill_rect(canvas, bounds, background);
   stroke_rect(canvas, bounds, 3,
-              xterm_pixel(active ? kColorWifiActiveBorder
+              color_pixel(active ? kColorWifiActiveBorder
                                  : kColorControlBorder));
   const int scale = fit_text_scale(label, bounds.width - 12, 3, 1);
-  draw_centered_text(canvas, bounds, label, scale, xterm_pixel(kColorWhite));
+  draw_centered_text(canvas, bounds, label, scale, color_pixel(kColorWhite));
 }
 
 void add_wifi_key_row(Canvas *canvas, const std::string &values, int y,
@@ -2907,37 +2892,37 @@ void render_wifi(const WifiState &state, const NetworkStatus &network,
   if (!canvas || !layout)
     return;
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
-                 xterm_pixel(kColorBackground));
+                 color_pixel(kColorBackground));
   layout->keys.clear();
   layout->back_button = Rect{16, 10, 120, 62};
   layout->ssid_field = Rect{330, 10, 310, 62};
   layout->passphrase_field = Rect{650, 10, 330, 62};
   layout->save_button = Rect{990, 10, 274, 62};
   draw_wifi_button(canvas, layout->back_button, "BACK", false);
-  draw_text(canvas, 158, 25, "ADD WIFI", 3, xterm_pixel(kColorTitle));
+  draw_text(canvas, 158, 25, "ADD WIFI", 3, color_pixel(kColorTitle));
 
-  const uint16_t field_bg = xterm_pixel(kColorField);
+  const uint16_t field_bg = color_pixel(kColorField);
   fill_rect(canvas, layout->ssid_field, field_bg);
   stroke_rect(canvas, layout->ssid_field, 3,
-              xterm_pixel(state.field == WifiSsid ? kColorWifiFocus
+              color_pixel(state.field == WifiSsid ? kColorWifiFocus
                                                   : kColorInactiveBorder));
   draw_text(canvas, layout->ssid_field.x + 10, layout->ssid_field.y + 7,
-            "SSID", 1, xterm_pixel(kColorFieldLabel));
+            "SSID", 1, color_pixel(kColorFieldLabel));
   draw_text(canvas, layout->ssid_field.x + 10, layout->ssid_field.y + 28,
-            tail_for_field(state.ssid, 19), 2, xterm_pixel(kColorWhite));
+            tail_for_field(state.ssid, 19), 2, color_pixel(kColorWhite));
 
   fill_rect(canvas, layout->passphrase_field, field_bg);
   stroke_rect(canvas, layout->passphrase_field, 3,
-              xterm_pixel(state.field == WifiPassphrase
+              color_pixel(state.field == WifiPassphrase
                               ? kColorWifiFocus
                               : kColorInactiveBorder));
   draw_text(canvas, layout->passphrase_field.x + 10,
             layout->passphrase_field.y + 7, "PASSWORD", 1,
-            xterm_pixel(kColorFieldLabel));
+            color_pixel(kColorFieldLabel));
   draw_text(canvas, layout->passphrase_field.x + 10,
             layout->passphrase_field.y + 28,
             tail_for_field(std::string(state.passphrase.size(), '*'), 20), 2,
-            xterm_pixel(kColorWhite));
+            color_pixel(kColorWhite));
   draw_wifi_button(canvas, layout->save_button, "SAVE NETWORK", false);
 
   if (state.symbols) {
@@ -2968,7 +2953,7 @@ void render_wifi(const WifiState &state, const NetworkStatus &network,
                                  ? "SAVING DOES NOT INTERRUPT CURRENT WIFI"
                                  : state.status;
   draw_centered_text(canvas, Rect{12, 436, kLogicalWidth - 24, 10}, footer, 1,
-                     xterm_pixel(kColorFooter));
+                     color_pixel(kColorFooter));
   const std::string active_ssid =
       network.ssid.empty() ? "NOT CONNECTED" : network.ssid;
   const std::string wlan_address =
@@ -2980,11 +2965,11 @@ void render_wifi(const WifiState &state, const NetworkStatus &network,
       wireguard_address;
   draw_centered_text(canvas, Rect{12, 450, kLogicalWidth - 24, 10},
                      fit_text_width(addresses, kLogicalWidth - 32, 1), 1,
-                     xterm_pixel(kColorText));
+                     color_pixel(kColorText));
   draw_centered_text(canvas, Rect{12, 464, kLogicalWidth - 24, 10},
                      fit_text_width("AUTO WIFI: " + network.selector,
                                     kLogicalWidth - 32, 1),
-                     1, xterm_pixel(kColorMuted));
+                     1, color_pixel(kColorMuted));
 }
 
 class Framebuffer {

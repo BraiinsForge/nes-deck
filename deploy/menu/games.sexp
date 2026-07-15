@@ -1,31 +1,31 @@
-;; Deck menu catalog and dashboard palette, schema version 4.
+;; Deck menu catalog and dashboard palette, schema version 5.
 ;;
 ;; Each game has exactly five fields.  The compiler writes them to games.tsv
 ;; in this order: id, title, system, rom, color.
-(:version 4
+(:version 5
  :palette
-  (:background 16
-   :text-dark 233
-   :field 233
-   :surface 234
-   :inactive-border 59
-   :control-border 242
-   :footer 250
-   :inactive-text 253
-   :text 255
-   :white 231
-   :title 229
-   :volume-off 138
-   :volume-on 108
-   :selected 109
-   :wifi-active 67
-   :wifi-focus 111
-   :wifi-active-border 147
-   :field-label 145
-   :accent 202
-   :active 237
-   :control-surface 236
-   :muted 246)
+  (:background "#000000"
+   :text-dark "#121212"
+   :field "#121212"
+   :surface "#1C1C1C"
+   :inactive-border "#5F5F5F"
+   :control-border "#6C6C6C"
+   :footer "#BCBCBC"
+   :inactive-text "#DADADA"
+   :text "#EEEEEE"
+   :white "#FFFFFF"
+   :title "#FFFFAF"
+   :volume-off "#AF8787"
+   :volume-on "#87AF87"
+   :selected "#87AFAF"
+   :wifi-active "#5F87AF"
+   :wifi-focus "#87AFFF"
+   :wifi-active-border "#AFAFFF"
+   :field-label "#AFAFAF"
+   :accent "#FF5F00"
+   :active "#3A3A3A"
+   :control-surface "#303030"
+   :muted "#949494")
  :games
   ((:id "mario"
    :title "SUPER MARIO BROS."

@@ -168,8 +168,9 @@ xterm-256 palette. The output is headerless TSV in the field order above. It is
 written beside a process-specific temporary file and
 atomically renamed only after the complete catalog validates.
 
-The catalog also contains every dashboard color as a semantic xterm-256 index.
-The compiler writes these to `palette.tsv`. A complete version-1 override at
+The catalog also contains every dashboard color as a semantic 24-bit
+`#RRGGBB` value. The compiler writes these to `palette.tsv`. A complete
+version-2 override at
 `/mnt/data/nes-deck/state/dashboard-palette.sexp` replaces those values. The
 native dashboard validates all roles before applying any of them. If the
 override, generated palette, or checked-in palette is malformed or missing,

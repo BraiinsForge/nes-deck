@@ -7,8 +7,8 @@
 
 (in-package #:nes-deck-catalog)
 
-(defconstant +schema-version+ 4)
-(defconstant +palette-override-version+ 1)
+(defconstant +schema-version+ 5)
+(defconstant +palette-override-version+ 2)
 (defconstant +maximum-games+ 64)
 (defconstant +maximum-catalog-bytes+ 65536)
 (defconstant +console-rom-root+ "/mnt/data/roms/")
@@ -193,17 +193,20 @@
     (catalog-error "game :color must be from the xterm-256 palette"))
   (string-upcase value))
 
-(defun validate-palette-index (value key)
-  (unless (and (integerp value) (<= 0 value 255))
-    (catalog-error "palette ~S must be an integer from 0 through 255" key))
-  value)
+(defun validate-rgb-color (value key)
+  (unless (and (stringp value)
+               (= (length value) 7)
+               (char= (char value 0) #\#)
+               (every #'hexadecimal-character-p (subseq value 1)))
+    (catalog-error "palette ~S must have the form #RRGGBB" key))
+  (string-upcase value))
 
 (defun validate-palette (form context)
   (let ((pairs (decode-plist form +palette-keys+ context)))
     (loop for key in +palette-keys+
           collect
           (list (string-downcase (symbol-name key))
-                (validate-palette-index (required-value key pairs) key)))))
+                (validate-rgb-color (required-value key pairs) key)))))
 
 (defun validate-game (form position)
   (let* ((context (format nil "game ~D" position))
@@ -283,8 +286,7 @@
   (dolist (entry palette)
     (write-string (first entry) stream)
     (write-char #\Tab stream)
-    (write-string (write-to-string (second entry) :base 10 :radix nil)
-                  stream)
+    (write-string (second entry) stream)
     (terpri stream)))
 
 (defun emit-outputs-atomically (games palette games-output palette-output)
