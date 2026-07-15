@@ -46,6 +46,24 @@ const pageTemplate = `{{define "page"}}<!doctype html>
         </label>
         <button type="submit" class="primary-button">Upload game</button>
       </form>
+      {{if .Palette}}
+        <section class="palette-section">
+          <h2>Dashboard colors</h2>
+          <p class="hint">xterm-256 indexes</p>
+          <form action="/palette" method="post">
+            <input type="hidden" name="csrf" value="{{.CSRF}}">
+            <div class="palette-grid">
+              {{range .Palette}}
+                <label>
+                  <span>{{.Label}}</span>
+                  <input type="number" name="{{.Name}}" value="{{.Value}}" min="0" max="255" inputmode="numeric" required>
+                </label>
+              {{end}}
+            </div>
+            <button type="submit" class="primary-button">Apply colors</button>
+          </form>
+        </section>
+      {{end}}
     {{else}}
       {{if .Error}}<p class="message error" role="alert"><strong>Error:</strong> {{.Error}}</p>{{end}}
       <form action="/login" method="post">
@@ -109,6 +127,12 @@ h1 {
   font-size: clamp(2.4rem, 10vw, 4.2rem);
   line-height: 0.95;
   letter-spacing: -0.04em;
+}
+
+h2 {
+  margin: 0;
+  font-size: 1.7rem;
+  line-height: 1;
 }
 
 form { margin: 0; }
@@ -193,8 +217,32 @@ input:focus, select:focus, button:focus, .skip-link:focus {
 
 .error { font-weight: 700; }
 
+.palette-section { margin-top: 56px; }
+
+.hint {
+  margin: 7px 0 20px;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 0.78rem;
+}
+
+.palette-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+}
+
+.palette-grid label { margin-bottom: 15px; }
+
+.palette-grid label > span {
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.palette-grid input { min-height: 40px; }
+
 @media (max-width: 480px) {
   main { width: min(100% - 24px, 520px); }
   header { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .palette-grid { grid-template-columns: 1fr; }
 }
 `

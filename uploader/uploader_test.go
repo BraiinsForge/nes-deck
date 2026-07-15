@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -156,6 +157,71 @@ func testStore(t *testing.T) (*romStore, string) {
 	return store, root
 }
 
+func testPalette(t *testing.T) (*paletteStore, string) {
+	t.Helper()
+	directory := t.TempDir()
+	base := filepath.Join(directory, "palette.tsv")
+	var contents strings.Builder
+	for index, spec := range dashboardPaletteSpecs {
+		contents.WriteString(spec.name)
+		contents.WriteByte('\t')
+		contents.WriteString(strconv.Itoa(16 + index))
+		contents.WriteByte('\n')
+	}
+	if err := os.WriteFile(base, []byte(contents.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	override := filepath.Join(directory, "state", "dashboard-palette.sexp")
+	return &paletteStore{
+		activePath:   filepath.Join(directory, "missing-active.tsv"),
+		fallbackPath: base,
+		overridePath: override,
+	}, override
+}
+
+func TestDashboardPaletteConfiguration(t *testing.T) {
+	store, overridePath := testPalette(t)
+	fields, err := store.current()
+	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != 16 {
+		t.Fatalf("fallback palette did not load: %#v %v", fields, err)
+	}
+	values := make(map[string]int, len(fields))
+	for _, field := range fields {
+		values[field.Name] = field.Value
+	}
+	values["accent"] = 202
+	restarts := 0
+	store.restartDashboard = func() error {
+		restarts++
+		return nil
+	}
+	if err := store.save(values); err != nil {
+		t.Fatal(err)
+	}
+	if restarts != 1 {
+		t.Fatalf("palette save restarted dashboard %d times", restarts)
+	}
+	contents, err := os.ReadFile(overridePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := parsePaletteOverride(contents)
+	if err != nil || parsed["accent"] != 202 {
+		t.Fatalf("palette override did not round-trip: %#v %v", parsed, err)
+	}
+	if err := os.WriteFile(overridePath, []byte("(:version 1 :palette (:background 999))\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fields, err = store.current()
+	if err != nil || fields[0].Value != 16 {
+		t.Fatalf("bad optional override hid the fallback palette: %#v %v", fields, err)
+	}
+	values["accent"] = 256
+	if err := store.save(values); err == nil {
+		t.Fatal("out-of-range palette value was accepted")
+	}
+}
+
 func TestROMStoreFilesWithoutReplacement(t *testing.T) {
 	store, root := testStore(t)
 	entry, err := store.add("nes", "Test Game", "source.nes", bytes.NewReader(testNES()))
@@ -190,7 +256,13 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	config := passwordConfig{iterations: 1, salt: []byte("0123456789abcdef")}
 	config.digest = derivePassword([]byte(password), config.salt, config.iterations)
 	store, root := testStore(t)
-	app, err := newApplication(config, store, true, testServiceAddress)
+	palette, overridePath := testPalette(t)
+	paletteRestarts := 0
+	palette.restartDashboard = func() error {
+		paletteRestarts++
+		return nil
+	}
+	app, err := newApplication(config, store, palette, true, testServiceAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,12 +325,33 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	if uploadResponse.Header().Get("Content-Security-Policy") == "" || uploadResponse.Header().Get("X-Frame-Options") != "DENY" {
 		t.Fatal("security headers are missing")
 	}
+
+	paletteForm := url.Values{"csrf": {session.csrf}}
+	for index, spec := range dashboardPaletteSpecs {
+		paletteForm.Set(spec.name, strconv.Itoa(32+index))
+	}
+	paletteRequest := requestFor(http.MethodPost, testServiceOrigin+"/palette", strings.NewReader(paletteForm.Encode()))
+	paletteRequest.Header.Set("Origin", testServiceOrigin)
+	paletteRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	paletteRequest.AddCookie(cookies[0])
+	paletteResponse := httptest.NewRecorder()
+	app.ServeHTTP(paletteResponse, paletteRequest)
+	if paletteResponse.Code != http.StatusOK || !strings.Contains(paletteResponse.Body.String(), "saved and applied") {
+		t.Fatalf("palette update returned %d: %s", paletteResponse.Code, paletteResponse.Body.String())
+	}
+	if paletteRestarts != 1 {
+		t.Fatalf("palette update restarted dashboard %d times", paletteRestarts)
+	}
+	if _, err := os.Stat(overridePath); err != nil {
+		t.Fatalf("palette update was not persisted: %v", err)
+	}
 }
 
 func TestCrossOriginAndPaperDesignRules(t *testing.T) {
 	config := passwordConfig{iterations: 1, salt: []byte("0123456789abcdef"), digest: make([]byte, 32)}
 	store, _ := testStore(t)
-	app, err := newApplication(config, store, true, testServiceAddress)
+	palette, _ := testPalette(t)
+	app, err := newApplication(config, store, palette, true, testServiceAddress)
 	if err != nil {
 		t.Fatal(err)
 	}

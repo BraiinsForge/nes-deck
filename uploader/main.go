@@ -17,6 +17,9 @@ const (
 	installedROMRoot        = "/mnt/data/roms"
 	installedBaseCatalog    = "/mnt/data/nes-deck/menu/games.tsv"
 	installedUploadCatalog  = "/mnt/data/nes-deck/uploads/games.tsv"
+	installedActivePalette  = "/mnt/data/nes-deck/state/palette.tsv"
+	installedBasePalette    = "/mnt/data/nes-deck/menu/palette.tsv"
+	installedPaletteConfig  = "/mnt/data/nes-deck/state/dashboard-palette.sexp"
 )
 
 func usage() {
@@ -61,7 +64,13 @@ func runServer() error {
 		uploadCatalog:  installedUploadCatalog,
 		restartCatalog: restartDashboard,
 	}
-	app, err := newApplication(password, store, true, address)
+	palette := &paletteStore{
+		activePath:       installedActivePalette,
+		fallbackPath:     installedBasePalette,
+		overridePath:     installedPaletteConfig,
+		restartDashboard: restartDashboard,
+	}
+	app, err := newApplication(password, store, palette, true, address)
 	if err != nil {
 		return err
 	}

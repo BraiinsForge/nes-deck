@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -46,11 +47,13 @@ type pageData struct {
 	Error         string
 	Notice        string
 	Entries       []catalogEntry
+	Palette       []paletteField
 }
 
 type application struct {
 	password       passwordConfig
 	store          *romStore
+	palette        *paletteStore
 	origin         string
 	host           string
 	enforceNetwork bool
@@ -75,7 +78,7 @@ func normalizeServiceAddress(address string) (string, error) {
 	return net.JoinHostPort(parsed.String(), port), nil
 }
 
-func newApplication(password passwordConfig, store *romStore, enforceNetwork bool, address string) (*application, error) {
+func newApplication(password passwordConfig, store *romStore, palette *paletteStore, enforceNetwork bool, address string) (*application, error) {
 	parsed, err := template.New("page").Parse(pageTemplate)
 	if err != nil {
 		return nil, err
@@ -87,6 +90,7 @@ func newApplication(password passwordConfig, store *romStore, enforceNetwork boo
 	return &application{
 		password:       password,
 		store:          store,
+		palette:        palette,
 		origin:         "http://" + address,
 		host:           address,
 		enforceNetwork: enforceNetwork,
@@ -269,7 +273,11 @@ func (app *application) dashboardData(session userSession, message, notice strin
 	if err != nil && message == "" {
 		message = "The upload catalog cannot be read."
 	}
-	return pageData{Authenticated: true, CSRF: session.csrf, Error: message, Notice: notice, Entries: entries}
+	palette, err := app.palette.current()
+	if err != nil && message == "" {
+		message = "The dashboard colors cannot be read."
+	}
+	return pageData{Authenticated: true, CSRF: session.csrf, Error: message, Notice: notice, Entries: entries, Palette: palette}
 }
 
 func (app *application) handleIndex(response http.ResponseWriter, request *http.Request) {
@@ -400,6 +408,57 @@ func (app *application) handleUpload(response http.ResponseWriter, request *http
 	app.render(response, http.StatusOK, app.dashboardData(session, "", notice))
 }
 
+func (app *application) handlePalette(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost || !app.sameOrigin(request) {
+		http.Error(response, "Request rejected", http.StatusForbidden)
+		return
+	}
+	_, session, ok := app.currentSession(request)
+	if !ok {
+		http.Error(response, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/x-www-form-urlencoded" {
+		http.Error(response, "Unsupported form encoding", http.StatusUnsupportedMediaType)
+		return
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, maximumPaletteBytes)
+	if err := request.ParseForm(); err != nil {
+		app.render(response, http.StatusBadRequest, app.dashboardData(session, "The color form was malformed.", ""))
+		return
+	}
+	if !app.csrfValid(request, session) {
+		http.Error(response, "Request rejected", http.StatusForbidden)
+		return
+	}
+	values := make(map[string]int, len(dashboardPaletteSpecs))
+	for key, fields := range request.PostForm {
+		if key == "csrf" {
+			if len(fields) != 1 {
+				http.Error(response, "Request rejected", http.StatusForbidden)
+				return
+			}
+			continue
+		}
+		if !validPaletteName(key) || len(fields) != 1 {
+			app.render(response, http.StatusBadRequest, app.dashboardData(session, "The color form contains an unknown or repeated field.", ""))
+			return
+		}
+		value, parseErr := strconv.Atoi(fields[0])
+		if parseErr != nil || value < 0 || value > 255 {
+			app.render(response, http.StatusBadRequest, app.dashboardData(session, "Every color must be an xterm-256 index from 0 through 255.", ""))
+			return
+		}
+		values[key] = value
+	}
+	if err := app.palette.save(values); err != nil {
+		app.render(response, http.StatusUnprocessableEntity, app.dashboardData(session, err.Error(), ""))
+		return
+	}
+	app.render(response, http.StatusOK, app.dashboardData(session, "", "Dashboard colors were saved and applied."))
+}
+
 func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	app.securityHeaders(response)
 	if !app.requestAllowed(request) {
@@ -415,6 +474,8 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		app.handleLogout(response, request)
 	case "/upload":
 		app.handleUpload(response, request)
+	case "/palette":
+		app.handlePalette(response, request)
 	case "/assets/paper.css":
 		if request.Method != http.MethodGet {
 			http.Error(response, "Method not allowed", http.StatusMethodNotAllowed)

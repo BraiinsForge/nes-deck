@@ -14,6 +14,12 @@ one matching ROM. Existing files are never replaced. Successful files go to
 atomically to `/mnt/data/nes-deck/uploads/games.tsv` before the dashboard is
 restarted.
 
+The authenticated page also edits all semantic dashboard colors as xterm-256
+indexes. It writes one complete, strictly validated S-expression to
+`/mnt/data/nes-deck/state/dashboard-palette.sexp` and restarts the dashboard.
+A malformed optional override is ignored by both the page and the dashboard;
+built-in colors keep the startup path available.
+
 `ops/configure-deck.sh` asks for the uploader password during setup and stores
 it in the local, Git-ignored `deck.conf` with mode `0600`. Each deployment
 derives a fresh password record and installs only that record at
