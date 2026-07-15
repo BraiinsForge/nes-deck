@@ -230,7 +230,10 @@ func paletteFields(values map[string]int) []paletteField {
 func (store *paletteStore) currentLocked() ([]paletteField, error) {
 	var values map[string]int
 	var baseError error
-	for _, path := range []string{store.activePath, store.fallbackPath} {
+	// The launcher deliberately chooses the checked-in palette when an override
+	// fails. Prefer that same source here so an older generated file cannot make
+	// the web form claim stale colors are active.
+	for _, path := range []string{store.fallbackPath, store.activePath} {
 		contents, err := readBoundedRegular(path, maximumPaletteBytes)
 		if err != nil {
 			baseError = err

@@ -185,6 +185,20 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != 16 {
 		t.Fatalf("fallback palette did not load: %#v %v", fields, err)
 	}
+	var stale strings.Builder
+	for index, spec := range dashboardPaletteSpecs {
+		stale.WriteString(spec.name)
+		stale.WriteByte('\t')
+		stale.WriteString(strconv.Itoa(96 + index))
+		stale.WriteByte('\n')
+	}
+	if err := os.WriteFile(store.activePath, []byte(stale.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fields, err = store.current()
+	if err != nil || fields[0].Value != 16 {
+		t.Fatalf("stale generated palette overrode the checked-in fallback: %#v %v", fields, err)
+	}
 	values := make(map[string]int, len(fields))
 	for _, field := range fields {
 		values[field.Name] = field.Value
@@ -208,6 +222,15 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 	parsed, err := parsePaletteOverride(contents)
 	if err != nil || parsed["accent"] != 202 {
 		t.Fatalf("palette override did not round-trip: %#v %v", parsed, err)
+	}
+	fields, err = store.current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range fields {
+		if field.Name == "accent" && field.Value != 202 {
+			t.Fatalf("valid override was not displayed: %#v", fields)
+		}
 	}
 	if err := os.WriteFile(overridePath, []byte("(:version 1 :palette (:background 999))\n"), 0600); err != nil {
 		t.Fatal(err)
