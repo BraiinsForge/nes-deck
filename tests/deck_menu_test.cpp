@@ -688,6 +688,8 @@ int main() {
   expect(adjacent_system(menu_layout.systems, "nes", 1) == "gb" &&
              adjacent_system(menu_layout.systems, "nes", -1) == "deck",
          "shoulder navigation wraps through populated systems");
+  expect(system_label("gbc") == "GBC",
+         "Game Boy Color uses the compact GBC tab label");
   const Rect &active_tab = menu_layout.system_buttons[0];
   const Rect &inactive_tab = menu_layout.system_buttons[1];
   expect(canvas[static_cast<size_t>(active_tab.y) * kLogicalWidth +

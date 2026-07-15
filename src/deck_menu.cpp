@@ -2112,7 +2112,7 @@ struct SystemDefinition {
 const SystemDefinition kSystemDefinitions[] = {
     {"nes", "NES"},
     {"gb", "GAME BOY"},
-    {"gbc", "GAME BOY COLOR"},
+    {"gbc", "GBC"},
     {"zx", "ZX SPECTRUM"},
     {"chip8", "CHIP-8"},
     {"deck", "DECK"},
