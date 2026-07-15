@@ -202,12 +202,15 @@ cp -a "$fbterm/share/retro-deck/keymaps/." \
 cp deploy/terminal/fonts.conf deploy/terminal/retro-terminal \
   "$payload/nes-deck/terminal/"
 
-cp deploy/menu/games.sexp deploy/menu/games.tsv \
+cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/palette.tsv \
   deploy/menu/compile-catalog.lisp deploy/menu/deck-menu-launcher \
   deploy/menu/fetch-covers "$payload/nes-deck/menu/"
 cp deploy/ecl "$payload/usr/bin/ecl"
 cp ops/deck-wifi/deck-wifi-profile-add \
   "$payload/usr/sbin/deck-wifi-profile-add"
+cp ops/deck-wifi/deck-wifi-select ops/deck-wifi/deck-wifi-watch \
+  "$payload/usr/sbin/"
+cp ops/deck-wifi/deck-wifi.init "$payload/etc/init.d/deck-wifi"
 cp deploy/menu/nes-deck.init "$payload/etc/init.d/nes-deck"
 mkdir -p "$payload/etc/hotplug.d/usb"
 cp deploy/menu/nes-deck-keyboard.hotplug \
@@ -257,7 +260,10 @@ chmod 0600 "$payload/nes-deck/uploader/address.conf"
 chmod 0700 "$payload/usr/bin/ecl" \
   "$payload/usr/sbin/deck-keyboard-quirks" \
   "$payload/usr/sbin/deck-wifi-profile-add" \
+  "$payload/usr/sbin/deck-wifi-select" \
+  "$payload/usr/sbin/deck-wifi-watch" \
   "$payload/etc/hotplug.d/usb/90-nes-deck-keyboard" \
+  "$payload/etc/init.d/deck-wifi" \
   "$payload/etc/init.d/nes-deck" \
   "$payload/etc/init.d/nes-deck-uploader"
 
@@ -338,6 +344,16 @@ done
   echo "Staged keyboard quirk helper is missing" >&2
   exit 1
 }
+for wifi_executable in deck-wifi-profile-add deck-wifi-select deck-wifi-watch; do
+  [ -x "$stage/usr/sbin/$wifi_executable" ] || {
+    echo "Staged Wi-Fi helper is missing: $wifi_executable" >&2
+    exit 1
+  }
+done
+[ -x "$stage/etc/init.d/deck-wifi" ] || {
+  echo "Staged Wi-Fi service is missing" >&2
+  exit 1
+}
 [ -x "$stage/etc/hotplug.d/usb/90-nes-deck-keyboard" ] || {
   echo "Staged keyboard hotplug hook is missing" >&2
   exit 1
@@ -348,6 +364,10 @@ done
 }
 [ -s "$stage/nes-deck/menu/games.tsv" ] || {
   echo "Staged menu catalog is empty" >&2
+  exit 1
+}
+[ -s "$stage/nes-deck/menu/palette.tsv" ] || {
+  echo "Staged dashboard palette is empty" >&2
   exit 1
 }
 
@@ -367,6 +387,8 @@ scheme_result=$(
   exit 1
 }
 "$stage/nes-deck/menu/deck-menu" --help >/dev/null
+"$stage/nes-deck/menu/deck-menu" --validate-palette \
+  "$stage/nes-deck/menu/palette.tsv"
 uploader_deploy_config=$stage/nes-deck/uploader/password.conf
 uploader_address_config=$stage/nes-deck/uploader/address.conf
 [ -f "$uploader_deploy_config" ] && [ ! -L "$uploader_deploy_config" ] || {
@@ -436,10 +458,15 @@ chmod 0700 /mnt/data/langs/lua /mnt/data/langs/lisp \
 cp -p "$stage/usr/bin/ecl" /usr/bin/ecl
 cp -p "$stage/usr/sbin/deck-wifi-profile-add" \
   /usr/sbin/deck-wifi-profile-add
+cp -p "$stage/usr/sbin/deck-wifi-select" /usr/sbin/deck-wifi-select
+cp -p "$stage/usr/sbin/deck-wifi-watch" /usr/sbin/deck-wifi-watch
+cp -p "$stage/etc/init.d/deck-wifi" /etc/init.d/deck-wifi
 cp -p "$stage/etc/init.d/nes-deck" /etc/init.d/nes-deck
 cp -p "$stage/etc/init.d/nes-deck-uploader" \
   /etc/init.d/nes-deck-uploader
 chmod 0700 /usr/bin/ecl /usr/sbin/deck-wifi-profile-add \
+  /usr/sbin/deck-wifi-select /usr/sbin/deck-wifi-watch \
+  /etc/init.d/deck-wifi \
   /etc/init.d/nes-deck /etc/init.d/nes-deck-uploader
 
 if [ -x /etc/init.d/bmc ]; then
@@ -447,6 +474,8 @@ if [ -x /etc/init.d/bmc ]; then
   /etc/init.d/bmc disable 2>/dev/null || :
 fi
 /etc/init.d/nes-deck enable
+/etc/init.d/deck-wifi enable
+/etc/init.d/deck-wifi restart
 /etc/init.d/nes-deck start
 /etc/init.d/nes-deck-uploader enable
 /etc/init.d/nes-deck-uploader start
@@ -468,6 +497,10 @@ done
 
 /etc/init.d/nes-deck status >/dev/null 2>&1 || {
   echo "Retro Deck service did not start" >&2
+  exit 1
+}
+/etc/init.d/deck-wifi status >/dev/null 2>&1 || {
+  echo "Deck Wi-Fi watcher did not start" >&2
   exit 1
 }
 pidof deck-menu >/dev/null 2>&1 || {
