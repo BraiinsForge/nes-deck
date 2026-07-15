@@ -36,6 +36,23 @@ int main() {
   assert(DeckAudioOutputRate(32768, 32000) == 32000);
   assert(DeckAudioOutputRate(44100, 44100) == 44100);
 
+  unsetenv("RETRO_DECK_EXIT_HINT");
+  assert(!DeckExitHintRequested());
+  setenv("RETRO_DECK_EXIT_HINT", "1", 1);
+  assert(DeckExitHintRequested());
+  setenv("RETRO_DECK_EXIT_HINT", "0", 1);
+  assert(!DeckExitHintRequested());
+  setenv("RETRO_DECK_EXIT_HINT", "invalid", 1);
+  assert(!DeckExitHintRequested());
+  unsetenv("RETRO_DECK_EXIT_HINT");
+
+  std::vector<uint16_t> exit_hint(600 * 1280, 0x1234);
+  DeckDrawExitHintRgb565(&exit_hint[0], 600);
+  assert(exit_hint[(1279 - 20) * 600 + 20] == 0xffff);
+  assert(exit_hint[(1279 - 36) * 600 + 36] == 0xffff);
+  assert(exit_hint[(1279 - 18) * 600 + 18] == 0x0000);
+  assert(exit_hint[(1279 - 100) * 600 + 100] == 0x1234);
+
   unsigned int volume = 0;
   std::string error;
   unsetenv("RETRO_DECK_VOLUME_PERCENT");

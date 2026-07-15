@@ -4375,6 +4375,8 @@ ChildResult run_game(const std::string &emulator, const GameEntry &game,
       std::make_pair("INFONES_VOLUME_PERCENT", volume_text));
   environment.push_back(
       std::make_pair("RETRO_DECK_VOLUME_PERCENT", volume_text));
+  if (game.system != "deck")
+    environment.push_back(std::make_pair("RETRO_DECK_EXIT_HINT", "1"));
   if (!volume_state.empty())
     environment.push_back(
         std::make_pair("RETRO_DECK_VOLUME_STATE", volume_state));

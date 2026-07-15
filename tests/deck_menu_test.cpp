@@ -559,6 +559,7 @@ int main() {
   const std::string helper =
       "#!/bin/sh\n"
       "printf '%s' \"$INFONES_VOLUME_PERCENT\" > \"$1.volume\"\n"
+      "printf '%s' \"${RETRO_DECK_EXIT_HINT:-}\" > \"$1.exit-hint\"\n"
       "printf '%s' \"${RETRO_DECK_VOLUME_STATE:-}\" > \"$1.volume-state\"\n";
   expect(write_file(emulator, helper.data(), helper.size()),
          "write emulator fixture");
@@ -570,7 +571,10 @@ int main() {
     expect(WIFEXITED(child.status) && WEXITSTATUS(child.status) == 0,
            "volume child exits cleanly");
     expect(read_file(captured) == "63", "child inherits selected volume");
+    expect(read_file(rom + ".exit-hint") == "1",
+           "console child enables the persistent exit hint");
     unlink(captured.c_str());
+    unlink((rom + ".exit-hint").c_str());
     expect(read_file(rom + ".volume-state").empty(),
            "ordinary child receives no writable volume path");
     unlink((rom + ".volume-state").c_str());
@@ -581,6 +585,7 @@ int main() {
            "muted child exits cleanly");
     expect(read_file(captured) == "0", "muted child receives zero volume");
     unlink(captured.c_str());
+    unlink((rom + ".exit-hint").c_str());
     unlink((rom + ".volume-state").c_str());
 
     child = run_game(emulator, games[0], 42, NULL, &framebuffer, volume_state);
@@ -590,6 +595,7 @@ int main() {
     expect(read_file(rom + ".volume-state") == volume_state,
            "volume-aware child receives the exact persistent state path");
     unlink(captured.c_str());
+    unlink((rom + ".exit-hint").c_str());
     unlink((rom + ".volume-state").c_str());
   }
 

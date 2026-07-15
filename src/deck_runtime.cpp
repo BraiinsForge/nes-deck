@@ -126,9 +126,15 @@ unsigned int DeckAudioOutputRate(unsigned int source_rate,
   return negotiated_rate;
 }
 
+bool DeckExitHintRequested() {
+  const char *value = std::getenv("RETRO_DECK_EXIT_HINT");
+  return value && std::strcmp(value, "1") == 0;
+}
+
 DeckFramebuffer::DeckFramebuffer()
     : fd_(-1), memory_(NULL), map_size_(0), stride_(0),
-      last_source_width_(0), last_source_height_(0) {}
+      last_source_width_(0), last_source_height_(0),
+      exit_hint_(DeckExitHintRequested()) {}
 
 DeckFramebuffer::~DeckFramebuffer() { close_device(); }
 
@@ -278,6 +284,8 @@ void DeckFramebuffer::publish_frame(const DeckScaledLayout &layout) {
     std::memcpy(memory_ + offset * sizeof(uint16_t), &frame_[offset],
                 copy_bytes);
   }
+  if (exit_hint_)
+    DeckDrawExitHintRgb565(reinterpret_cast<uint16_t *>(memory_), row_words);
 }
 
 bool DeckFramebuffer::present_xrgb8888(const void *pixels,

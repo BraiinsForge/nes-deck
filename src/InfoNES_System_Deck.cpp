@@ -31,6 +31,7 @@
 #include "../InfoNES_pAPU.h"
 #include "nes_audio_mixer.h"
 #include "nes_sram.h"
+#include "deck_runtime.h"
 
 #define TRUE 1
 #define FALSE 0
@@ -67,6 +68,7 @@ static int fb_staging_rows = 0;
 static int fb_staging_columns = 0;
 static int fb_vsync_state = 0;
 static int runtime_diagnostics = 0;
+static int exit_hint_enabled = 0;
 static uint64_t diagnostic_frames = 0;
 static uint64_t diagnostic_render_nanoseconds = 0;
 static uint64_t diagnostic_max_render_nanoseconds = 0;
@@ -309,6 +311,7 @@ static int lcd_fb_init(void) {
 #endif
   runtime_diagnostics =
       environment_flag("INFONES_RUNTIME_DIAGNOSTICS", FALSE);
+  exit_hint_enabled = environment_flag("RETRO_DECK_EXIT_HINT", FALSE);
   fb_vsync_state = environment_flag("INFONES_VSYNC", FALSE) ? 1 : 0;
   if (runtime_diagnostics)
     printf("InfoNES: Runtime video diagnostics enabled\n");
@@ -732,6 +735,10 @@ void InfoNES_LoadFrame(void) {
     }
   }
 #endif
+  if (exit_hint_enabled && fb_bpp == 2 && fb_var.xres == 600 &&
+      fb_var.yres >= 1280)
+    DeckDrawExitHintRgb565((uint16_t *)fb_mem,
+                           (size_t)fb_stride / sizeof(uint16_t));
   record_render_time(render_started);
   MaybeSaveSRAM();
 }

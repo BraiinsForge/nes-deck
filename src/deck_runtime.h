@@ -30,6 +30,45 @@ uint16_t DeckRgb888To565(uint32_t color);
 bool DeckReadVolumePercent(unsigned int *volume, std::string *error);
 unsigned int DeckAudioOutputRate(unsigned int source_rate,
                                  unsigned int negotiated_rate);
+bool DeckExitHintRequested();
+
+inline void DeckDrawExitHintRgb565(uint16_t *pixels, size_t row_stride) {
+  if (!pixels || row_stride < 600)
+    return;
+  const int left = 20;
+  const int top = 20;
+  const int cell = 4;
+  const int physical_height = 1280;
+  const auto fill_logical_rect =
+      [pixels, row_stride, physical_height](int x, int y, int width,
+                                             int height, uint16_t color) {
+        for (int logical_x = x; logical_x < x + width; ++logical_x) {
+          if (logical_x < 0 || logical_x >= physical_height)
+            continue;
+          const size_t physical_row =
+              static_cast<size_t>(physical_height - 1 - logical_x);
+          for (int logical_y = y; logical_y < y + height; ++logical_y) {
+            if (logical_y >= 0 && logical_y < 480)
+              pixels[physical_row * row_stride +
+                     static_cast<size_t>(logical_y)] = color;
+          }
+        }
+      };
+  for (int step = 0; step < 9; ++step) {
+    const int x = left + step * cell;
+    const int opposite_x = left + (8 - step) * cell;
+    const int y = top + step * cell;
+    fill_logical_rect(x - 2, y - 2, cell + 4, cell + 4, 0x0000);
+    fill_logical_rect(opposite_x - 2, y - 2, cell + 4, cell + 4, 0x0000);
+  }
+  for (int step = 0; step < 9; ++step) {
+    const int x = left + step * cell;
+    const int opposite_x = left + (8 - step) * cell;
+    const int y = top + step * cell;
+    fill_logical_rect(x, y, cell, cell, 0xffff);
+    fill_logical_rect(opposite_x, y, cell, cell, 0xffff);
+  }
+}
 
 class DeckFramebuffer {
 public:
@@ -63,6 +102,7 @@ private:
   int stride_;
   unsigned int last_source_width_;
   unsigned int last_source_height_;
+  bool exit_hint_;
   std::vector<uint16_t> frame_;
 };
 

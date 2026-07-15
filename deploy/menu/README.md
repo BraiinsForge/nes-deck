@@ -104,11 +104,12 @@ restores the last audible level, or the configured default if the launcher
 started muted. Every nonzero adjustment plays a short confirmation chime. The
 selected volume is passed to every emulator. Brightness updates
 `/sys/class/backlight/display-bl/brightness` and persists in safe 10-point steps
-without changing any network state. A continuous two-second hold anywhere on
-the touchscreen
-terminates the emulator child and redraws the menu. Touch does not supply
-controller input; a keyboard or mapped controller is still needed to press
-Start and play.
+without changing any network state. Every console emulator draws an outlined
+pixel cross in the top-left corner. Holding that cross for two seconds
+terminates the emulator child and redraws the menu. The full-screen hold target
+remains active, so a partially obscured icon cannot trap a player. Touch does
+not supply controller input; a keyboard or mapped controller is still needed
+to press Start and play.
 
 ZX keeps the two gamepad ports mapped as Kempston and Sinclair 2, while a
 physical keyboard is routed through Fuse's dedicated Spectrum-keyboard port.

@@ -64,8 +64,10 @@ passphrases, WireGuard private keys, or ROM data.
   Goodix by name and capabilities instead of assuming an event number.
 - The S99 menu exclusively grabs the Goodix event device while it is active.
   It releases the framebuffer before starting InfoNES but retains touch input
-  so a continuous two-second hold anywhere on the touchscreen can terminate
-  the game and return to the menu. Touch is not otherwise used during gameplay.
+  so a continuous two-second hold can terminate the game and return to the
+  menu. Console emulators stamp an outlined cross at the top-left safe inset to
+  make that gesture visible; the complete screen remains a valid hold target.
+  Touch is not otherwise used during gameplay.
 - The menu maps its 1280x480 logical canvas onto the portrait framebuffer as
   `column = y`, `row = 1279 - x`. Its host test verifies every logical pixel
   maps in bounds and exactly once.
