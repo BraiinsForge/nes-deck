@@ -1901,6 +1901,20 @@ const uint8_t *glyph_rows(char input) {
       {17, 17, 17, 17, 17, 17, 14}, {17, 17, 17, 17, 17, 10, 4},
       {17, 17, 17, 17, 21, 21, 10}, {17, 17, 10, 4, 10, 17, 17},
       {17, 17, 10, 4, 4, 4, 4},     {31, 1, 2, 4, 8, 16, 31}};
+  static const uint8_t lowercase[26][7] = {
+      {0, 0, 14, 1, 15, 17, 15},    {16, 16, 30, 17, 17, 17, 30},
+      {0, 0, 14, 16, 16, 17, 14},   {1, 1, 15, 17, 17, 17, 15},
+      {0, 0, 14, 17, 31, 16, 14},   {6, 9, 8, 28, 8, 8, 8},
+      {0, 0, 15, 17, 15, 1, 14},    {16, 16, 30, 17, 17, 17, 17},
+      {4, 0, 12, 4, 4, 4, 14},      {2, 0, 6, 2, 2, 18, 12},
+      {16, 16, 18, 20, 24, 20, 18}, {12, 4, 4, 4, 4, 4, 14},
+      {0, 0, 26, 21, 21, 17, 17},   {0, 0, 30, 17, 17, 17, 17},
+      {0, 0, 14, 17, 17, 17, 14},   {0, 0, 30, 17, 30, 16, 16},
+      {0, 0, 15, 17, 15, 1, 1},     {0, 0, 22, 25, 16, 16, 16},
+      {0, 0, 15, 16, 14, 1, 30},    {8, 8, 28, 8, 8, 9, 6},
+      {0, 0, 17, 17, 17, 19, 13},   {0, 0, 17, 17, 17, 10, 4},
+      {0, 0, 17, 17, 21, 21, 10},   {0, 0, 17, 10, 4, 10, 17},
+      {0, 0, 17, 17, 15, 1, 14},    {0, 0, 31, 2, 4, 8, 31}};
   static const uint8_t period[7] = {0, 0, 0, 0, 0, 6, 6};
   static const uint8_t comma[7] = {0, 0, 0, 0, 6, 6, 4};
   static const uint8_t colon[7] = {0, 6, 6, 0, 6, 6, 0};
@@ -1936,7 +1950,7 @@ const uint8_t *glyph_rows(char input) {
 
   unsigned char ch = static_cast<unsigned char>(input);
   if (ch >= 'a' && ch <= 'z')
-    ch = static_cast<unsigned char>(ch - 'a' + 'A');
+    return lowercase[ch - 'a'];
   if (ch >= 'A' && ch <= 'Z')
     return letters[ch - 'A'];
   if (ch >= '0' && ch <= '9')
@@ -2694,7 +2708,8 @@ void render_wifi(const WifiState &state, Canvas *canvas, WifiLayout *layout) {
   layout->delete_button = Rect{1060, 364, 204, 66};
   draw_wifi_button(canvas, layout->mode_button, state.symbols ? "ABC" : "123",
                    state.symbols);
-  draw_wifi_button(canvas, layout->shift_button, "SHIFT",
+  draw_wifi_button(canvas, layout->shift_button,
+                   state.uppercase ? "ABC" : "abc",
                    !state.symbols && state.uppercase);
   draw_wifi_button(canvas, layout->space_button, "SPACE", false);
   draw_wifi_button(canvas, layout->delete_button, "DELETE", false);
