@@ -28,6 +28,13 @@ read -r -p 'Deck SSH target (root@IP): ' target
   exit 1
 }
 
+read -r -p 'Deck WireGuard address (10.0.0.2-253): ' wireguard_address
+if [[ ! $wireguard_address =~ ^10\.0\.0\.([0-9]{1,3})$ ||
+      ${BASH_REMATCH[1]} -lt 2 || ${BASH_REMATCH[1]} -gt 253 ]]; then
+  echo "Invalid Deck WireGuard address" >&2
+  exit 1
+fi
+
 read -r -s -p 'ROM uploader password (8-128 bytes): ' uploader_password
 printf '\n'
 read -r -s -p 'Repeat ROM uploader password: ' confirmation
@@ -47,6 +54,7 @@ temporary=$(mktemp "${config}.new.XXXXXX")
 trap 'rm -f "$temporary"' EXIT INT TERM HUP
 {
   printf 'DECK_SSH_TARGET=%s\n' "$target"
+  printf 'DECK_WIREGUARD_ADDRESS=%s\n' "$wireguard_address"
   printf 'ROM_UPLOADER_PASSWORD=%s\n' "$uploader_password"
 } >"$temporary"
 chmod 0600 "$temporary"

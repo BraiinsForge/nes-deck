@@ -48,8 +48,10 @@ if (( (8#$config_mode & 077) != 0 )); then
 fi
 
 target=
+wireguard_address=
 uploader_password=
 target_seen=0
+wireguard_seen=0
 password_seen=0
 line_number=0
 while IFS= read -r line || [[ -n $line ]]; do
@@ -69,6 +71,14 @@ while IFS= read -r line || [[ -n $line ]]; do
       }
       target=$value
       target_seen=1
+      ;;
+    DECK_WIREGUARD_ADDRESS)
+      [[ $wireguard_seen -eq 0 ]] || {
+        echo "Duplicate DECK_WIREGUARD_ADDRESS in $config" >&2
+        exit 1
+      }
+      wireguard_address=$value
+      wireguard_seen=1
       ;;
     ROM_UPLOADER_PASSWORD)
       [[ $password_seen -eq 0 ]] || {
@@ -92,6 +102,11 @@ fi
   echo "DECK_SSH_TARGET must have the form root@DECK-IP" >&2
   exit 1
 }
+if [[ ! $wireguard_address =~ ^10\.0\.0\.([0-9]{1,3})$ ||
+      ${BASH_REMATCH[1]} -lt 2 || ${BASH_REMATCH[1]} -gt 253 ]]; then
+  echo "DECK_WIREGUARD_ADDRESS must be a usable 10.0.0.0/24 peer address" >&2
+  exit 1
+fi
 if [[ $password_seen -eq 0 || ${#uploader_password} -lt 8 ||
       ${#uploader_password} -gt 128 || $uploader_password == *$'\r'* ||
       $uploader_password == *$'\n'* ]]; then
@@ -100,7 +115,7 @@ if [[ $password_seen -eq 0 || ${#uploader_password} -lt 8 ||
 fi
 
 if [[ $check_config -eq 1 ]]; then
-  echo "Deck configuration is valid for $target"
+  echo "Deck configuration is valid for $target at $wireguard_address"
   exit 0
 fi
 
@@ -168,6 +183,8 @@ cp "$uploader/bin/rom-uploader" \
 printf '%s\n' "$uploader_password" |
   (cd uploader && nix shell nixpkgs#go -c go run . --set-password \
     "$payload/nes-deck/uploader/password.conf")
+printf '%s:8080\n' "$wireguard_address" \
+  >"$payload/nes-deck/uploader/address.conf"
 cp "$lua/bin/lua" "$payload/nes-deck/langs/lua"
 cp "$python/bin/python" "$payload/nes-deck/langs/python"
 cp "$chibi/bin/chibi-scheme" \
@@ -236,6 +253,7 @@ find "$payload/nes-deck" -type f \( \
   -name 'ecl.bin' \) -exec chmod 0700 {} +
 chmod 0700 "$payload/nes-deck/uploader/rom-uploader"
 chmod 0600 "$payload/nes-deck/uploader/password.conf"
+chmod 0600 "$payload/nes-deck/uploader/address.conf"
 chmod 0700 "$payload/usr/bin/ecl" \
   "$payload/usr/sbin/deck-keyboard-quirks" \
   "$payload/usr/sbin/deck-wifi-profile-add" \
@@ -343,12 +361,19 @@ scheme_result=$(
 }
 "$stage/nes-deck/menu/deck-menu" --help >/dev/null
 uploader_deploy_config=$stage/nes-deck/uploader/password.conf
+uploader_address_config=$stage/nes-deck/uploader/address.conf
 [ -f "$uploader_deploy_config" ] && [ ! -L "$uploader_deploy_config" ] || {
   echo "Staged uploader password configuration is missing or unsafe" >&2
   exit 1
 }
 "$stage/nes-deck/uploader/rom-uploader" --check-password-config \
   "$uploader_deploy_config"
+[ -f "$uploader_address_config" ] && [ ! -L "$uploader_address_config" ] || {
+  echo "Staged uploader address configuration is missing or unsafe" >&2
+  exit 1
+}
+"$stage/nes-deck/uploader/rom-uploader" --check-address \
+  "$uploader_address_config"
 
 mkdir -p "$base" /mnt/data/roms /mnt/data/langs \
   /mnt/data/chiptunes "$base/langs" "$base/licenses" \
@@ -373,7 +398,8 @@ cp -p "$stage/nes-deck/uploader/rom-uploader" \
 chmod 0700 "$base/uploader" "$base/uploads" \
   "$base/uploader/rom-uploader"
 cp -p "$uploader_deploy_config" "$base/uploader/password.conf"
-chmod 0600 "$base/uploader/password.conf"
+cp -p "$uploader_address_config" "$base/uploader/address.conf"
+chmod 0600 "$base/uploader/password.conf" "$base/uploader/address.conf"
 
 mkdir -p "$base/menu" "$base/games" "$base/terminal" "$base/licenses"
 cp -p "$stage/nes-deck/menu/"* "$base/menu/"

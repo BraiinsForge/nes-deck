@@ -1,4 +1,5 @@
 /result*
 /foss-games/
 /deck.conf
+/.deck-configs/
 *.srm

@@ -14,7 +14,6 @@ WG_PROCESS_FOREGROUND=1
 export WG_PROCESS_FOREGROUND
 
 IFACE=wg0
-ADDRESS=10.0.0.10/32
 ROUTE=10.0.0.0/24
 MTU=1420
 STATE_DIR=/var/run/wireguard
@@ -23,6 +22,7 @@ WIREGUARD_GO="$INSTALL_DIR/bin/wireguard-go"
 WG="$INSTALL_DIR/bin/wg"
 CONFIG=/etc/wireguard/wg0.conf
 PRIVATE_KEY=/etc/wireguard/wg0.key
+ADDRESS_CONFIG=/etc/wireguard/wg0.address
 
 daemon_pid=
 
@@ -32,6 +32,8 @@ die()
 	exit 1
 }
 
+# Invoked through trap after the userspace daemon exits.
+# shellcheck disable=SC2329
 cleanup()
 {
 	status=$?
@@ -74,9 +76,23 @@ ensure_tun()
 [ -x "$WG" ] || die "missing $WG"
 [ -r "$CONFIG" ] || die "missing $CONFIG"
 [ -r "$PRIVATE_KEY" ] || die "missing $PRIVATE_KEY"
+[ -r "$ADDRESS_CONFIG" ] || die "missing $ADDRESS_CONFIG"
+
+ADDRESS=$(cat "$ADDRESS_CONFIG")
+case "$ADDRESS" in
+	10.0.0.*'/32') ;;
+	*) die 'WireGuard address must be a 10.0.0.0/24 host route' ;;
+esac
+SOURCE=${ADDRESS%/32}
+last_octet=${SOURCE##*.}
+case "$last_octet" in
+	''|*[!0-9]*) die 'WireGuard address has an invalid host octet' ;;
+esac
+[ "$last_octet" -ge 2 ] && [ "$last_octet" -le 253 ] ||
+	die 'WireGuard address host octet is reserved'
 
 umask 077
-chmod 0600 "$CONFIG" "$PRIVATE_KEY"
+chmod 0600 "$CONFIG" "$PRIVATE_KEY" "$ADDRESS_CONFIG"
 ensure_tun
 mkdir -p "$STATE_DIR"
 
@@ -100,7 +116,7 @@ done
 "$WG" set "$IFACE" private-key "$PRIVATE_KEY"
 ip address add "$ADDRESS" dev "$IFACE"
 ip link set dev "$IFACE" mtu "$MTU" up
-ip route replace "$ROUTE" dev "$IFACE" src 10.0.0.10
+ip route replace "$ROUTE" dev "$IFACE" src "$SOURCE"
 
 printf 'deck-wireguard: %s is up as %s; routing %s\n' "$IFACE" "$ADDRESS" "$ROUTE"
 

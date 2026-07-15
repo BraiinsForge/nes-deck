@@ -15,6 +15,11 @@ import (
 	"testing"
 )
 
+const (
+	testServiceAddress = "10.0.0.10:8080"
+	testServiceOrigin  = "http://" + testServiceAddress
+)
+
 func testNES() []byte {
 	rom := make([]byte, 16+16384)
 	copy(rom, []byte{'N', 'E', 'S', 0x1a})
@@ -89,6 +94,27 @@ func TestPasswordInputValidation(t *testing.T) {
 	}
 }
 
+func TestServiceAddressConfiguration(t *testing.T) {
+	for _, address := range []string{"10.0.0.2:8080", "10.0.0.10:8080", "10.0.0.253:8080"} {
+		if normalized, err := normalizeServiceAddress(address); err != nil || normalized != address {
+			t.Fatalf("valid service address was rejected: %q %q %v", address, normalized, err)
+		}
+	}
+	for _, address := range []string{"", "10.0.0.1:8080", "10.0.0.254:8080", "10.0.1.7:8080", "10.0.0.11:80", "localhost:8080"} {
+		if _, err := normalizeServiceAddress(address); err == nil {
+			t.Fatalf("invalid service address was accepted: %q", address)
+		}
+	}
+	directory := t.TempDir()
+	path := filepath.Join(directory, "address.conf")
+	if err := os.WriteFile(path, []byte("10.0.0.12:8080\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if address, err := loadServiceAddress(path); err != nil || address != "10.0.0.12:8080" {
+		t.Fatalf("service address configuration did not load: %q %v", address, err)
+	}
+}
+
 func TestROMValidationAndZIPBoundaries(t *testing.T) {
 	rom := testNES()
 	if err := validateROM("nes", rom); err != nil {
@@ -154,7 +180,7 @@ func TestROMStoreFilesWithoutReplacement(t *testing.T) {
 
 func requestFor(method, target string, body io.Reader) *http.Request {
 	request := httptest.NewRequest(method, target, body)
-	request.Host = serviceAddress
+	request.Host = testServiceAddress
 	request.RemoteAddr = "10.0.0.2:41000"
 	return request
 }
@@ -164,19 +190,19 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	config := passwordConfig{iterations: 1, salt: []byte("0123456789abcdef")}
 	config.digest = derivePassword([]byte(password), config.salt, config.iterations)
 	store, root := testStore(t)
-	app, err := newApplication(config, store, true)
+	app, err := newApplication(config, store, true, testServiceAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	wrongHost := requestFor(http.MethodGet, serviceOrigin+"/", nil)
+	wrongHost := requestFor(http.MethodGet, testServiceOrigin+"/", nil)
 	wrongHost.Host = "10.0.1.6:8080"
 	wrongResponse := httptest.NewRecorder()
 	app.ServeHTTP(wrongResponse, wrongHost)
 	if wrongResponse.Code != http.StatusMisdirectedRequest {
 		t.Fatalf("non-WireGuard host returned %d", wrongResponse.Code)
 	}
-	nonPeer := requestFor(http.MethodGet, serviceOrigin+"/", nil)
+	nonPeer := requestFor(http.MethodGet, testServiceOrigin+"/", nil)
 	nonPeer.RemoteAddr = "10.0.1.8:41000"
 	nonPeerResponse := httptest.NewRecorder()
 	app.ServeHTTP(nonPeerResponse, nonPeer)
@@ -185,8 +211,8 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	}
 
 	loginBody := url.Values{"password": {password}}.Encode()
-	login := requestFor(http.MethodPost, serviceOrigin+"/login", strings.NewReader(loginBody))
-	login.Header.Set("Origin", serviceOrigin)
+	login := requestFor(http.MethodPost, testServiceOrigin+"/login", strings.NewReader(loginBody))
+	login.Header.Set("Origin", testServiceOrigin)
 	login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	loginResponse := httptest.NewRecorder()
 	app.ServeHTTP(loginResponse, login)
@@ -212,8 +238,8 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	}
 	_, _ = fileWriter.Write(testNES())
 	_ = multipartWriter.Close()
-	upload := requestFor(http.MethodPost, serviceOrigin+"/upload", &uploadBody)
-	upload.Header.Set("Origin", serviceOrigin)
+	upload := requestFor(http.MethodPost, testServiceOrigin+"/upload", &uploadBody)
+	upload.Header.Set("Origin", testServiceOrigin)
 	upload.Header.Set("Content-Type", multipartWriter.FormDataContentType())
 	upload.AddCookie(cookies[0])
 	uploadResponse := httptest.NewRecorder()
@@ -232,18 +258,18 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 func TestCrossOriginAndPaperDesignRules(t *testing.T) {
 	config := passwordConfig{iterations: 1, salt: []byte("0123456789abcdef"), digest: make([]byte, 32)}
 	store, _ := testStore(t)
-	app, err := newApplication(config, store, true)
+	app, err := newApplication(config, store, true, testServiceAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, origin := range []string{"", "null", serviceOrigin} {
-		request := requestFor(http.MethodPost, serviceOrigin+"/login", nil)
+	for _, origin := range []string{"", "null", testServiceOrigin} {
+		request := requestFor(http.MethodPost, testServiceOrigin+"/login", nil)
 		request.Header.Set("Origin", origin)
 		if !app.sameOrigin(request) {
 			t.Fatalf("browser-compatible origin was rejected: %q", origin)
 		}
 	}
-	foreign := requestFor(http.MethodPost, serviceOrigin+"/login", strings.NewReader("password=nope"))
+	foreign := requestFor(http.MethodPost, testServiceOrigin+"/login", strings.NewReader("password=nope"))
 	foreign.Header.Set("Origin", "http://example.com")
 	foreign.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	foreignResponse := httptest.NewRecorder()
@@ -252,8 +278,8 @@ func TestCrossOriginAndPaperDesignRules(t *testing.T) {
 		t.Fatalf("foreign-origin login returned %d", foreignResponse.Code)
 	}
 	for attempt := 0; attempt < 6; attempt++ {
-		failed := requestFor(http.MethodPost, serviceOrigin+"/login", strings.NewReader("password=wrong-password-value"))
-		failed.Header.Set("Origin", serviceOrigin)
+		failed := requestFor(http.MethodPost, testServiceOrigin+"/login", strings.NewReader("password=wrong-password-value"))
+		failed.Header.Set("Origin", testServiceOrigin)
 		failed.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		failedResponse := httptest.NewRecorder()
 		app.ServeHTTP(failedResponse, failed)

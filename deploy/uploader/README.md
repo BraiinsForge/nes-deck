@@ -1,9 +1,10 @@
 # WireGuard ROM intake
 
-The native `rom-uploader` service accepts owner-supplied ROMs at
-`http://10.0.0.10:8080`. Its listener is fixed to the Deck's `10.0.0.10`
-address and uses `SO_BINDTODEVICE` for `wg0`; startup fails rather than falling
-back to Wi-Fi or an all-address listener.
+The native `rom-uploader` service accepts owner-supplied ROMs at the Deck's
+configured `http://10.0.0.x:8080` address. The deployment writes that unique
+address to `/mnt/data/nes-deck/uploader/address.conf`. The listener uses
+`SO_BINDTODEVICE` for `wg0`; startup fails rather than falling back to Wi-Fi or
+an all-address listener.
 
 The service uses a PBKDF2-HMAC-SHA256 password record, bounded login attempts,
 eight-hour same-site sessions, CSRF tokens, strict origin and host checks, and

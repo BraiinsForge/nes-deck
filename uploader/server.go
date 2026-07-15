@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -21,9 +22,7 @@ import (
 )
 
 const (
-	serviceAddress      = "10.0.0.10:8080"
 	serviceInterface    = "wg0"
-	serviceOrigin       = "http://10.0.0.10:8080"
 	sessionCookieName   = "deck_rom_session"
 	sessionLifetime     = 8 * time.Hour
 	maximumSessions     = 8
@@ -64,16 +63,32 @@ type application struct {
 	loginGate chan struct{}
 }
 
-func newApplication(password passwordConfig, store *romStore, enforceNetwork bool) (*application, error) {
+func normalizeServiceAddress(address string) (string, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || port != "8080" {
+		return "", errors.New("service address must use an IPv4 address and port 8080")
+	}
+	parsed := net.ParseIP(host).To4()
+	if parsed == nil || parsed[0] != 10 || parsed[1] != 0 || parsed[2] != 0 || parsed[3] < 2 || parsed[3] > 253 {
+		return "", errors.New("service address must be a usable 10.0.0.0/24 peer address")
+	}
+	return net.JoinHostPort(parsed.String(), port), nil
+}
+
+func newApplication(password passwordConfig, store *romStore, enforceNetwork bool, address string) (*application, error) {
 	parsed, err := template.New("page").Parse(pageTemplate)
+	if err != nil {
+		return nil, err
+	}
+	address, err = normalizeServiceAddress(address)
 	if err != nil {
 		return nil, err
 	}
 	return &application{
 		password:       password,
 		store:          store,
-		origin:         serviceOrigin,
-		host:           serviceAddress,
+		origin:         "http://" + address,
+		host:           address,
 		enforceNetwork: enforceNetwork,
 		now:            time.Now,
 		template:       parsed,
@@ -422,7 +437,7 @@ func restartDashboard() error {
 	return nil
 }
 
-func listenWireGuard() (net.Listener, error) {
+func listenWireGuard(address string) (net.Listener, error) {
 	configuration := net.ListenConfig{
 		Control: func(network, address string, connection syscall.RawConn) error {
 			var controlError error
@@ -434,5 +449,5 @@ func listenWireGuard() (net.Listener, error) {
 			return controlError
 		},
 	}
-	return configuration.Listen(context.Background(), "tcp4", serviceAddress)
+	return configuration.Listen(context.Background(), "tcp4", address)
 }

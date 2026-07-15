@@ -2,4 +2,5 @@
 # text. The real file contains a secret, must remain mode 0600, and is ignored
 # by Git.
 DECK_SSH_TARGET=root@192.168.1.100
+DECK_WIREGUARD_ADDRESS=10.0.0.11
 ROM_UPLOADER_PASSWORD=

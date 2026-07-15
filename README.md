@@ -25,8 +25,9 @@ cd nes-deck
 ./ops/deploy.sh
 ```
 
-The setup command asks for the Deck's current SSH address and the ROM uploader
-password. It writes `deck.conf` with mode `0600`; the file is ignored by Git.
+The setup command asks for the Deck's current SSH address, its unique
+WireGuard address, and the ROM uploader password. It writes `deck.conf` with
+mode `0600`; the file is ignored by Git.
 Use `--config PATH` with both commands to keep separate configurations for
 multiple Decks. A positional `root@DECK-IP` passed to `deploy.sh` temporarily
 overrides the configured SSH target.
@@ -85,17 +86,18 @@ mono or stereo. Ten CC0 tracks are included with provenance and checksums in
 
 ## Upload ROMs over WireGuard
 
-Open `http://10.0.0.10:8080` while connected to the Deck's WireGuard network
-and sign in with the password from your private deployment configuration. The
+Open `http://<DECK_WIREGUARD_ADDRESS>:8080` while connected to the Deck's
+WireGuard network and sign in with the password from your private deployment
+configuration. The
 Paper-style intake page accepts a raw NES, GB, GBC, ZX Spectrum, or CHIP-8 ROM,
 or a ZIP containing exactly one matching ROM. It validates the payload,
 refuses to replace an existing file, files it below
 `/mnt/data/roms/<system>/`, updates a private supplemental catalog, and
 restarts the dashboard so the game appears.
 
-The service binds to both the `10.0.0.10` address and the `wg0` device. It does
-not listen on Wi-Fi, and it never changes Wi-Fi, WireGuard, routes, or firewall
-state. Authentication, CSRF, upload limits, and password rotation are
+The service binds to both the configured WireGuard address and the `wg0`
+device. It does not listen on Wi-Fi, and it never changes Wi-Fi, WireGuard,
+routes, or firewall state. Authentication, CSRF, upload limits, and password rotation are
 documented in [deploy/uploader/README.md](deploy/uploader/README.md).
 
 ## Using the dashboard
