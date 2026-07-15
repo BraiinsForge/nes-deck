@@ -24,11 +24,18 @@ if [ "${3:-}" = link ]; then
 	exit 0
 fi
 if [ "${3:-}" = scan ]; then
+	[ "${TEST_IW_FAIL:-0}" = 1 ] && exit 1
 	cat "$TEST_SCAN"
 	exit 0
 fi
 exit 1
 FAKE_IW
+
+cat > "$fixture/bin/iwinfo" <<'FAKE_IWINFO'
+#!/bin/sh
+[ "${TEST_IWINFO_FAIL:-0}" = 1 ] && exit 1
+cat "$TEST_IWINFO_SCAN"
+FAKE_IWINFO
 
 cat > "$fixture/bin/ip" <<'FAKE_IP'
 #!/bin/sh
@@ -114,7 +121,8 @@ cat > "$fixture/bin/date" <<'FAKE_DATE'
 echo 20260715-120000
 FAKE_DATE
 
-chmod 0700 "$fixture/bin/iw" "$fixture/bin/ip" "$fixture/bin/uci" \
+chmod 0700 "$fixture/bin/iw" "$fixture/bin/iwinfo" \
+	"$fixture/bin/ip" "$fixture/bin/uci" \
 	"$fixture/bin/wifi" "$fixture/bin/logger" "$fixture/bin/sleep" \
 	"$fixture/bin/date"
 
@@ -153,6 +161,20 @@ BSS 00:00:00:00:00:03(on wlan0)
 	SSID: good
 	Authentication suites: PSK
 SCAN
+	cat > "$scenario/iwinfo-scan" <<'IWINFO_SCAN'
+Cell 01 - Address: 00:00:00:00:00:01
+          ESSID: "old"
+          Signal: -10 dBm  Quality: 60/70
+          Encryption: WPA2 PSK (CCMP)
+Cell 02 - Address: 00:00:00:00:00:02
+          ESSID: "bad"
+          Signal: -20 dBm  Quality: 50/70
+          Encryption: WPA2 PSK (CCMP)
+Cell 03 - Address: 00:00:00:00:00:03
+          ESSID: "good"
+          Signal: -30 dBm  Quality: 40/70
+          Encryption: WPA2 PSK (CCMP)
+IWINFO_SCAN
 	: > "$scenario/attempts"
 	printf '0\n' > "$scenario/associated"
 	printf '0\n' > "$scenario/ready"
@@ -162,9 +184,14 @@ SCAN
 run_selector() {
 	scenario=$1
 	good_ssid=$2
+	iwinfo_fail=${3:-0}
+	iw_fail=${4:-1}
 	TEST_ASSOCIATED=$scenario/associated \
 	TEST_READY=$scenario/ready \
 	TEST_SCAN=$scenario/scan \
+	TEST_IWINFO_SCAN=$scenario/iwinfo-scan \
+	TEST_IWINFO_FAIL=$iwinfo_fail \
+	TEST_IW_FAIL=$iw_fail \
 	TEST_ATTEMPTS=$scenario/attempts \
 	TEST_GOOD_SSID=$good_ssid \
 	DECK_WIFI_PATH=$fixture/bin:/usr/bin:/bin \
@@ -179,7 +206,8 @@ run_selector() {
 	DECK_WIFI_SWITCH_TIMEOUT=2 \
 	DECK_WIFI_ROLLBACK_GRACE=2 \
 	DECK_WIFI_HEALTH_INTERVAL=1 \
-	export TEST_ASSOCIATED TEST_READY TEST_SCAN TEST_ATTEMPTS TEST_GOOD_SSID \
+	export TEST_ASSOCIATED TEST_READY TEST_SCAN TEST_IWINFO_SCAN \
+		TEST_IWINFO_FAIL TEST_IW_FAIL TEST_ATTEMPTS TEST_GOOD_SSID \
 		DECK_WIFI_PATH DECK_WIFI_PROFILE_DIR DECK_WIFI_BACKUP_DIR \
 		DECK_WIFI_CONFIG DECK_WIFI_RUNTIME_CONFIG DECK_WIFI_STATUS_FILE \
 		DECK_WIFI_LOCK_DIR DECK_WIFI_TMP_DIR DECK_WIFI_SCAN_INTERVAL \
@@ -199,6 +227,19 @@ grep -qx 'CONNECTED' "$success/run/status" ||
 	fail 'success was not exposed in status'
 [ "$(find "$success/backups" -type f -name 'wireless.*.before-switch' | wc -l)" -eq 1 ] ||
 	fail 'selector did not create exactly one pre-switch backup'
+
+fallback=$(make_scenario fallback)
+run_selector "$fallback" good 1 0 || fail 'raw iw scan fallback failed'
+printf 'bad\ngood\n' > "$fixture/expected-fallback-attempts"
+cmp "$fixture/expected-fallback-attempts" "$fallback/attempts" ||
+	fail 'raw iw fallback did not preserve candidate ordering'
+
+scan_failure=$(make_scenario scan-failure)
+if run_selector "$scan_failure" good 1 1; then
+	fail 'selector accepted failure from both scan providers'
+fi
+grep -qx 'WIFI SCAN FAILED' "$scan_failure/run/status" ||
+	fail 'bounded scan failure was not exposed in status'
 
 rollback=$(make_scenario rollback)
 if run_selector "$rollback" absent; then

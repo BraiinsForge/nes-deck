@@ -11,9 +11,11 @@ Canonical IWD `.psk` files live in `/etc/deck-wifi/profiles` with mode `0600`.
 The selector decodes IWD filenames, ignores profiles containing
 `AutoConnect=false`, and scans without logging SSIDs. Candidates must advertise
 a PSK authentication suite; SAE-only and unclassified BSSes are skipped. After
-two successful scans, every visible known candidate is tried once in signal
-order, with alternatives ahead of the currently configured SSID. Both IWD
-`Passphrase` and 64-digit `PreSharedKey` profiles are supported. A complete
+one successful OpenWrt `iwinfo` scan, every visible known candidate is tried
+once in signal order, with alternatives ahead of the currently configured
+SSID. A raw `iw` scan remains as a compatibility fallback, and three bounded
+retries absorb transient driver-busy failures. Both IWD `Passphrase` and
+64-digit `PreSharedKey` profiles are supported. A complete
 network-health check immediately before every commit prevents a scan/reconnect
 race, and a healthy connection is never changed.
 
@@ -27,7 +29,8 @@ network does not recover. It never waits forever after rollback.
 The watcher and selector atomically maintain the root-only runtime state file
 `/var/run/deck-wifi/status`. It contains short credential-free states such as
 `BOOT GRACE 90 SECONDS`, `SCANNING KNOWN WIFI`, `TRYING KNOWN WIFI 1 OF 3`,
-and `NO KNOWN WIFI CONNECTED`. The dashboard displays this state beside the
+and `NO KNOWN WIFI CONNECTED`. Each credential-free transition is also sent to
+logd for post-outage diagnosis. The dashboard displays this state beside the
 active SSID and the `wlan0` and `wg0` IPv4 addresses.
 
 `/etc/config/wireless`, its pre-switch backups, and the generated supplicant

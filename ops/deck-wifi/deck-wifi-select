@@ -13,8 +13,10 @@ STATUS_FILE=${DECK_WIFI_STATUS_FILE:-/var/run/deck-wifi/status}
 IFACE=${DECK_WIFI_INTERFACE:-wlan0}
 LOCK_DIR=${DECK_WIFI_LOCK_DIR:-/tmp/deck-wifi-select.lock}
 TAB=$(printf '\t')
-SCAN_CONFIRMATIONS=${DECK_WIFI_SCAN_CONFIRMATIONS:-2}
+SCAN_CONFIRMATIONS=${DECK_WIFI_SCAN_CONFIRMATIONS:-1}
 SCAN_INTERVAL=${DECK_WIFI_SCAN_INTERVAL:-5}
+SCAN_RETRIES=${DECK_WIFI_SCAN_RETRIES:-3}
+SCAN_RETRY_INTERVAL=${DECK_WIFI_SCAN_RETRY_INTERVAL:-3}
 SWITCH_TIMEOUT=${DECK_WIFI_SWITCH_TIMEOUT:-60}
 ROLLBACK_GRACE=${DECK_WIFI_ROLLBACK_GRACE:-20}
 HEALTH_INTERVAL=${DECK_WIFI_HEALTH_INTERVAL:-2}
@@ -34,6 +36,7 @@ write_status() {
 	if printf '%s\n' "$status" > "$temporary_status" &&
 		chmod 0600 "$temporary_status" &&
 		mv "$temporary_status" "$STATUS_FILE"; then
+		logger -t deck-wifi "state: $status"
 		return 0
 	fi
 	rm -f "$temporary_status" 2>/dev/null || true
@@ -163,13 +166,34 @@ cleanup() {
 	rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 
-scan_once() {
-	: > "$SCAN_IW"
-	: > "$SCAN_RAW"
-	: > "$SCAN_HEX"
-	: > "$SCAN_SORTED"
+parse_iwinfo_scan() {
+	awk '
+		function emit() {
+			if (length(ssid) > 0) printf "%s\t%d\t%s\n", signal, psk, ssid
+		}
+		/^Cell / {
+			emit()
+			signal=-1000
+			ssid=""
+			psk=0
+			next
+		}
+		/^[[:space:]]*Signal:/ { signal=$2; next }
+		/^[[:space:]]*Encryption:/ {
+			if (index($0, "PSK")) psk=1
+			next
+		}
+		/^[[:space:]]*ESSID: "/ {
+			ssid=$0
+			sub(/^[[:space:]]*ESSID: "/, "", ssid)
+			sub(/"$/, "", ssid)
+			next
+		}
+		END { emit() }
+	' "$SCAN_IW" > "$SCAN_RAW"
+}
 
-	iw dev "$IFACE" scan > "$SCAN_IW" 2>/dev/null || return 1
+parse_iw_scan() {
 	awk '
 		function emit() {
 			if (length(ssid) > 0) printf "%s\t%d\t%s\n", signal, psk, ssid
@@ -193,6 +217,25 @@ scan_once() {
 		}
 		END { emit() }
 	' "$SCAN_IW" > "$SCAN_RAW"
+}
+
+scan_once() {
+	: > "$SCAN_IW"
+	: > "$SCAN_RAW"
+	: > "$SCAN_HEX"
+	: > "$SCAN_SORTED"
+
+	if command -v iwinfo >/dev/null 2>&1 &&
+		iwinfo "$IFACE" scan > "$SCAN_IW" 2>/dev/null; then
+		parse_iwinfo_scan
+	fi
+	if [ ! -s "$SCAN_RAW" ]; then
+		: > "$SCAN_IW"
+		if ! iw dev "$IFACE" scan > "$SCAN_IW" 2>/dev/null; then
+			return 1
+		fi
+		parse_iw_scan
+	fi
 	[ -s "$SCAN_RAW" ] || return 1
 
 	while IFS="$TAB" read -r signal advertises_psk ssid; do
@@ -311,7 +354,23 @@ while [ "$confirmation" -lt "$SCAN_CONFIRMATIONS" ]; do
 		write_status "CONNECTED" || true
 		exit 0
 	fi
-	if ! scan_once; then
+	retry=0
+	scan_succeeded=false
+	while [ "$retry" -lt "$SCAN_RETRIES" ]; do
+		if scan_once; then
+			scan_succeeded=true
+			break
+		fi
+		retry=$((retry + 1))
+		[ "$retry" -ge "$SCAN_RETRIES" ] && break
+		write_status "WIFI SCAN RETRY $retry OF $SCAN_RETRIES" || true
+		sleep "$SCAN_RETRY_INTERVAL"
+		if network_ready; then
+			write_status "CONNECTED" || true
+			exit 0
+		fi
+	done
+	if [ "$scan_succeeded" != true ]; then
 		write_status "WIFI SCAN FAILED" || true
 		exit 1
 	fi
