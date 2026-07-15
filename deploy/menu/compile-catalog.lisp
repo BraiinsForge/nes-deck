@@ -7,13 +7,13 @@
 
 (in-package #:nes-deck-catalog)
 
-(defconstant +schema-version+ 5)
-(defconstant +palette-override-version+ 2)
+(defconstant +schema-version+ 6)
+(defconstant +appearance-override-version+ 3)
 (defconstant +maximum-games+ 64)
 (defconstant +maximum-catalog-bytes+ 65536)
 (defconstant +console-rom-root+ "/mnt/data/roms/")
 (defconstant +deck-game-root+ "/mnt/data/nes-deck/games/")
-(defparameter +catalog-keys+ '(:version :palette :games))
+(defparameter +catalog-keys+ '(:version :settings-icon :palette :games))
 (defparameter +game-keys+
   '(:id :title :system :rom :color))
 (defparameter +palette-keys+
@@ -22,7 +22,12 @@
     :volume-off :volume-on :selected :wifi-active :wifi-focus
     :wifi-active-border :field-label :accent :active :control-surface
     :muted))
-(defparameter +palette-override-keys+ '(:version :palette))
+(defparameter +appearance-override-keys+
+  '(:version :settings-icon :palette))
+(defparameter +settings-icons+
+  '("gear-classic" "gear-square" "gear-diamond" "gear-eight"
+    "gear-spoke" "gear-ring" "gear-cross" "gear-compact"
+    "gear-heavy" "gear-rivet"))
 
 (defun catalog-error (control &rest arguments)
   (error "Catalog error: ~?" control arguments))
@@ -48,7 +53,8 @@
          (setf cursor (cdr cursor))
          (incf count))))))
 
-(defun decode-plist (value allowed-keys context)
+(defun decode-plist (value allowed-keys context
+                     &optional (required-keys allowed-keys))
   "Decode a short property list and reject missing, duplicate, or unknown keys."
   (let* ((elements
            ;; Permit one extra pair through the bounded traversal so the
@@ -65,7 +71,7 @@
       (when (assoc key pairs :test #'eq)
         (catalog-error "~A contains duplicate key ~S" context key))
       (push (cons key field-value) pairs))
-    (dolist (key allowed-keys)
+    (dolist (key required-keys)
       (unless (assoc key pairs :test #'eq)
         (catalog-error "~A is missing key ~S" context key)))
     (nreverse pairs)))
@@ -208,6 +214,12 @@
           (list (string-downcase (symbol-name key))
                 (validate-rgb-color (required-value key pairs) key)))))
 
+(defun validate-settings-icon (value context)
+  (unless (and (stringp value)
+               (member value +settings-icons+ :test #'string=))
+    (catalog-error "~A must name one of the ten built-in pixel cogs" context))
+  value)
+
 (defun validate-game (form position)
   (let* ((context (format nil "game ~D" position))
          (pairs (decode-plist form +game-keys+ context))
@@ -231,6 +243,9 @@
 (defun validate-catalog (form)
   (let* ((pairs (decode-plist form +catalog-keys+ "catalog"))
          (version (required-value :version pairs))
+         (settings-icon
+           (validate-settings-icon (required-value :settings-icon pairs)
+                                   "catalog :settings-icon"))
          (palette (validate-palette (required-value :palette pairs)
                                     "catalog :palette"))
          (raw-games
@@ -247,17 +262,29 @@
       (let ((duplicate (duplicate-field games (car field))))
         (when duplicate
           (catalog-error "duplicate game ~A ~S" (cdr field) duplicate))))
-    (values games palette)))
+    (values games palette settings-icon)))
 
-(defun validate-palette-override (form)
-  (let* ((pairs (decode-plist form +palette-override-keys+
-                              "palette override"))
+(defun validate-appearance-override (form)
+  (let* ((pairs (decode-plist form +appearance-override-keys+
+                              "appearance override"
+                              '(:version :palette)))
          (version (required-value :version pairs)))
-    (unless (eql version +palette-override-version+)
-      (catalog-error "unsupported palette override :version ~S; expected ~D"
-                     version +palette-override-version+))
-    (validate-palette (required-value :palette pairs)
-                      "palette override :palette")))
+    (unless (member version '(2 3) :test #'eql)
+      (catalog-error
+       "unsupported appearance override :version ~S; expected 2 or ~D"
+       version +appearance-override-version+))
+    (let ((settings-pair (assoc :settings-icon pairs :test #'eq)))
+      (when (and (eql version 2) settings-pair)
+        (catalog-error "appearance override version 2 cannot set an icon"))
+      (when (and (eql version +appearance-override-version+)
+                 (null settings-pair))
+        (catalog-error "appearance override version 3 is missing :settings-icon"))
+      (values
+       (validate-palette (required-value :palette pairs)
+                         "appearance override :palette")
+       (when settings-pair
+         (validate-settings-icon (cdr settings-pair)
+                                 "appearance override :settings-icon"))))))
 
 (defun read-catalog (source)
   (with-open-file (stream source :direction :input)
@@ -282,14 +309,19 @@
              (write-string field stream))
     (terpri stream)))
 
-(defun write-palette-tsv (palette stream)
+(defun write-palette-tsv (palette settings-icon stream)
+  (write-string "settings-icon" stream)
+  (write-char #\Tab stream)
+  (write-string settings-icon stream)
+  (terpri stream)
   (dolist (entry palette)
     (write-string (first entry) stream)
     (write-char #\Tab stream)
     (write-string (second entry) stream)
     (terpri stream)))
 
-(defun emit-outputs-atomically (games palette games-output palette-output)
+(defun emit-outputs-atomically
+    (games palette settings-icon games-output palette-output)
   ;; Temporary files remain beside their outputs so both final renames are
   ;; atomic on the Deck's persistent filesystem.
   (let* ((games-temporary
@@ -310,7 +342,7 @@
                                    :direction :output
                                    :if-exists :supersede
                                    :if-does-not-exist :create)
-             (write-palette-tsv palette stream)
+             (write-palette-tsv palette settings-icon stream)
              (finish-output stream))
            (rename-file palette-temporary palette-output
                         :if-exists :supersede)
@@ -341,16 +373,21 @@
   (multiple-value-bind
         (source games-output palette-output palette-override)
       (last-four-command-arguments)
-    (multiple-value-bind (games base-palette)
+    (multiple-value-bind (games base-palette base-settings-icon)
         (validate-catalog (read-catalog source))
-      (let ((palette
-              (if (probe-file palette-override)
-                  (validate-palette-override
-                   (read-catalog palette-override))
-                  base-palette)))
-        (emit-outputs-atomically games palette games-output palette-output)
-        (format t "catalog: wrote ~D games and ~D palette roles~%"
-                (length games) (length palette))))))
+      (let ((palette base-palette)
+            (settings-icon base-settings-icon))
+        (when (probe-file palette-override)
+          (multiple-value-bind (override-palette override-settings-icon)
+              (validate-appearance-override (read-catalog palette-override))
+            (setf palette override-palette)
+            (when override-settings-icon
+              (setf settings-icon override-settings-icon))))
+        (emit-outputs-atomically games palette settings-icon
+                                 games-output palette-output)
+        (format t
+                "catalog: wrote ~D games, ~D palette roles, and icon ~A~%"
+                (length games) (length palette) settings-icon)))))
 
 (handler-case
     (progn

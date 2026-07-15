@@ -47,6 +47,7 @@ type pageData struct {
 	Notice        string
 	Entries       []catalogEntry
 	Palette       []paletteField
+	SettingsIcons []settingsIconField
 }
 
 type application struct {
@@ -272,11 +273,11 @@ func (app *application) dashboardData(session userSession, message, notice strin
 	if err != nil && message == "" {
 		message = "The upload catalog cannot be read."
 	}
-	palette, err := app.palette.current()
+	palette, settingsIcons, err := app.palette.current()
 	if err != nil && message == "" {
-		message = "The dashboard colors cannot be read."
+		message = "The dashboard appearance cannot be read."
 	}
-	return pageData{Authenticated: true, CSRF: session.csrf, Error: message, Notice: notice, Entries: entries, Palette: palette}
+	return pageData{Authenticated: true, CSRF: session.csrf, Error: message, Notice: notice, Entries: entries, Palette: palette, SettingsIcons: settingsIcons}
 }
 
 func (app *application) handleIndex(response http.ResponseWriter, request *http.Request) {
@@ -424,7 +425,7 @@ func (app *application) handlePalette(response http.ResponseWriter, request *htt
 	}
 	request.Body = http.MaxBytesReader(response, request.Body, maximumPaletteBytes)
 	if err := request.ParseForm(); err != nil {
-		app.render(response, http.StatusBadRequest, app.dashboardData(session, "The color form was malformed.", ""))
+		app.render(response, http.StatusBadRequest, app.dashboardData(session, "The appearance form was malformed.", ""))
 		return
 	}
 	if !app.csrfValid(request, session) {
@@ -432,6 +433,7 @@ func (app *application) handlePalette(response http.ResponseWriter, request *htt
 		return
 	}
 	values := make(map[string]string, len(dashboardPaletteSpecs))
+	settingsIcon := ""
 	for key, fields := range request.PostForm {
 		if key == "csrf" {
 			if len(fields) != 1 {
@@ -440,8 +442,16 @@ func (app *application) handlePalette(response http.ResponseWriter, request *htt
 			}
 			continue
 		}
+		if key == "settings-icon" {
+			if len(fields) != 1 || settingsIcon != "" || !validSettingsIcon(fields[0]) {
+				app.render(response, http.StatusBadRequest, app.dashboardData(session, "Choose one of the available settings icons.", ""))
+				return
+			}
+			settingsIcon = fields[0]
+			continue
+		}
 		if !validPaletteName(key) || len(fields) != 1 {
-			app.render(response, http.StatusBadRequest, app.dashboardData(session, "The color form contains an unknown or repeated field.", ""))
+			app.render(response, http.StatusBadRequest, app.dashboardData(session, "The appearance form contains an unknown or repeated field.", ""))
 			return
 		}
 		value, valid := normalizeRGB(fields[0])
@@ -451,11 +461,15 @@ func (app *application) handlePalette(response http.ResponseWriter, request *htt
 		}
 		values[key] = value
 	}
-	if err := app.palette.save(values); err != nil {
+	if settingsIcon == "" {
+		app.render(response, http.StatusBadRequest, app.dashboardData(session, "Choose a settings icon.", ""))
+		return
+	}
+	if err := app.palette.save(values, settingsIcon); err != nil {
 		app.render(response, http.StatusUnprocessableEntity, app.dashboardData(session, err.Error(), ""))
 		return
 	}
-	app.render(response, http.StatusOK, app.dashboardData(session, "", "Dashboard colors were saved and applied."))
+	app.render(response, http.StatusOK, app.dashboardData(session, "", "Dashboard appearance was saved and applied."))
 }
 
 func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Request) {

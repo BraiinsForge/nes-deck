@@ -85,6 +85,7 @@ int main() {
   std::string error;
 
   const std::string palette_fixture =
+      "settings-icon\tgear-diamond\n"
       "background\t#000000\ntext-dark\t#121212\nfield\t#121212\n"
       "surface\t#1C1C1C\ninactive-border\t#5F5F5F\n"
       "control-border\t#6C6C6C\nfooter\t#BCBCBC\n"
@@ -101,8 +102,9 @@ int main() {
   expect(load_dashboard_palette(palette_path, &error) &&
              kColorAccent.red == 0x12 && kColorAccent.green == 0x34 &&
              kColorAccent.blue == 0x56 && kColorMuted.red == 0x65 &&
-             kColorMuted.green == 0x43 && kColorMuted.blue == 0x21,
-         "complete full RGB dashboard palette loads");
+             kColorMuted.green == 0x43 && kColorMuted.blue == 0x21 &&
+             gSettingsIcon == 2,
+         "complete full RGB dashboard appearance loads");
   const std::string bad_palette = "background\t#12345G\n";
   expect(write_file(bad_palette_path, bad_palette.data(), bad_palette.size()),
          "write invalid dashboard palette fixture");
@@ -111,6 +113,15 @@ int main() {
              kColorAccent.red == 0x12 && kColorAccent.green == 0x34 &&
              kColorAccent.blue == 0x56,
          "invalid palette is rejected without partially changing colors");
+  std::string bad_icon_palette = palette_fixture;
+  bad_icon_palette.replace(14, std::strlen("gear-diamond"), "gear-nope");
+  expect(write_file(bad_palette_path, bad_icon_palette.data(),
+                    bad_icon_palette.size()),
+         "write invalid settings icon fixture");
+  error.clear();
+  expect(!load_dashboard_palette(bad_palette_path, &error) &&
+             gSettingsIcon == 2 && kColorAccent.red == 0x12,
+         "invalid settings icon is rejected without partially changing appearance");
   reset_dashboard_palette();
 
   expect(menu_gamepad_key_to_button(BTN_THUMB2) == kMenuPadConfirm &&
@@ -707,6 +718,25 @@ int main() {
     fourth_nes.color = xterm_color(81);
     tab_games.push_back(fourth_nes);
   }
+
+  std::set<uint64_t> settings_icon_hashes;
+  for (size_t icon = 0; icon < kSettingsIconDefinitionCount; ++icon) {
+    Canvas icon_canvas(static_cast<size_t>(kLogicalWidth * kLogicalHeight), 0);
+    gSettingsIcon = icon;
+    draw_settings_icon(&icon_canvas, Rect{0, 0, 56, 56}, 0xffff);
+    uint64_t hash = 1469598103934665603ULL;
+    for (size_t pixel = 0; pixel < icon_canvas.size(); ++pixel) {
+      hash ^= icon_canvas[pixel];
+      hash *= 1099511628211ULL;
+    }
+    if (!settings_icon_hashes.insert(hash).second)
+      std::cerr << "duplicate settings icon rendering: "
+                << kSettingsIconDefinitions[icon].name << std::endl;
+  }
+  expect(kSettingsIconDefinitionCount == 10 &&
+             settings_icon_hashes.size() == kSettingsIconDefinitionCount,
+         "all ten configurable pixel cogs render distinctly");
+  reset_dashboard_palette();
 
   render_menu(tab_games, "nes", 0, std::string(), &canvas, &menu_layout);
   expect(canvas.size() == static_cast<size_t>(kLogicalWidth * kLogicalHeight),

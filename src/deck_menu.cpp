@@ -317,6 +317,70 @@ RgbColor kColorActive = {0x50, 0x33, 0x11};
 RgbColor kColorControlSurface = {0x30, 0x30, 0x30};
 RgbColor kColorMuted = {0x94, 0x94, 0x94};
 
+struct SettingsIconDefinition {
+  const char *name;
+  const char *rows[9];
+};
+
+const SettingsIconDefinition kSettingsIconDefinitions[] = {
+    {"gear-classic",
+     {"..##.##..", ".#######.", "###...###", "##.....##",
+      "##.....##", "##.....##", "###...###", ".#######.",
+      "..##.##.."}},
+    {"gear-square",
+     {".##...##.", ".##...##.", "#########", "##.....##",
+      "##.....##", "##.....##", "#########", ".##...##.",
+      ".##...##."}},
+    {"gear-diamond",
+     {"....#....", "..#####..", ".##...##.", "##.....##",
+      "#.......#", "##.....##", ".##...##.", "..#####..",
+      "....#...."}},
+    {"gear-eight",
+     {".##...##.", "###...###", ".#######.", "..#...#..",
+      "..#...#..", "..#...#..", ".#######.", "###...###",
+      ".##...##."}},
+    {"gear-spoke",
+     {"...###...", ".#.###.#.", "..#####..", "###.#.###",
+      "####.####", "###.#.###", "..#####..", ".#.###.#.",
+      "...###..."}},
+    {"gear-ring",
+     {"...###...", ".#######.", "###...###", "##.....##",
+      "##.....##", "##.....##", "###...###", ".#######.",
+      "...###..."}},
+    {"gear-cross",
+     {"...###...", "...###...", "..#####..", "###...###",
+      "###...###", "###...###", "..#####..", "...###...",
+      "...###..."}},
+    {"gear-compact",
+     {".........", "...###...", "..#####..", ".##...##.",
+      ".##...##.", ".##...##.", "..#####..", "...###...",
+      "........."}},
+    {"gear-heavy",
+     {".###.###.", "#########", "###...###", "##.....##",
+      "##.....##", "##.....##", "###...###", "#########",
+      ".###.###."}},
+    {"gear-rivet",
+     {"..#...#..", ".#######.", "##.#.#.##", ".#.....#.",
+      ".#.....#.", ".#.....#.", "##.#.#.##", ".#######.",
+      "..#...#.."}},
+};
+
+const size_t kSettingsIconDefinitionCount =
+    sizeof(kSettingsIconDefinitions) / sizeof(kSettingsIconDefinitions[0]);
+const size_t kDefaultSettingsIcon = 4;
+size_t gSettingsIcon = kDefaultSettingsIcon;
+
+bool settings_icon_index(const std::string &name, size_t *result) {
+  for (size_t index = 0; index < kSettingsIconDefinitionCount; ++index) {
+    if (name == kSettingsIconDefinitions[index].name) {
+      if (result)
+        *result = index;
+      return true;
+    }
+  }
+  return false;
+}
+
 struct PaletteToken {
   const char *name;
   RgbColor *value;
@@ -683,6 +747,7 @@ std::vector<std::string> split_tabs(const std::string &line) {
 void reset_dashboard_palette() {
   for (size_t index = 0; index < kPaletteTokenCount; ++index)
     *kPaletteTokens[index].value = kPaletteTokens[index].default_value;
+  gSettingsIcon = kDefaultSettingsIcon;
 }
 
 bool load_dashboard_palette(const std::string &path, std::string *error) {
@@ -712,6 +777,8 @@ bool load_dashboard_palette(const std::string &path, std::string *error) {
 
   std::vector<RgbColor> values(kPaletteTokenCount, RgbColor{0, 0, 0});
   std::vector<bool> seen(kPaletteTokenCount, false);
+  size_t settings_icon = kDefaultSettingsIcon;
+  bool saw_settings_icon = false;
   std::string line;
   size_t line_number = 0;
   while (std::getline(input, line)) {
@@ -726,6 +793,22 @@ bool load_dashboard_palette(const std::string &path, std::string *error) {
         *error = "palette line " + std::to_string(line_number) +
                  " must have exactly 2 TSV fields";
       return false;
+    }
+    if (fields[0] == "settings-icon") {
+      if (saw_settings_icon) {
+        if (error)
+          *error = "duplicate settings icon on line " +
+                   std::to_string(line_number);
+        return false;
+      }
+      if (!settings_icon_index(fields[1], &settings_icon)) {
+        if (error)
+          *error = "unknown settings icon on line " +
+                   std::to_string(line_number);
+        return false;
+      }
+      saw_settings_icon = true;
+      continue;
     }
     size_t token = 0;
     while (token < kPaletteTokenCount &&
@@ -766,6 +849,7 @@ bool load_dashboard_palette(const std::string &path, std::string *error) {
   }
   for (size_t token = 0; token < kPaletteTokenCount; ++token)
     *kPaletteTokens[token].value = values[token];
+  gSettingsIcon = settings_icon;
   return true;
 }
 
@@ -2416,21 +2500,19 @@ void draw_outline_arrow(Canvas *canvas, const Rect &bounds,
 }
 
 void draw_settings_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
-  const int center_x = bounds.x + bounds.width / 2;
-  const int center_y = bounds.y + bounds.height / 2;
-  const uint16_t background = color_pixel(kColorBackground);
-  fill_pixel_cut_rect(canvas, Rect{center_x - 14, center_y - 14, 28, 28}, 5,
-                      color);
-  fill_rect(canvas, Rect{center_x - 4, center_y - 23, 8, 10}, color);
-  fill_rect(canvas, Rect{center_x - 4, center_y + 13, 8, 10}, color);
-  fill_rect(canvas, Rect{center_x - 23, center_y - 4, 10, 8}, color);
-  fill_rect(canvas, Rect{center_x + 13, center_y - 4, 10, 8}, color);
-  fill_rect(canvas, Rect{center_x - 19, center_y - 19, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x + 11, center_y - 19, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x - 19, center_y + 11, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x + 11, center_y + 11, 8, 8}, color);
-  fill_pixel_cut_rect(canvas, Rect{center_x - 6, center_y - 6, 12, 12}, 3,
-                      background);
+  const int pixel = 4;
+  const int left = bounds.x + (bounds.width - 9 * pixel) / 2;
+  const int top = bounds.y + (bounds.height - 9 * pixel) / 2;
+  const SettingsIconDefinition &icon =
+      kSettingsIconDefinitions[gSettingsIcon];
+  for (int row = 0; row < 9; ++row) {
+    for (int column = 0; column < 9; ++column) {
+      if (icon.rows[row][column] == '#')
+        fill_rect(canvas,
+                  Rect{left + column * pixel, top + row * pixel, pixel, pixel},
+                  color);
+    }
+  }
 }
 
 void draw_close_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {

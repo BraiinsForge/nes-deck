@@ -17,6 +17,27 @@ type paletteSpec struct {
 	label string
 }
 
+type settingsIconSpec struct {
+	name  string
+	label string
+	rows  [9]string
+}
+
+const defaultSettingsIcon = "gear-spoke"
+
+var settingsIconSpecs = []settingsIconSpec{
+	{name: "gear-classic", label: "Classic", rows: [9]string{"..##.##..", ".#######.", "###...###", "##.....##", "##.....##", "##.....##", "###...###", ".#######.", "..##.##.."}},
+	{name: "gear-square", label: "Square", rows: [9]string{".##...##.", ".##...##.", "#########", "##.....##", "##.....##", "##.....##", "#########", ".##...##.", ".##...##."}},
+	{name: "gear-diamond", label: "Diamond", rows: [9]string{"....#....", "..#####..", ".##...##.", "##.....##", "#.......#", "##.....##", ".##...##.", "..#####..", "....#...."}},
+	{name: "gear-eight", label: "Eight tooth", rows: [9]string{".##...##.", "###...###", ".#######.", "..#...#..", "..#...#..", "..#...#..", ".#######.", "###...###", ".##...##."}},
+	{name: "gear-spoke", label: "Spoked", rows: [9]string{"...###...", ".#.###.#.", "..#####..", "###.#.###", "####.####", "###.#.###", "..#####..", ".#.###.#.", "...###..."}},
+	{name: "gear-ring", label: "Ring", rows: [9]string{"...###...", ".#######.", "###...###", "##.....##", "##.....##", "##.....##", "###...###", ".#######.", "...###..."}},
+	{name: "gear-cross", label: "Cross", rows: [9]string{"...###...", "...###...", "..#####..", "###...###", "###...###", "###...###", "..#####..", "...###...", "...###..."}},
+	{name: "gear-compact", label: "Compact", rows: [9]string{".........", "...###...", "..#####..", ".##...##.", ".##...##.", ".##...##.", "..#####..", "...###...", "........."}},
+	{name: "gear-heavy", label: "Heavy", rows: [9]string{".###.###.", "#########", "###...###", "##.....##", "##.....##", "##.....##", "###...###", "#########", ".###.###."}},
+	{name: "gear-rivet", label: "Riveted", rows: [9]string{"..#...#..", ".#######.", "##.#.#.##", ".#.....#.", ".#.....#.", ".#.....#.", "##.#.#.##", ".#######.", "..#...#.."}},
+}
+
 var dashboardPaletteSpecs = []paletteSpec{
 	{name: "background", label: "Background"},
 	{name: "text-dark", label: "Dark text"},
@@ -46,6 +67,18 @@ type paletteField struct {
 	Name  string
 	Label string
 	Value string
+}
+
+type settingsIconField struct {
+	Name     string
+	Label    string
+	Pixels   []bool
+	Selected bool
+}
+
+type dashboardAppearance struct {
+	palette      map[string]string
+	settingsIcon string
 }
 
 type paletteStore struct {
@@ -92,6 +125,15 @@ func validPaletteName(name string) bool {
 	return false
 }
 
+func validSettingsIcon(name string) bool {
+	for _, spec := range settingsIconSpecs {
+		if spec.name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeRGB(value string) (string, bool) {
 	if len(value) != 7 || value[0] != '#' {
 		return "", false
@@ -123,39 +165,53 @@ func validatePalette(values map[string]string) error {
 	return nil
 }
 
-func parsePaletteTSV(contents []byte) (map[string]string, error) {
+func parsePaletteTSV(contents []byte) (dashboardAppearance, error) {
 	values := make(map[string]string, len(dashboardPaletteSpecs))
+	settingsIcon := ""
 	scanner := bufio.NewScanner(strings.NewReader(string(contents)))
 	scanner.Buffer(make([]byte, maximumPaletteBytes), maximumPaletteBytes+1)
 	for scanner.Scan() {
 		line := strings.TrimSuffix(scanner.Text(), "\r")
 		fields := strings.Split(line, "\t")
-		if len(fields) != 2 || !validPaletteName(fields[0]) {
-			return nil, errors.New("palette contains a malformed or unknown entry")
+		if len(fields) != 2 {
+			return dashboardAppearance{}, errors.New("appearance contains a malformed entry")
+		}
+		if fields[0] == "settings-icon" {
+			if settingsIcon != "" || !validSettingsIcon(fields[1]) {
+				return dashboardAppearance{}, errors.New("appearance contains an invalid settings icon")
+			}
+			settingsIcon = fields[1]
+			continue
+		}
+		if !validPaletteName(fields[0]) {
+			return dashboardAppearance{}, errors.New("palette contains an unknown entry")
 		}
 		if _, exists := values[fields[0]]; exists {
-			return nil, fmt.Errorf("palette repeats %s", fields[0])
+			return dashboardAppearance{}, fmt.Errorf("palette repeats %s", fields[0])
 		}
 		value, valid := normalizeRGB(fields[1])
 		if !valid {
-			return nil, fmt.Errorf("palette %s is not a full RGB color", fields[0])
+			return dashboardAppearance{}, fmt.Errorf("palette %s is not a full RGB color", fields[0])
 		}
 		values[fields[0]] = value
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return dashboardAppearance{}, err
 	}
 	if err := validatePalette(values); err != nil {
-		return nil, err
+		return dashboardAppearance{}, err
 	}
-	return values, nil
+	if settingsIcon == "" {
+		settingsIcon = defaultSettingsIcon
+	}
+	return dashboardAppearance{palette: values, settingsIcon: settingsIcon}, nil
 }
 
 func paletteTokens(contents []byte) ([]string, error) {
 	if len(contents) == 0 || len(contents) > maximumPaletteBytes {
 		return nil, errors.New("palette override has an invalid size")
 	}
-	tokens := make([]string, 0, 2*len(dashboardPaletteSpecs)+6)
+	tokens := make([]string, 0, 2*len(dashboardPaletteSpecs)+10)
 	for index := 0; index < len(contents); {
 		character := contents[index]
 		if character == ' ' || character == '\t' || character == '\r' || character == '\n' {
@@ -183,50 +239,74 @@ func paletteTokens(contents []byte) ([]string, error) {
 			return nil, errors.New("palette override token is too long")
 		}
 		tokens = append(tokens, token)
-		if len(tokens) > 2*len(dashboardPaletteSpecs)+8 {
+		if len(tokens) > 2*len(dashboardPaletteSpecs)+10 {
 			return nil, errors.New("palette override contains too many tokens")
 		}
 	}
 	return tokens, nil
 }
 
-func parsePaletteOverride(contents []byte) (map[string]string, error) {
+func parsePaletteOverride(contents []byte) (dashboardAppearance, error) {
 	tokens, err := paletteTokens(contents)
 	if err != nil {
-		return nil, err
+		return dashboardAppearance{}, err
 	}
-	if len(tokens) != 2*len(dashboardPaletteSpecs)+7 || tokens[0] != "(" || tokens[1] != ":version" || tokens[2] != "2" || tokens[3] != ":palette" || tokens[4] != "(" || tokens[len(tokens)-2] != ")" || tokens[len(tokens)-1] != ")" {
-		return nil, errors.New("palette override must use schema version 2")
+	if len(tokens) < 7 || tokens[0] != "(" || tokens[1] != ":version" || tokens[len(tokens)-2] != ")" || tokens[len(tokens)-1] != ")" {
+		return dashboardAppearance{}, errors.New("appearance override has an invalid structure")
 	}
+	version := tokens[2]
+	index := 3
+	settingsIcon := ""
+	if version == "3" {
+		if len(tokens) != 2*len(dashboardPaletteSpecs)+9 || tokens[index] != ":settings-icon" {
+			return dashboardAppearance{}, errors.New("appearance override must use schema version 3")
+		}
+		encodedIcon := tokens[index+1]
+		if len(encodedIcon) < 3 || encodedIcon[0] != '"' || encodedIcon[len(encodedIcon)-1] != '"' || !validSettingsIcon(encodedIcon[1:len(encodedIcon)-1]) {
+			return dashboardAppearance{}, errors.New("appearance override contains an unknown settings icon")
+		}
+		settingsIcon = encodedIcon[1 : len(encodedIcon)-1]
+		index += 2
+	} else if version == "2" {
+		if len(tokens) != 2*len(dashboardPaletteSpecs)+7 {
+			return dashboardAppearance{}, errors.New("palette override version 2 has an invalid structure")
+		}
+	} else {
+		return dashboardAppearance{}, errors.New("appearance override must use schema version 2 or 3")
+	}
+	if tokens[index] != ":palette" || tokens[index+1] != "(" {
+		return dashboardAppearance{}, errors.New("appearance override is missing its palette")
+	}
+	index += 2
 	values := make(map[string]string, len(dashboardPaletteSpecs))
-	for index := 5; index < len(tokens)-2; index += 2 {
+	for ; index < len(tokens)-2; index += 2 {
 		key := tokens[index]
 		if !strings.HasPrefix(key, ":") || !validPaletteName(key[1:]) {
-			return nil, errors.New("palette override contains an unknown color")
+			return dashboardAppearance{}, errors.New("palette override contains an unknown color")
 		}
 		name := key[1:]
 		if _, exists := values[name]; exists {
-			return nil, fmt.Errorf("palette override repeats %s", name)
+			return dashboardAppearance{}, fmt.Errorf("palette override repeats %s", name)
 		}
 		encoded := tokens[index+1]
 		if len(encoded) != 9 || encoded[0] != '"' || encoded[8] != '"' {
-			return nil, fmt.Errorf("palette override %s is not a quoted RGB color", name)
+			return dashboardAppearance{}, fmt.Errorf("palette override %s is not a quoted RGB color", name)
 		}
 		value, valid := normalizeRGB(encoded[1:8])
 		if !valid {
-			return nil, fmt.Errorf("palette override %s is not a full RGB color", name)
+			return dashboardAppearance{}, fmt.Errorf("palette override %s is not a full RGB color", name)
 		}
 		values[name] = value
 	}
 	if err := validatePalette(values); err != nil {
-		return nil, err
+		return dashboardAppearance{}, err
 	}
-	return values, nil
+	return dashboardAppearance{palette: values, settingsIcon: settingsIcon}, nil
 }
 
-func encodePaletteOverride(values map[string]string) []byte {
+func encodePaletteOverride(values map[string]string, settingsIcon string) []byte {
 	var builder strings.Builder
-	builder.WriteString("(:version 2\n :palette\n  (")
+	fmt.Fprintf(&builder, "(:version 3\n :settings-icon %q\n :palette\n  (", settingsIcon)
 	for index, spec := range dashboardPaletteSpecs {
 		if index > 0 {
 			builder.WriteString("\n   ")
@@ -245,10 +325,25 @@ func paletteFields(values map[string]string) []paletteField {
 	return fields
 }
 
-func (store *paletteStore) currentLocked() ([]paletteField, error) {
-	var values map[string]string
+func settingsIconFields(selected string) []settingsIconField {
+	fields := make([]settingsIconField, 0, len(settingsIconSpecs))
+	for _, spec := range settingsIconSpecs {
+		pixels := make([]bool, 0, 81)
+		for _, row := range spec.rows {
+			for _, pixel := range row {
+				pixels = append(pixels, pixel == '#')
+			}
+		}
+		fields = append(fields, settingsIconField{Name: spec.name, Label: spec.label, Pixels: pixels, Selected: spec.name == selected})
+	}
+	return fields
+}
+
+func (store *paletteStore) currentLocked() ([]paletteField, []settingsIconField, error) {
+	var appearance dashboardAppearance
+	var loaded bool
 	var baseError error
-	// The launcher deliberately chooses the checked-in palette when an override
+	// The launcher deliberately chooses the checked-in appearance when an override
 	// fails. Prefer that same source here so an older generated file cannot make
 	// the web form claim stale colors are active.
 	for _, path := range []string{store.fallbackPath, store.activePath} {
@@ -257,44 +352,51 @@ func (store *paletteStore) currentLocked() ([]paletteField, error) {
 			baseError = err
 			continue
 		}
-		values, err = parsePaletteTSV(contents)
+		appearance, err = parsePaletteTSV(contents)
 		if err == nil {
+			loaded = true
 			break
 		}
 		baseError = err
 	}
-	if values == nil {
-		return nil, fmt.Errorf("read installed dashboard palette: %w", baseError)
+	if !loaded {
+		return nil, nil, fmt.Errorf("read installed dashboard appearance: %w", baseError)
 	}
 	contents, err := readBoundedRegular(store.overridePath, maximumPaletteBytes)
 	if err == nil {
 		if override, parseErr := parsePaletteOverride(contents); parseErr == nil {
-			values = override
+			appearance.palette = override.palette
+			if override.settingsIcon != "" {
+				appearance.settingsIcon = override.settingsIcon
+			}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		// A bad optional override must never hide the usable installed palette.
 	}
-	return paletteFields(values), nil
+	return paletteFields(appearance.palette), settingsIconFields(appearance.settingsIcon), nil
 }
 
-func (store *paletteStore) current() ([]paletteField, error) {
+func (store *paletteStore) current() ([]paletteField, []settingsIconField, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	return store.currentLocked()
 }
 
-func (store *paletteStore) save(values map[string]string) error {
+func (store *paletteStore) save(values map[string]string, settingsIcon string) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if err := validatePalette(values); err != nil {
 		return err
 	}
-	if err := atomicWrite(store.overridePath, encodePaletteOverride(values), 0600); err != nil {
-		return fmt.Errorf("save dashboard palette: %w", err)
+	if !validSettingsIcon(settingsIcon) {
+		return errors.New("choose one of the available settings icons")
+	}
+	if err := atomicWrite(store.overridePath, encodePaletteOverride(values, settingsIcon), 0600); err != nil {
+		return fmt.Errorf("save dashboard appearance: %w", err)
 	}
 	if store.restartDashboard != nil {
 		if err := store.restartDashboard(); err != nil {
-			return fmt.Errorf("colors were saved, but the dashboard could not reload: %w", err)
+			return fmt.Errorf("appearance was saved, but the dashboard could not reload: %w", err)
 		}
 	}
 	return nil

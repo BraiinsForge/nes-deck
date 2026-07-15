@@ -169,16 +169,20 @@ written beside a process-specific temporary file and
 atomically renamed only after the complete catalog validates.
 
 The catalog also contains every dashboard color as a semantic 24-bit
-`#RRGGBB` value. The compiler writes these to `palette.tsv`. A complete
-version-2 override at
-`/mnt/data/nes-deck/state/dashboard-palette.sexp` replaces those values. The
-native dashboard validates all roles before applying any of them. If the
-override, generated palette, or checked-in palette is malformed or missing,
-startup continues with the last usable layer or built-in colors.
+`#RRGGBB` value and a `:settings-icon` selected from ten built-in pixel cogs.
+The compiler writes these to `palette.tsv`. A complete version-3 override at
+`/mnt/data/nes-deck/state/dashboard-palette.sexp` replaces the colors and icon.
+Existing version-2 color-only overrides remain valid and inherit the catalog's
+icon. The native dashboard validates the complete appearance before applying
+any of it. If the override, generated appearance, or checked-in fallback is
+malformed or missing, startup continues with the last usable layer or built-in
+defaults.
 
-The checked-in `games.tsv` and `palette.tsv` files are known-good fallbacks. If
-ECL, the source catalog, or generation is unavailable, the launcher uses those
-files and logs the reason. No shell evaluates catalog content.
+The checked-in `games.tsv` and `palette.tsv` files are known-good fallbacks.
+The first appearance row names the default settings icon, and the remaining
+rows contain the colors. If ECL, the source catalog, or generation is
+unavailable, the launcher uses those files and logs the reason. No shell
+evaluates catalog content.
 
 ## Pre-deployment check
 

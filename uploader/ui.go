@@ -49,10 +49,23 @@ const pageTemplate = `{{define "page"}}<!doctype html>
       </form>
       {{if .Palette}}
         <section class="palette-section">
-          <h2>Dashboard colors</h2>
-          <p class="hint">#RRGGBB</p>
+          <h2>Dashboard appearance</h2>
           <form action="/palette" method="post">
             <input type="hidden" name="csrf" value="{{.CSRF}}">
+            <h3 id="settings-icon-label">Settings button</h3>
+            <div class="settings-icons" role="radiogroup" aria-labelledby="settings-icon-label">
+              {{range .SettingsIcons}}
+                <label class="settings-icon-choice">
+                  <input type="radio" name="settings-icon" value="{{.Name}}" {{if .Selected}}checked{{end}} required>
+                  <span class="pixel-cog" aria-hidden="true">
+                    {{range .Pixels}}<b class="{{if .}}on{{end}}"></b>{{end}}
+                  </span>
+                  <span>{{.Label}}</span>
+                </label>
+              {{end}}
+            </div>
+            <h3>Colors</h3>
+            <p class="hint">#RRGGBB</p>
             <div class="palette-grid">
               {{range .Palette}}
                 <label>
@@ -64,7 +77,7 @@ const pageTemplate = `{{define "page"}}<!doctype html>
                 </label>
               {{end}}
             </div>
-            <button type="submit" class="primary-button">Apply colors</button>
+            <button type="submit" class="primary-button">Apply appearance</button>
           </form>
         </section>
       {{end}}
@@ -137,6 +150,12 @@ h2 {
   margin: 0;
   font-size: 1.7rem;
   line-height: 1;
+}
+
+h3 {
+  margin: 30px 0 14px;
+  font-size: 1.05rem;
+  line-height: 1.1;
 }
 
 form { margin: 0; }
@@ -223,6 +242,54 @@ input:focus, select:focus, button:focus, .skip-link:focus {
 
 .palette-section { margin-top: 56px; }
 
+.settings-icons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+}
+
+.settings-icon-choice {
+  position: relative;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.settings-icon-choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.pixel-cog {
+  display: grid;
+  grid-template-columns: repeat(9, 5px);
+  grid-template-rows: repeat(9, 5px);
+  width: 45px;
+  height: 45px;
+  color: #777;
+}
+
+.pixel-cog b {
+  display: block;
+  width: 5px;
+  height: 5px;
+}
+
+.pixel-cog b.on { background: currentColor; }
+
+.settings-icon-choice input:checked + .pixel-cog { color: #000; }
+
+.settings-icon-choice input:focus-visible + .pixel-cog {
+  outline: 3px solid #000;
+  outline-offset: 3px;
+}
+
 .hint {
   margin: 7px 0 20px;
   font-family: "Courier New", Courier, monospace;
@@ -263,6 +330,7 @@ input:focus, select:focus, button:focus, .skip-link:focus {
 @media (max-width: 480px) {
   main { width: min(100% - 24px, 520px); }
   header { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .settings-icons { grid-template-columns: 1fr; }
   .palette-grid { grid-template-columns: 1fr; }
 }
 `

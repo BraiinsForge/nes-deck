@@ -1,8 +1,9 @@
-;; Deck menu catalog and dashboard palette, schema version 5.
+;; Deck menu catalog and dashboard appearance, schema version 6.
 ;;
 ;; Each game has exactly five fields.  The compiler writes them to games.tsv
 ;; in this order: id, title, system, rom, color.
-(:version 5
+(:version 6
+ :settings-icon "gear-spoke"
  :palette
   (:background "#000000"
    :text-dark "#121212"

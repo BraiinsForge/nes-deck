@@ -185,8 +185,8 @@ func testRGB(index int) string {
 
 func TestDashboardPaletteConfiguration(t *testing.T) {
 	store, overridePath := testPalette(t)
-	fields, err := store.current()
-	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" {
+	fields, icons, err := store.current()
+	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" || len(icons) != 10 || !icons[4].Selected {
 		t.Fatalf("fallback palette did not load: %#v %v", fields, err)
 	}
 	var stale strings.Builder
@@ -199,7 +199,7 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 	if err := os.WriteFile(store.activePath, []byte(stale.String()), 0600); err != nil {
 		t.Fatal(err)
 	}
-	fields, err = store.current()
+	fields, icons, err = store.current()
 	if err != nil || fields[0].Value != "#010203" {
 		t.Fatalf("stale generated palette overrode the checked-in fallback: %#v %v", fields, err)
 	}
@@ -213,7 +213,7 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 		restarts++
 		return nil
 	}
-	if err := store.save(values); err != nil {
+	if err := store.save(values, "gear-rivet"); err != nil {
 		t.Fatal(err)
 	}
 	if restarts != 1 {
@@ -224,10 +224,10 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed, err := parsePaletteOverride(contents)
-	if err != nil || parsed["accent"] != "#123456" {
+	if err != nil || parsed.palette["accent"] != "#123456" || parsed.settingsIcon != "gear-rivet" {
 		t.Fatalf("palette override did not round-trip: %#v %v", parsed, err)
 	}
-	fields, err = store.current()
+	fields, icons, err = store.current()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,16 +236,23 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 			t.Fatalf("valid override was not displayed: %#v", fields)
 		}
 	}
+	if !icons[9].Selected {
+		t.Fatalf("valid settings icon was not displayed: %#v", icons)
+	}
 	if err := os.WriteFile(overridePath, []byte("(:version 2 :palette (:background \"#12345G\"))\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	fields, err = store.current()
+	fields, icons, err = store.current()
 	if err != nil || fields[0].Value != "#010203" {
 		t.Fatalf("bad optional override hid the fallback palette: %#v %v", fields, err)
 	}
 	values["accent"] = "#12345G"
-	if err := store.save(values); err == nil {
+	if err := store.save(values, "gear-rivet"); err == nil {
 		t.Fatal("malformed palette value was accepted")
+	}
+	values["accent"] = "#123456"
+	if err := store.save(values, "not-a-cog"); err == nil {
+		t.Fatal("unknown settings icon was accepted")
 	}
 }
 
@@ -357,6 +364,7 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	for index, spec := range dashboardPaletteSpecs {
 		paletteForm.Set(spec.name, strings.ToLower(testRGB(index+32)))
 	}
+	paletteForm.Set("settings-icon", "gear-diamond")
 	paletteRequest := requestFor(http.MethodPost, testServiceOrigin+"/palette", strings.NewReader(paletteForm.Encode()))
 	paletteRequest.Header.Set("Origin", testServiceOrigin)
 	paletteRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -368,8 +376,9 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	}
 	if !strings.Contains(paletteResponse.Body.String(), `type="color"`) ||
 		!strings.Contains(paletteResponse.Body.String(), `value="#616263"`) ||
+		!strings.Contains(paletteResponse.Body.String(), `value="gear-diamond" checked`) ||
 		!strings.Contains(paletteResponse.Body.String(), `/assets/palette.js`) {
-		t.Fatal("palette response does not expose synchronized full RGB controls")
+		t.Fatal("appearance response does not expose RGB and settings-icon controls")
 	}
 	if paletteRestarts != 1 {
 		t.Fatalf("palette update restarted dashboard %d times", paletteRestarts)
@@ -379,7 +388,7 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 		t.Fatalf("palette update was not persisted: %v", err)
 	}
 	installedPalette, err := parsePaletteOverride(overrideContents)
-	if err != nil || installedPalette[dashboardPaletteSpecs[0].name] != "#616263" {
+	if err != nil || installedPalette.palette[dashboardPaletteSpecs[0].name] != "#616263" || installedPalette.settingsIcon != "gear-diamond" {
 		t.Fatalf("HTTP palette was not normalized and persisted: %#v %v", installedPalette, err)
 	}
 
