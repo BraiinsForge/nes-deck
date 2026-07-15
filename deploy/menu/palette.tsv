@@ -11,12 +11,12 @@ white	#FFFFFF
 title	#FFFFAF
 volume-off	#AF8787
 volume-on	#87AF87
-selected	#87AFAF
+selected	#ECB6E7
 wifi-active	#5F87AF
 wifi-focus	#87AFFF
 wifi-active-border	#AFAFFF
 field-label	#AFAFAF
-accent	#FF5F00
-active	#3A3A3A
+accent	#FE6C27
+active	#503311
 control-surface	#303030
 muted	#949494
