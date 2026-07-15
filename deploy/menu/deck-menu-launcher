@@ -251,7 +251,7 @@ if [ -x "$ECL" ] && [ -r "$COMPILER" ] && [ -r "$CATALOG" ]; then
 		palette=$GENERATED_PALETTE
 		log_message "using generated manifest and dashboard palette"
 	else
-		log_message "catalog generation failed; using checked-in manifest and built-in palette"
+		log_message "catalog generation failed; using checked-in manifest and palette"
 	fi
 else
 	log_message "ECL catalog compiler unavailable; using checked-in manifest and palette"
