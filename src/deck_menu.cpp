@@ -2204,17 +2204,12 @@ void draw_outline_arrow(Canvas *canvas, const Rect &bounds,
 void draw_settings_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
   const int center_x = bounds.x + bounds.width / 2;
   const int center_y = bounds.y + bounds.height / 2;
-  draw_pixel_panel(canvas, Rect{center_x - 14, center_y - 14, 28, 28},
-                   xterm_pixel(kColorBackground), color, 4);
-  fill_rect(canvas, Rect{center_x - 4, center_y - 4, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x - 4, center_y - 22, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x - 4, center_y + 14, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x - 22, center_y - 4, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x + 14, center_y - 4, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x - 18, center_y - 18, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x + 10, center_y - 18, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x - 18, center_y + 10, 8, 8}, color);
-  fill_rect(canvas, Rect{center_x + 10, center_y + 10, 8, 8}, color);
+  const int rows[3] = {center_y - 14, center_y, center_y + 14};
+  const int knobs[3] = {center_x - 10, center_x + 10, center_x - 4};
+  for (int index = 0; index < 3; ++index) {
+    fill_rect(canvas, Rect{center_x - 20, rows[index] - 2, 40, 4}, color);
+    fill_rect(canvas, Rect{knobs[index] - 4, rows[index] - 6, 8, 12}, color);
+  }
 }
 
 void draw_close_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
@@ -2380,7 +2375,7 @@ void render_menu(const std::vector<GameEntry> &games,
     return;
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
                  xterm_pixel(kColorBackground));
-  layout->settings_button = Rect{1212, 12, 56, 56};
+  layout->settings_button = Rect{1212, 412, 56, 56};
   layout->game_previous_button = Rect{156, 232, 80, 100};
   layout->game_next_button = Rect{1044, 232, 80, 100};
   layout->systems.clear();
@@ -2392,7 +2387,7 @@ void render_menu(const std::vector<GameEntry> &games,
   layout->shown_game_index = games.size();
 
   draw_settings_icon(canvas, layout->settings_button,
-                     xterm_pixel(kColorInactiveText));
+                     xterm_pixel(kColorFooter));
 
   for (size_t definition = 0;
        definition < sizeof(kSystemDefinitions) / sizeof(kSystemDefinitions[0]);
@@ -2458,9 +2453,9 @@ void render_menu(const std::vector<GameEntry> &games,
 
     if (layout->game_indices.size() > 1) {
       draw_outline_arrow(canvas, layout->game_previous_button, ArrowLeft,
-                         xterm_pixel(kColorText));
+                         xterm_pixel(kColorFooter));
       draw_outline_arrow(canvas, layout->game_next_button, ArrowRight,
-                         xterm_pixel(kColorText));
+                         xterm_pixel(kColorFooter));
     } else {
       layout->game_previous_button = Rect{0, 0, 0, 0};
       layout->game_next_button = Rect{0, 0, 0, 0};
@@ -2486,8 +2481,8 @@ void render_menu(const std::vector<GameEntry> &games,
   }
 
   if (!status.empty()) {
-    const int footer_scale = fit_text_scale(status, kLogicalWidth - 24, 2, 1);
-    draw_centered_text(canvas, Rect{12, 452, kLogicalWidth - 24, 24}, status,
+    const int footer_scale = fit_text_scale(status, kLogicalWidth - 100, 2, 1);
+    draw_centered_text(canvas, Rect{12, 452, kLogicalWidth - 100, 24}, status,
                        footer_scale, xterm_pixel(kColorFooter));
   }
 }

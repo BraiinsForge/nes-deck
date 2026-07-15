@@ -709,7 +709,12 @@ int main() {
                        menu_layout.settings_button.y +
                            menu_layout.settings_button.height / 2) ==
                  MenuTargetSettings,
-         "console tabs and the gear expose direct touch targets");
+         "console tabs and the bottom-right settings control expose touch targets");
+  expect(menu_layout.settings_button.x == 1212 &&
+             menu_layout.settings_button.y == 412 &&
+             rect_contains_color(canvas, menu_layout.settings_button,
+                                 xterm_pixel(kColorFooter)),
+         "dim retro settings sliders sit at the bottom-right inset");
   expect(menu_layout.game_buttons.size() == 3 &&
              menu_layout.game_indices.size() == 4 &&
              menu_layout.visible_game_indices.size() == 3 &&
@@ -748,10 +753,10 @@ int main() {
                  xterm_pixel(kColorBackground),
          "carousel arrows do not have background rectangles");
   expect(rect_contains_color(canvas, menu_layout.game_previous_button,
-                             xterm_pixel(kColorText)) &&
+                             xterm_pixel(kColorFooter)) &&
              rect_contains_color(canvas, menu_layout.game_next_button,
-                                 xterm_pixel(kColorText)),
-         "carousel arrow glyphs use white outlines");
+                                 xterm_pixel(kColorFooter)),
+         "carousel arrow glyphs use dim outlines");
   expect(rects_are_horizontal_mirrors(canvas,
                                       menu_layout.game_previous_button,
                                       menu_layout.game_next_button),
@@ -894,8 +899,8 @@ int main() {
   SettingsLayout settings_layout;
   render_settings(42, 60, "us", SettingsTargetVolumeDown, std::string(),
                   &canvas, &settings_layout);
-  expect(settings_layout.close_button.x == menu_layout.settings_button.x &&
-             settings_layout.close_button.y == menu_layout.settings_button.y &&
+  expect(settings_layout.close_button.x == 1212 &&
+             settings_layout.close_button.y == 12 &&
              settings_target_at(settings_layout,
                                 settings_layout.close_button.x + 20,
                                 settings_layout.close_button.y + 20) ==
@@ -904,7 +909,7 @@ int main() {
                                 settings_layout.wifi_button.x + 20,
                                 settings_layout.wifi_button.y + 20) ==
                  SettingsTargetWifi,
-         "settings cross replaces the gear and WiFi stays at top right");
+         "settings cross stays at top right and WiFi remains alongside it");
   expect(settings_target_at(settings_layout,
                             settings_layout.volume_down_button.x + 20,
                             settings_layout.volume_down_button.y + 20) ==
