@@ -785,7 +785,7 @@
           '';
 
           meta = {
-            description = "WireGuard-only ROM intake service for Retro Deck";
+            description = "Passworded ROM intake service for Retro Deck";
             platforms = [ "armv7l-linux" ];
           };
         };

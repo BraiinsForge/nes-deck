@@ -70,13 +70,13 @@ func runServer() error {
 		overridePath:     installedPaletteConfig,
 		restartDashboard: restartDashboard,
 	}
-	app, err := newApplication(password, store, palette, true, address)
+	app, err := newApplication(password, store, palette, address)
 	if err != nil {
 		return err
 	}
-	listener, err := listenWireGuard(address)
+	listener, err := listenAllInterfaces(address)
 	if err != nil {
-		return fmt.Errorf("listen on %s through %s: %w", address, serviceInterface, err)
+		return fmt.Errorf("listen on all IPv4 interfaces at %s: %w", address, err)
 	}
 	server := &http.Server{
 		Handler:           app,
@@ -92,7 +92,7 @@ func runServer() error {
 		<-stopping
 		_ = server.Close()
 	}()
-	log.Printf("ROM uploader listening at %s on %s only", address, serviceInterface)
+	log.Printf("ROM uploader listening at %s on all IPv4 interfaces", address)
 	err = server.Serve(listener)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil

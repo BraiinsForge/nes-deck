@@ -183,7 +183,7 @@ cp "$uploader/bin/rom-uploader" \
 printf '%s\n' "$uploader_password" |
   (cd uploader && nix shell nixpkgs#go -c go run . --set-password \
     "$payload/nes-deck/uploader/password.conf")
-printf '%s:8080\n' "$wireguard_address" \
+printf '%s\n' '0.0.0.0:8080' \
   >"$payload/nes-deck/uploader/address.conf"
 cp "$lua/bin/lua" "$payload/nes-deck/langs/lua"
 cp "$python/bin/python" "$payload/nes-deck/langs/python"
@@ -520,7 +520,7 @@ pidof rom-uploader >/dev/null 2>&1 || {
 service_needs_restart=0
 uploader_needs_restart=0
 rm -rf "$stage"
-echo "Retro Deck and its WireGuard ROM uploader are running."
+echo "Retro Deck and its ROM uploader are running."
 tail -n 12 "$base/log/deck-menu.log" || :
 REMOTE
 

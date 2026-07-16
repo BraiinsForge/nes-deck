@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	testListenAddress  = "0.0.0.0:8080"
 	testServiceAddress = "10.0.0.10:8080"
 	testServiceOrigin  = "http://" + testServiceAddress
 )
@@ -96,22 +97,20 @@ func TestPasswordInputValidation(t *testing.T) {
 }
 
 func TestServiceAddressConfiguration(t *testing.T) {
-	for _, address := range []string{"10.0.0.2:8080", "10.0.0.10:8080", "10.0.0.253:8080"} {
-		if normalized, err := normalizeServiceAddress(address); err != nil || normalized != address {
-			t.Fatalf("valid service address was rejected: %q %q %v", address, normalized, err)
-		}
+	if normalized, err := normalizeServiceAddress(testListenAddress); err != nil || normalized != testListenAddress {
+		t.Fatalf("all-interface service address was rejected: %q %v", normalized, err)
 	}
-	for _, address := range []string{"", "10.0.0.1:8080", "10.0.0.254:8080", "10.0.1.7:8080", "10.0.0.11:80", "localhost:8080"} {
+	for _, address := range []string{"", "10.0.0.10:8080", "0.0.0.0:80", "localhost:8080", "[::]:8080"} {
 		if _, err := normalizeServiceAddress(address); err == nil {
 			t.Fatalf("invalid service address was accepted: %q", address)
 		}
 	}
 	directory := t.TempDir()
 	path := filepath.Join(directory, "address.conf")
-	if err := os.WriteFile(path, []byte("10.0.0.12:8080\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(testListenAddress+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if address, err := loadServiceAddress(path); err != nil || address != "10.0.0.12:8080" {
+	if address, err := loadServiceAddress(path); err != nil || address != testListenAddress {
 		t.Fatalf("service address configuration did not load: %q %v", address, err)
 	}
 }
@@ -296,24 +295,25 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 		paletteRestarts++
 		return nil
 	}
-	app, err := newApplication(config, store, palette, true, testServiceAddress)
+	app, err := newApplication(config, store, palette, testListenAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	wrongHost := requestFor(http.MethodGet, testServiceOrigin+"/", nil)
-	wrongHost.Host = "10.0.1.6:8080"
+	wrongHost.Host = "deck.local:8080"
 	wrongResponse := httptest.NewRecorder()
 	app.ServeHTTP(wrongResponse, wrongHost)
 	if wrongResponse.Code != http.StatusMisdirectedRequest {
-		t.Fatalf("non-WireGuard host returned %d", wrongResponse.Code)
+		t.Fatalf("non-IP host returned %d", wrongResponse.Code)
 	}
-	nonPeer := requestFor(http.MethodGet, testServiceOrigin+"/", nil)
-	nonPeer.RemoteAddr = "10.0.1.8:41000"
-	nonPeerResponse := httptest.NewRecorder()
-	app.ServeHTTP(nonPeerResponse, nonPeer)
-	if nonPeerResponse.Code != http.StatusMisdirectedRequest {
-		t.Fatalf("non-WireGuard peer returned %d", nonPeerResponse.Code)
+	wifiRequest := requestFor(http.MethodGet, "http://192.168.1.20:8080/", nil)
+	wifiRequest.Host = "192.168.1.20:8080"
+	wifiRequest.RemoteAddr = "192.168.1.50:41000"
+	wifiResponse := httptest.NewRecorder()
+	app.ServeHTTP(wifiResponse, wifiRequest)
+	if wifiResponse.Code != http.StatusOK {
+		t.Fatalf("Wi-Fi interface request returned %d", wifiResponse.Code)
 	}
 
 	loginBody := url.Values{"password": {password}}.Encode()
@@ -406,7 +406,7 @@ func TestCrossOriginAndPaperDesignRules(t *testing.T) {
 	config := passwordConfig{iterations: 1, salt: []byte("0123456789abcdef"), digest: make([]byte, 32)}
 	store, _ := testStore(t)
 	palette, _ := testPalette(t)
-	app, err := newApplication(config, store, palette, true, testServiceAddress)
+	app, err := newApplication(config, store, palette, testListenAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,6 +416,17 @@ func TestCrossOriginAndPaperDesignRules(t *testing.T) {
 		if !app.sameOrigin(request) {
 			t.Fatalf("browser-compatible origin was rejected: %q", origin)
 		}
+	}
+	wifiOrigin := "http://192.168.1.20:8080"
+	wifiRequest := requestFor(http.MethodPost, wifiOrigin+"/login", nil)
+	wifiRequest.Host = "192.168.1.20:8080"
+	wifiRequest.Header.Set("Origin", wifiOrigin)
+	if !app.sameOrigin(wifiRequest) {
+		t.Fatal("same-origin policy rejected the Wi-Fi interface origin")
+	}
+	wifiRequest.Header.Set("Origin", testServiceOrigin)
+	if app.sameOrigin(wifiRequest) {
+		t.Fatal("same-origin policy accepted an origin from another interface")
 	}
 	foreign := requestFor(http.MethodPost, testServiceOrigin+"/login", strings.NewReader("password=nope"))
 	foreign.Header.Set("Origin", "http://example.com")

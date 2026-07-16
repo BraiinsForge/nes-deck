@@ -17,12 +17,11 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
 const (
-	serviceInterface    = "wg0"
+	servicePort         = "8080"
 	sessionCookieName   = "deck_rom_session"
 	sessionLifetime     = 8 * time.Hour
 	maximumSessions     = 8
@@ -51,14 +50,11 @@ type pageData struct {
 }
 
 type application struct {
-	password       passwordConfig
-	store          *romStore
-	palette        *paletteStore
-	origin         string
-	host           string
-	enforceNetwork bool
-	now            func() time.Time
-	template       *template.Template
+	password passwordConfig
+	store    *romStore
+	palette  *paletteStore
+	now      func() time.Time
+	template *template.Template
 
 	mu        sync.Mutex
 	sessions  map[string]userSession
@@ -68,37 +64,33 @@ type application struct {
 
 func normalizeServiceAddress(address string) (string, error) {
 	host, port, err := net.SplitHostPort(address)
-	if err != nil || port != "8080" {
-		return "", errors.New("service address must use an IPv4 address and port 8080")
+	if err != nil || port != servicePort {
+		return "", errors.New("service address must be 0.0.0.0:8080")
 	}
 	parsed := net.ParseIP(host).To4()
-	if parsed == nil || parsed[0] != 10 || parsed[1] != 0 || parsed[2] != 0 || parsed[3] < 2 || parsed[3] > 253 {
-		return "", errors.New("service address must be a usable 10.0.0.0/24 peer address")
+	if parsed == nil || !parsed.Equal(net.IPv4zero) {
+		return "", errors.New("service address must be 0.0.0.0:8080")
 	}
 	return net.JoinHostPort(parsed.String(), port), nil
 }
 
-func newApplication(password passwordConfig, store *romStore, palette *paletteStore, enforceNetwork bool, address string) (*application, error) {
+func newApplication(password passwordConfig, store *romStore, palette *paletteStore, address string) (*application, error) {
 	parsed, err := template.New("page").Parse(pageTemplate)
 	if err != nil {
 		return nil, err
 	}
-	address, err = normalizeServiceAddress(address)
-	if err != nil {
+	if _, err := normalizeServiceAddress(address); err != nil {
 		return nil, err
 	}
 	return &application{
-		password:       password,
-		store:          store,
-		palette:        palette,
-		origin:         "http://" + address,
-		host:           address,
-		enforceNetwork: enforceNetwork,
-		now:            time.Now,
-		template:       parsed,
-		sessions:       make(map[string]userSession),
-		attempts:       make(map[string]loginAttempt),
-		loginGate:      make(chan struct{}, 1),
+		password:  password,
+		store:     store,
+		palette:   palette,
+		now:       time.Now,
+		template:  parsed,
+		sessions:  make(map[string]userSession),
+		attempts:  make(map[string]loginAttempt),
+		loginGate: make(chan struct{}, 1),
 	}, nil
 }
 
@@ -123,11 +115,6 @@ func remoteHost(remoteAddress string) string {
 	return host
 }
 
-func wireGuardPeer(host string) bool {
-	address := net.ParseIP(host).To4()
-	return address != nil && address[0] == 10 && address[1] == 0 && address[2] == 0
-}
-
 func (app *application) securityHeaders(response http.ResponseWriter) {
 	response.Header().Set("Cache-Control", "no-store")
 	response.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
@@ -139,22 +126,20 @@ func (app *application) securityHeaders(response http.ResponseWriter) {
 }
 
 func (app *application) requestAllowed(request *http.Request) bool {
-	if request.Host != app.host {
-		return false
-	}
-	return !app.enforceNetwork || wireGuardPeer(remoteHost(request.RemoteAddr))
+	host, port, err := net.SplitHostPort(request.Host)
+	return err == nil && port == servicePort && net.ParseIP(host).To4() != nil
 }
 
 func (app *application) sameOrigin(request *http.Request) bool {
 	origin := request.Header.Get("Origin")
 	if origin == "" || origin == "null" {
 		// Some browsers omit Origin, or send an opaque origin, for a regular
-		// same-page form submission. ServeHTTP has already restricted these
-		// requests to the exact service host and a WireGuard peer. Upload and
-		// logout requests additionally require an unguessable CSRF token.
+		// same-page form submission. ServeHTTP has already required an IPv4
+		// literal host on the service port. Upload and logout requests also
+		// require an unguessable CSRF token.
 		return true
 	}
-	return origin == app.origin
+	return origin == "http://"+request.Host
 }
 
 func (app *application) currentSession(request *http.Request) (string, userSession, bool) {
@@ -475,7 +460,7 @@ func (app *application) handlePalette(response http.ResponseWriter, request *htt
 func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	app.securityHeaders(response)
 	if !app.requestAllowed(request) {
-		http.Error(response, "This service is available only through its WireGuard address.", http.StatusMisdirectedRequest)
+		http.Error(response, "Use one of this Deck's IPv4 addresses on port 8080.", http.StatusMisdirectedRequest)
 		return
 	}
 	switch request.URL.Path {
@@ -518,17 +503,6 @@ func restartDashboard() error {
 	return nil
 }
 
-func listenWireGuard(address string) (net.Listener, error) {
-	configuration := net.ListenConfig{
-		Control: func(network, address string, connection syscall.RawConn) error {
-			var controlError error
-			if err := connection.Control(func(descriptor uintptr) {
-				controlError = syscall.SetsockoptString(int(descriptor), syscall.SOL_SOCKET, 25, serviceInterface)
-			}); err != nil {
-				return err
-			}
-			return controlError
-		},
-	}
-	return configuration.Listen(context.Background(), "tcp4", address)
+func listenAllInterfaces(address string) (net.Listener, error) {
+	return net.Listen("tcp4", address)
 }

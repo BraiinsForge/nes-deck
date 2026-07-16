@@ -1,6 +1,6 @@
 #!/bin/sh /etc/rc.common
 
-# Passworded ROM intake bound to this Deck's configured WireGuard address.
+# Passworded ROM intake on every IPv4 interface.
 
 # rc.common consumes these declarations after sourcing this file.
 # shellcheck disable=SC2034
