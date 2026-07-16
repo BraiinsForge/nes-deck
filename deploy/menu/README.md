@@ -13,6 +13,8 @@ Copy these files to the Deck without changing their basenames:
 | `games.sexp` | `/mnt/data/nes-deck/menu/games.sexp` |
 | `games.tsv` | `/mnt/data/nes-deck/menu/games.tsv` |
 | `palette.tsv` | `/mnt/data/nes-deck/menu/palette.tsv` |
+| `knekko-settings-icons.tsv` | `/mnt/data/nes-deck/menu/knekko-settings-icons.tsv` |
+| `uploader/settings-icons/` | `/mnt/data/nes-deck/menu/settings-icons/` |
 | `compile-catalog.lisp` | `/mnt/data/nes-deck/menu/compile-catalog.lisp` |
 | `deck-menu-launcher` | `/mnt/data/nes-deck/menu/deck-menu-launcher` |
 | `deck-keyboard-quirks` | `/usr/sbin/deck-keyboard-quirks` |
@@ -170,7 +172,8 @@ written beside a process-specific temporary file and
 atomically renamed only after the complete catalog validates.
 
 The catalog also contains every dashboard color as a semantic 24-bit
-`#RRGGBB` value and a `:settings-icon` selected from the built-in pixel cogs.
+`#RRGGBB` value and a `:settings-icon` selected from the built-in pixel cogs or
+the complete knekko CC0 cog set.
 The compiler writes these to `palette.tsv`. A complete version-3 override at
 `/mnt/data/nes-deck/state/dashboard-palette.sexp` replaces the colors and icon.
 Existing version-2 color-only overrides remain valid and inherit the catalog's

@@ -25,9 +25,12 @@
 (defparameter +appearance-override-keys+
   '(:version :settings-icon :palette))
 (defparameter +settings-icons+
-  '("gear-classic" "gear-square" "gear-diamond" "gear-eight"
-    "gear-spoke" "gear-ring" "gear-cross" "gear-compact"
-    "gear-heavy" "gear-rivet" "gear-outline" "gear-steel-outline"))
+  (append
+   '("gear-classic" "gear-square" "gear-diamond" "gear-eight"
+     "gear-spoke" "gear-ring" "gear-cross" "gear-compact"
+     "gear-heavy" "gear-rivet" "gear-outline" "gear-steel-outline")
+   (loop for index from 1 to 36
+         collect (format nil "gear-knekko-~2,'0D" index))))
 
 (defun catalog-error (control &rest arguments)
   (error "Catalog error: ~?" control arguments))

@@ -185,10 +185,18 @@ func testRGB(index int) string {
 func TestDashboardPaletteConfiguration(t *testing.T) {
 	store, overridePath := testPalette(t)
 	fields, icons, err := store.current()
-	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" || len(icons) != 12 || !icons[11].Selected {
+	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" || len(icons) != 48 || !icons[11].Selected {
 		t.Fatalf("fallback palette did not load: %#v %v", fields, err)
 	}
+	knekkoIcons := 0
 	for _, spec := range settingsIconSpecs {
+		if spec.imageURL != "" {
+			if len(spec.rows) != 0 || !strings.HasPrefix(spec.imageURL, "/assets/settings-icons/") {
+				t.Fatalf("source settings icon %s has invalid asset metadata", spec.name)
+			}
+			knekkoIcons++
+			continue
+		}
 		if len(spec.rows) != 9 && len(spec.rows) != 23 {
 			t.Fatalf("settings icon %s uses unsupported grid size %d", spec.name, len(spec.rows))
 		}
@@ -197,6 +205,10 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 				t.Fatalf("settings icon %s is not square", spec.name)
 			}
 		}
+	}
+	groups := settingsIconGroups(icons)
+	if knekkoIcons != 36 || len(groups) != 4 || len(groups[1].Icons) != 6 || len(groups[2].Icons) != 10 || len(groups[3].Icons) != 20 {
+		t.Fatalf("complete source cog set was not grouped: %#v", groups)
 	}
 	var stale strings.Builder
 	for index, spec := range dashboardPaletteSpecs {
@@ -374,7 +386,7 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	for index, spec := range dashboardPaletteSpecs {
 		paletteForm.Set(spec.name, strings.ToLower(testRGB(index+32)))
 	}
-	paletteForm.Set("settings-icon", "gear-diamond")
+	paletteForm.Set("settings-icon", "gear-knekko-36")
 	paletteRequest := requestFor(http.MethodPost, testServiceOrigin+"/palette", strings.NewReader(paletteForm.Encode()))
 	paletteRequest.Header.Set("Origin", testServiceOrigin)
 	paletteRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -386,8 +398,9 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	}
 	if !strings.Contains(paletteResponse.Body.String(), `type="color"`) ||
 		!strings.Contains(paletteResponse.Body.String(), `value="#616263"`) ||
-		!strings.Contains(paletteResponse.Body.String(), `value="gear-diamond" checked`) ||
+		!strings.Contains(paletteResponse.Body.String(), `value="gear-knekko-36" checked`) ||
 		!strings.Contains(paletteResponse.Body.String(), `pixel-cog-23`) ||
+		!strings.Contains(paletteResponse.Body.String(), `/assets/settings-icons/36.png`) ||
 		!strings.Contains(paletteResponse.Body.String(), `/assets/palette.js`) {
 		t.Fatal("appearance response does not expose RGB and settings-icon controls")
 	}
@@ -399,7 +412,7 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 		t.Fatalf("palette update was not persisted: %v", err)
 	}
 	installedPalette, err := parsePaletteOverride(overrideContents)
-	if err != nil || installedPalette.palette[dashboardPaletteSpecs[0].name] != "#616263" || installedPalette.settingsIcon != "gear-diamond" {
+	if err != nil || installedPalette.palette[dashboardPaletteSpecs[0].name] != "#616263" || installedPalette.settingsIcon != "gear-knekko-36" {
 		t.Fatalf("HTTP palette was not normalized and persisted: %#v %v", installedPalette, err)
 	}
 
@@ -410,6 +423,22 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 		!strings.Contains(scriptResponse.Body.String(), "toUpperCase") ||
 		scriptResponse.Header().Get("Content-Type") != "text/javascript; charset=utf-8" {
 		t.Fatalf("palette synchronization asset returned %d", scriptResponse.Code)
+	}
+
+	iconRequest := requestFor(http.MethodGet, testServiceOrigin+"/assets/settings-icons/01.png", nil)
+	iconResponse := httptest.NewRecorder()
+	app.ServeHTTP(iconResponse, iconRequest)
+	if iconResponse.Code != http.StatusOK ||
+		!strings.HasPrefix(iconResponse.Header().Get("Content-Type"), "image/png") ||
+		iconResponse.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" ||
+		!bytes.HasPrefix(iconResponse.Body.Bytes(), []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatalf("embedded settings icon returned %d", iconResponse.Code)
+	}
+	unknownIconRequest := requestFor(http.MethodGet, testServiceOrigin+"/assets/settings-icons/../UPSTREAM.txt", nil)
+	unknownIconResponse := httptest.NewRecorder()
+	app.ServeHTTP(unknownIconResponse, unknownIconRequest)
+	if unknownIconResponse.Code != http.StatusNotFound {
+		t.Fatalf("unknown settings asset returned %d", unknownIconResponse.Code)
 	}
 }
 

@@ -40,13 +40,13 @@ type loginAttempt struct {
 }
 
 type pageData struct {
-	Authenticated bool
-	CSRF          string
-	Error         string
-	Notice        string
-	Entries       []catalogEntry
-	Palette       []paletteField
-	SettingsIcons []settingsIconField
+	Authenticated      bool
+	CSRF               string
+	Error              string
+	Notice             string
+	Entries            []catalogEntry
+	Palette            []paletteField
+	SettingsIconGroups []settingsIconGroup
 }
 
 type application struct {
@@ -262,7 +262,7 @@ func (app *application) dashboardData(session userSession, message, notice strin
 	if err != nil && message == "" {
 		message = "The dashboard appearance cannot be read."
 	}
-	return pageData{Authenticated: true, CSRF: session.csrf, Error: message, Notice: notice, Entries: entries, Palette: palette, SettingsIcons: settingsIcons}
+	return pageData{Authenticated: true, CSRF: session.csrf, Error: message, Notice: notice, Entries: entries, Palette: palette, SettingsIconGroups: settingsIconGroups(settingsIcons)}
 }
 
 func (app *application) handleIndex(response http.ResponseWriter, request *http.Request) {
@@ -489,6 +489,16 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		_, _ = response.Write([]byte(paletteJS))
 	default:
+		if asset, ok := settingsIconAsset(request.URL.Path); ok {
+			if request.Method != http.MethodGet {
+				http.Error(response, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			response.Header().Set("Content-Type", "image/png")
+			response.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			_, _ = response.Write(asset)
+			return
+		}
 		http.NotFound(response, request)
 	}
 }

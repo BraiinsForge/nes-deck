@@ -158,6 +158,7 @@ ops/deck-menu/fetch-foss-games.sh "$foss"
 
 mkdir -p \
   "$payload/nes-deck/menu" \
+  "$payload/nes-deck/menu/settings-icons" \
   "$payload/nes-deck/games" \
   "$payload/nes-deck/langs/chibi/lib" \
   "$payload/nes-deck/licenses" \
@@ -203,8 +204,10 @@ cp deploy/terminal/fonts.conf deploy/terminal/retro-terminal \
   "$payload/nes-deck/terminal/"
 
 cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/palette.tsv \
+  deploy/menu/knekko-settings-icons.tsv deploy/menu/ASSETS.md \
   deploy/menu/compile-catalog.lisp deploy/menu/deck-menu-launcher \
   deploy/menu/fetch-covers "$payload/nes-deck/menu/"
+cp -a uploader/settings-icons/. "$payload/nes-deck/menu/settings-icons/"
 cp deploy/ecl "$payload/usr/bin/ecl"
 cp ops/deck-wifi/deck-wifi-profile-add \
   "$payload/usr/sbin/deck-wifi-profile-add"
@@ -370,6 +373,11 @@ done
   echo "Staged dashboard palette is empty" >&2
   exit 1
 }
+[ "$(find "$stage/nes-deck/menu/settings-icons" -maxdepth 1 \
+  -type f -name "*.png" | wc -l)" -eq 36 ] || {
+  echo "Staged settings icon set is incomplete" >&2
+  exit 1
+}
 
 python_result=$(
   "$stage/nes-deck/langs/python" -c 'print(6 * 7)'
@@ -431,7 +439,7 @@ cp -p "$uploader_address_config" "$base/uploader/address.conf"
 chmod 0600 "$base/uploader/password.conf" "$base/uploader/address.conf"
 
 mkdir -p "$base/menu" "$base/games" "$base/terminal" "$base/licenses"
-cp -p "$stage/nes-deck/menu/"* "$base/menu/"
+cp -Rp "$stage/nes-deck/menu/." "$base/menu/"
 cp -p "$stage/nes-deck/games/"* "$base/games/"
 cp -Rp "$stage/nes-deck/terminal/." "$base/terminal/"
 cp -Rp "$stage/nes-deck/licenses/." "$base/licenses/"

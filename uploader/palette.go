@@ -18,14 +18,16 @@ type paletteSpec struct {
 }
 
 type settingsIconSpec struct {
-	name  string
-	label string
-	rows  []string
+	name     string
+	label    string
+	family   string
+	imageURL string
+	rows     []string
 }
 
 const defaultSettingsIcon = "gear-steel-outline"
 
-var settingsIconSpecs = []settingsIconSpec{
+var baseSettingsIconSpecs = []settingsIconSpec{
 	{name: "gear-classic", label: "Classic", rows: []string{"..##.##..", ".#######.", "###...###", "##.....##", "##.....##", "##.....##", "###...###", ".#######.", "..##.##.."}},
 	{name: "gear-square", label: "Square", rows: []string{".##...##.", ".##...##.", "#########", "##.....##", "##.....##", "##.....##", "#########", ".##...##.", ".##...##."}},
 	{name: "gear-diamond", label: "Diamond", rows: []string{"....#....", "..#####..", ".##...##.", "##.....##", "#.......#", "##.....##", ".##...##.", "..#####..", "....#...."}},
@@ -37,7 +39,7 @@ var settingsIconSpecs = []settingsIconSpec{
 	{name: "gear-heavy", label: "Heavy", rows: []string{".###.###.", "#########", "###...###", "##.....##", "##.....##", "##.....##", "###...###", "#########", ".###.###."}},
 	{name: "gear-rivet", label: "Riveted", rows: []string{"..#...#..", ".#######.", "##.#.#.##", ".#.....#.", ".#.....#.", ".#.....#.", "##.#.#.##", ".#######.", "..#...#.."}},
 	{name: "gear-outline", label: "Classic outline", rows: []string{"..##.##..", "..#...#..", "##.###.##", "#.#...#.#", "#.#...#.#", "#.#...#.#", "##.###.##", "..#...#..", "..##.##.."}},
-	{name: "gear-steel-outline", label: "Steel outline", rows: []string{
+	{name: "gear-steel-outline", label: "Outline", family: "current", rows: []string{
 		".......................", ".......#.......#.......", ".......##.....##.......", ".......####.####.......",
 		".......#########.......", "......###########......", "......###.....###......", "..######.......######..",
 		"..#####.........#####..", "...###...........###...", "....##...........##....", ".....#...........#.....",
@@ -46,6 +48,8 @@ var settingsIconSpecs = []settingsIconSpec{
 		".......##.....##.......", ".......#.......#.......", ".......................",
 	}},
 }
+
+var settingsIconSpecs = append(baseSettingsIconSpecs, knekkoSettingsIconSpecs...)
 
 var dashboardPaletteSpecs = []paletteSpec{
 	{name: "background", label: "Background"},
@@ -83,7 +87,14 @@ type settingsIconField struct {
 	Label    string
 	Pixels   []bool
 	GridSize int
+	Family   string
+	ImageURL string
 	Selected bool
+}
+
+type settingsIconGroup struct {
+	Label string
+	Icons []settingsIconField
 }
 
 type dashboardAppearance struct {
@@ -344,9 +355,40 @@ func settingsIconFields(selected string) []settingsIconField {
 				pixels = append(pixels, pixel == '#')
 			}
 		}
-		fields = append(fields, settingsIconField{Name: spec.name, Label: spec.label, Pixels: pixels, GridSize: len(spec.rows), Selected: spec.name == selected})
+		fields = append(fields, settingsIconField{Name: spec.name, Label: spec.label, Pixels: pixels, GridSize: len(spec.rows), Family: spec.family, ImageURL: spec.imageURL, Selected: spec.name == selected})
 	}
 	return fields
+}
+
+func settingsIconGroups(fields []settingsIconField) []settingsIconGroup {
+	order := []struct {
+		family string
+		label  string
+	}{
+		{family: "legacy", label: "Legacy selection"},
+		{family: "current", label: "Current"},
+		{family: "small", label: "Knekko small"},
+		{family: "medium", label: "Knekko medium"},
+		{family: "large", label: "Knekko large"},
+	}
+	groups := make([]settingsIconGroup, 0, len(order))
+	for _, definition := range order {
+		group := settingsIconGroup{Label: definition.label}
+		for _, field := range fields {
+			family := field.Family
+			if family == "" {
+				family = "legacy"
+			}
+			if family != definition.family || (family == "legacy" && !field.Selected) {
+				continue
+			}
+			group.Icons = append(group.Icons, field)
+		}
+		if len(group.Icons) > 0 {
+			groups = append(groups, group)
+		}
+	}
+	return groups
 }
 
 func (store *paletteStore) currentLocked() ([]paletteField, []settingsIconField, error) {

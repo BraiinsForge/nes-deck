@@ -11,6 +11,7 @@
  *             --chiptune-player /absolute/path/to/chiptune-deck \
  *             --chiptune-directory /absolute/path/to/chiptunes \
  *             --manifest /absolute/path/to/games.tsv \
+ *             --settings-icon-directory /absolute/path/to/settings-icons \
  *             --cover-directory /absolute/path/to/covers \
  *             --volume-state /absolute/path/to/volume.state \
  *             --brightness /sys/class/backlight/display-bl/brightness \
@@ -383,14 +384,59 @@ const SettingsIconDefinition kSettingsIconDefinitions[] = {
       "......................."}},
 };
 
-const size_t kSettingsIconDefinitionCount =
+const size_t kLegacySettingsIconDefinitionCount =
     sizeof(kSettingsIconDefinitions) / sizeof(kSettingsIconDefinitions[0]);
+
+struct KnekkoSettingsIconDefinition {
+  const char *name;
+  const char *filename;
+  int size;
+};
+
+#include "knekko_settings_icons_generated.inc"
+
+const size_t kKnekkoSettingsIconDefinitionCount =
+    sizeof(kKnekkoSettingsIconDefinitions) /
+    sizeof(kKnekkoSettingsIconDefinitions[0]);
+const size_t kSettingsIconDefinitionCount =
+    kLegacySettingsIconDefinitionCount +
+    kKnekkoSettingsIconDefinitionCount;
 const size_t kDefaultSettingsIcon = 11;
 size_t gSettingsIcon = kDefaultSettingsIcon;
 
+struct SettingsIconImage {
+  int size;
+  std::vector<uint16_t> pixels;
+  std::vector<unsigned char> alpha;
+
+  SettingsIconImage() : size(0) {}
+  void clear() {
+    size = 0;
+    pixels.clear();
+    alpha.clear();
+  }
+  bool loaded() const {
+    return size > 0 &&
+           pixels.size() == static_cast<size_t>(size * size) &&
+           alpha.size() == pixels.size();
+  }
+};
+
+SettingsIconImage gSettingsIconImage;
+
+const char *settings_icon_name(size_t index) {
+  if (index < kLegacySettingsIconDefinitionCount)
+    return kSettingsIconDefinitions[index].name;
+  index -= kLegacySettingsIconDefinitionCount;
+  if (index < kKnekkoSettingsIconDefinitionCount)
+    return kKnekkoSettingsIconDefinitions[index].name;
+  return NULL;
+}
+
 bool settings_icon_index(const std::string &name, size_t *result) {
   for (size_t index = 0; index < kSettingsIconDefinitionCount; ++index) {
-    if (name == kSettingsIconDefinitions[index].name) {
+    const char *icon_name = settings_icon_name(index);
+    if (icon_name && name == icon_name) {
       if (result)
         *result = index;
       return true;
@@ -766,6 +812,7 @@ void reset_dashboard_palette() {
   for (size_t index = 0; index < kPaletteTokenCount; ++index)
     *kPaletteTokens[index].value = kPaletteTokens[index].default_value;
   gSettingsIcon = kDefaultSettingsIcon;
+  gSettingsIconImage.clear();
 }
 
 bool load_dashboard_palette(const std::string &path, std::string *error) {
@@ -2079,6 +2126,102 @@ bool load_png_cover_image(const std::string &path,
   return true;
 }
 
+bool load_selected_settings_icon(const std::string &directory,
+                                 std::string *error) {
+  gSettingsIconImage.clear();
+  if (gSettingsIcon < kLegacySettingsIconDefinitionCount)
+    return true;
+  if (!is_absolute_path(directory)) {
+    if (error)
+      *error = "settings icon directory must be an absolute path";
+    return false;
+  }
+  const size_t definition_index =
+      gSettingsIcon - kLegacySettingsIconDefinitionCount;
+  if (definition_index >= kKnekkoSettingsIconDefinitionCount) {
+    if (error)
+      *error = "selected settings icon is outside the asset catalog";
+    return false;
+  }
+  const KnekkoSettingsIconDefinition &definition =
+      kKnekkoSettingsIconDefinitions[definition_index];
+  const std::string path = directory + "/" + definition.filename;
+  const int descriptor =
+      open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (descriptor < 0) {
+    if (error)
+      *error = errno_message("cannot open settings icon " + path);
+    return false;
+  }
+  struct stat info;
+  if (fstat(descriptor, &info) != 0 || !S_ISREG(info.st_mode) ||
+      info.st_size < 8 || info.st_size > 65536) {
+    const int saved_errno = errno;
+    close(descriptor);
+    errno = saved_errno;
+    if (error)
+      *error = "settings icon must be a small regular PNG: " + path;
+    return false;
+  }
+  FILE *file = fdopen(descriptor, "rb");
+  if (!file) {
+    const int saved_errno = errno;
+    close(descriptor);
+    errno = saved_errno;
+    if (error)
+      *error = errno_message("cannot read settings icon " + path);
+    return false;
+  }
+
+  png_image image;
+  std::memset(&image, 0, sizeof(image));
+  image.version = PNG_IMAGE_VERSION;
+  if (!png_image_begin_read_from_stdio(&image, file)) {
+    if (error)
+      *error = "cannot decode settings icon " + path + ": " + image.message;
+    fclose(file);
+    return false;
+  }
+  if (image.width != static_cast<png_uint_32>(definition.size) ||
+      image.height != static_cast<png_uint_32>(definition.size)) {
+    png_image_free(&image);
+    fclose(file);
+    if (error)
+      *error = "settings icon dimensions do not match the catalog: " + path;
+    return false;
+  }
+  image.format = PNG_FORMAT_RGBA;
+  std::vector<png_byte> source(PNG_IMAGE_SIZE(image));
+  if (!png_image_finish_read(&image, NULL, &source[0], 0, NULL)) {
+    if (error)
+      *error = "cannot read settings icon " + path + ": " + image.message;
+    png_image_free(&image);
+    fclose(file);
+    return false;
+  }
+  png_image_free(&image);
+  if (fclose(file) != 0) {
+    if (error)
+      *error = errno_message("cannot close settings icon " + path);
+    return false;
+  }
+
+  const size_t pixel_count =
+      static_cast<size_t>(definition.size * definition.size);
+  gSettingsIconImage.size = definition.size;
+  gSettingsIconImage.pixels.resize(pixel_count);
+  gSettingsIconImage.alpha.resize(pixel_count);
+  for (size_t pixel = 0; pixel < pixel_count; ++pixel) {
+    const size_t offset = pixel * 4;
+    const unsigned char alpha = source[offset + 3];
+    gSettingsIconImage.alpha[pixel] = alpha;
+    gSettingsIconImage.pixels[pixel] =
+        RgbColor{source[offset], source[offset + 1], source[offset + 2]}
+            .pixel();
+  }
+  return true;
+}
+
 size_t load_game_covers(const std::string &directory,
                         std::vector<GameEntry> *games) {
   if (!games || !is_absolute_path(directory))
@@ -2517,9 +2660,56 @@ void draw_outline_arrow(Canvas *canvas, const Rect &bounds,
   block(24, 2, 4, 4);
 }
 
+uint16_t blend_rgb565(uint16_t foreground, uint16_t background,
+                      unsigned int alpha) {
+  const unsigned int inverse = 255 - alpha;
+  const unsigned int red =
+      (((foreground >> 11) & 0x1f) * alpha +
+       ((background >> 11) & 0x1f) * inverse + 127) /
+      255;
+  const unsigned int green =
+      (((foreground >> 5) & 0x3f) * alpha +
+       ((background >> 5) & 0x3f) * inverse + 127) /
+      255;
+  const unsigned int blue =
+      ((foreground & 0x1f) * alpha + (background & 0x1f) * inverse + 127) /
+      255;
+  return static_cast<uint16_t>((red << 11) | (green << 5) | blue);
+}
+
 void draw_settings_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
-  const SettingsIconDefinition &icon =
-      kSettingsIconDefinitions[gSettingsIcon];
+  if (gSettingsIcon >= kLegacySettingsIconDefinitionCount &&
+      gSettingsIconImage.loaded()) {
+    const int target_size =
+        std::max(1, std::min(50, std::min(bounds.width, bounds.height)));
+    const int left = bounds.x + (bounds.width - target_size) / 2;
+    const int top = bounds.y + (bounds.height - target_size) / 2;
+    for (int y = 0; y < target_size; ++y) {
+      const int source_y = y * gSettingsIconImage.size / target_size;
+      for (int x = 0; x < target_size; ++x) {
+        const int source_x = x * gSettingsIconImage.size / target_size;
+        const size_t source = static_cast<size_t>(
+            source_y * gSettingsIconImage.size + source_x);
+        const unsigned int alpha = gSettingsIconImage.alpha[source];
+        if (alpha != 0) {
+          uint16_t &destination =
+              (*canvas)[static_cast<size_t>(top + y) * kLogicalWidth + left +
+                        x];
+          destination =
+              alpha == 255
+                  ? gSettingsIconImage.pixels[source]
+                  : blend_rgb565(gSettingsIconImage.pixels[source],
+                                 destination, alpha);
+        }
+      }
+    }
+    return;
+  }
+  const size_t definition =
+      gSettingsIcon < kLegacySettingsIconDefinitionCount
+          ? gSettingsIcon
+          : kDefaultSettingsIcon;
+  const SettingsIconDefinition &icon = kSettingsIconDefinitions[definition];
   const int pixel =
       std::max(1, std::min(4, std::min(bounds.width / icon.size,
                                       bounds.height / icon.size)));
@@ -4770,6 +4960,7 @@ struct Options {
   std::string chiptune_directory;
   std::string manifest;
   std::string palette;
+  std::string settings_icon_directory;
   std::string cover_directory;
   std::string volume_state;
   std::string brightness;
@@ -4807,6 +4998,7 @@ void print_usage(const char *program) {
                "--deck-game PATH --chiptune-player PATH "
                "--chiptune-directory PATH --manifest PATH "
                "--palette PATH "
+               "--settings-icon-directory PATH "
                "--cover-directory PATH "
                "--volume-state PATH "
                "--brightness PATH --brightness-max PATH "
@@ -4861,6 +5053,7 @@ bool parse_options(int argc, char **argv, Options *options,
                argument == "--chiptune-directory" ||
                argument == "--manifest" ||
                argument == "--palette" ||
+               argument == "--settings-icon-directory" ||
                argument == "--cover-directory" ||
                argument == "--volume-state" ||
                argument == "--brightness" ||
@@ -4892,6 +5085,8 @@ bool parse_options(int argc, char **argv, Options *options,
         destination = &options->manifest;
       else if (argument == "--palette")
         destination = &options->palette;
+      else if (argument == "--settings-icon-directory")
+        destination = &options->settings_icon_directory;
       else if (argument == "--cover-directory")
         destination = &options->cover_directory;
       else if (argument == "--volume-state")
@@ -4954,6 +5149,7 @@ bool parse_options(int argc, char **argv, Options *options,
       options->deck_game.empty() ||
       options->chiptune_player.empty() || options->chiptune_directory.empty() ||
       options->manifest.empty() || options->palette.empty() ||
+      options->settings_icon_directory.empty() ||
       options->cover_directory.empty() ||
       options->volume_state.empty() || options->brightness.empty() ||
       options->brightness_max.empty() || options->brightness_state.empty() ||
@@ -4965,6 +5161,7 @@ bool parse_options(int argc, char **argv, Options *options,
                "--chip8-emulator, --deck-game, --chiptune-player, "
                "--chiptune-directory, --manifest, "
                "--palette, "
+               "--settings-icon-directory, "
                "--cover-directory, --volume-state, --brightness, "
                "--brightness-max, --brightness-state, "
                "--keymap-state, --terminal, --wifi-helper, and "
@@ -4981,6 +5178,18 @@ int application_main(const Options &options) {
     std::cerr << "deck-menu: " << error
               << "; using built-in dashboard palette" << std::endl;
     reset_dashboard_palette();
+    error.clear();
+  }
+  if (!is_absolute_path(options.settings_icon_directory)) {
+    std::cerr << "deck-menu: settings icon directory must be an absolute path"
+              << std::endl;
+    return 1;
+  }
+  if (!load_selected_settings_icon(options.settings_icon_directory, &error)) {
+    std::cerr << "deck-menu: " << error
+              << "; using the built-in settings icon" << std::endl;
+    gSettingsIcon = kDefaultSettingsIcon;
+    gSettingsIconImage.clear();
     error.clear();
   }
   if (!validate_executable(options.nes_emulator, "NES emulator", &error) ||

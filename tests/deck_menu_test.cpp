@@ -726,7 +726,7 @@ int main() {
   }
 
   std::set<uint64_t> settings_icon_hashes;
-  for (size_t icon = 0; icon < kSettingsIconDefinitionCount; ++icon) {
+  for (size_t icon = 0; icon < kLegacySettingsIconDefinitionCount; ++icon) {
     Canvas icon_canvas(static_cast<size_t>(kLogicalWidth * kLogicalHeight), 0);
     gSettingsIcon = icon;
     draw_settings_icon(&icon_canvas, Rect{0, 0, 56, 56}, 0xffff);
@@ -737,11 +737,47 @@ int main() {
     }
     if (!settings_icon_hashes.insert(hash).second)
       std::cerr << "duplicate settings icon rendering: "
-                << kSettingsIconDefinitions[icon].name << std::endl;
+                << settings_icon_name(icon) << std::endl;
   }
-  expect(kSettingsIconDefinitionCount == 12 &&
-             settings_icon_hashes.size() == kSettingsIconDefinitionCount,
-         "all twelve configurable pixel cogs render distinctly");
+  expect(kLegacySettingsIconDefinitionCount == 12 &&
+             settings_icon_hashes.size() ==
+                 kLegacySettingsIconDefinitionCount,
+         "all twelve built-in pixel cogs render distinctly");
+  char settings_icon_directory[PATH_MAX] = {};
+  expect(realpath("uploader/settings-icons", settings_icon_directory) != NULL,
+         "resolve the source settings icon directory");
+  std::set<uint64_t> source_icon_hashes;
+  if (settings_icon_directory[0] != '\0') {
+    for (size_t icon = kLegacySettingsIconDefinitionCount;
+         icon < kSettingsIconDefinitionCount; ++icon) {
+      Canvas icon_canvas(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
+                         0);
+      gSettingsIcon = icon;
+      error.clear();
+      const bool loaded =
+          load_selected_settings_icon(settings_icon_directory, &error);
+      if (!loaded)
+        std::cerr << "source settings icon failed: "
+                  << settings_icon_name(icon) << ": " << error << std::endl;
+      expect(loaded, "load a source settings icon");
+      draw_settings_icon(&icon_canvas, Rect{0, 0, 56, 56}, 0xffff);
+      uint64_t hash = 1469598103934665603ULL;
+      for (size_t pixel = 0; pixel < icon_canvas.size(); ++pixel) {
+        hash ^= icon_canvas[pixel];
+        hash *= 1099511628211ULL;
+      }
+      if (!source_icon_hashes.insert(hash).second)
+        std::cerr << "duplicate source settings icon rendering: "
+                  << settings_icon_name(icon) << std::endl;
+    }
+  }
+  expect(kSettingsIconDefinitionCount == 48 &&
+             kKnekkoSettingsIconDefinitionCount == 36 &&
+             source_icon_hashes.size() ==
+                 kKnekkoSettingsIconDefinitionCount &&
+             std::strcmp(settings_icon_name(12), "gear-knekko-01") == 0 &&
+             std::strcmp(settings_icon_name(47), "gear-knekko-36") == 0,
+         "all 36 source cogs load and render distinctly");
   expect(std::strcmp(kSettingsIconDefinitions[kDefaultSettingsIcon].name,
                      "gear-steel-outline") == 0 &&
              kSettingsIconDefinitions[kDefaultSettingsIcon].size == 23,
@@ -1097,6 +1133,7 @@ int main() {
       "/tmp/chiptunes",
       "--manifest",     "/tmp/games",
       "--palette",      "/tmp/palette",
+      "--settings-icon-directory", "/tmp/settings-icons",
       "--cover-directory", "/tmp/covers",
       "--volume-state", "/tmp/volume",      "--brightness",
       "/tmp/brightness", "--brightness-max", "/tmp/max-brightness",
@@ -1116,6 +1153,7 @@ int main() {
   expect(options.terminal == "/bin/false" &&
              options.wifi_helper == "/bin/echo" &&
              options.palette == "/tmp/palette" &&
+             options.settings_icon_directory == "/tmp/settings-icons" &&
              options.wifi_status == "/var/run/deck-wifi/status" &&
              options.chiptune_player == "/bin/sleep" &&
              options.chiptune_directory == "/tmp/chiptunes" &&

@@ -237,8 +237,12 @@
 
           buildPhase = ''
             runHook preBuild
+            cp ${./src/deck_menu.cpp} deck_menu.cpp
+            cp ${./src/knekko_settings_icons_generated.inc} \
+              knekko_settings_icons_generated.inc
             $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-              ${./src/deck_menu.cpp} -static -lpng -lz -o deck-menu
+              deck_menu.cpp \
+              -static -lpng -lz -o deck-menu
             runHook postBuild
           '';
 
