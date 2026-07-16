@@ -13,13 +13,17 @@ STATUS_FILE=${DECK_WIFI_STATUS_FILE:-/var/run/deck-wifi/status}
 IFACE=${DECK_WIFI_INTERFACE:-wlan0}
 LOCK_DIR=${DECK_WIFI_LOCK_DIR:-/tmp/deck-wifi-select.lock}
 TAB=$(printf '\t')
-SCAN_CONFIRMATIONS=${DECK_WIFI_SCAN_CONFIRMATIONS:-1}
+SCAN_CONFIRMATIONS=${DECK_WIFI_SCAN_CONFIRMATIONS:-3}
 SCAN_INTERVAL=${DECK_WIFI_SCAN_INTERVAL:-5}
 SCAN_RETRIES=${DECK_WIFI_SCAN_RETRIES:-3}
 SCAN_RETRY_INTERVAL=${DECK_WIFI_SCAN_RETRY_INTERVAL:-3}
 SWITCH_TIMEOUT=${DECK_WIFI_SWITCH_TIMEOUT:-60}
 ROLLBACK_GRACE=${DECK_WIFI_ROLLBACK_GRACE:-20}
 HEALTH_INTERVAL=${DECK_WIFI_HEALTH_INTERVAL:-2}
+HEALTH_RECOVERY_AFTER=${DECK_WIFI_HEALTH_RECOVERY_AFTER:-20}
+ASSOCIATION_TIMEOUT=${DECK_WIFI_ASSOCIATION_TIMEOUT:-30}
+CANDIDATE_PASSES=${DECK_WIFI_CANDIDATE_PASSES:-2}
+CANDIDATE_PASS_INTERVAL=${DECK_WIFI_CANDIDATE_PASS_INTERVAL:-5}
 
 write_status() {
 	status=$1
@@ -77,8 +81,29 @@ network_ready() {
 wait_for_network() {
 	timeout=$1
 	elapsed=0
+	recovery_attempted=false
+	association_seen=false
 	while [ "$elapsed" -lt "$timeout" ]; do
 		network_ready && return 0
+		if is_associated; then
+			association_seen=true
+		elif [ "$association_seen" = false ] &&
+			[ "$elapsed" -ge "$ASSOCIATION_TIMEOUT" ]; then
+			logger -t deck-wifi \
+				'station did not associate within its bounded window'
+			return 1
+		fi
+		if [ "$recovery_attempted" = false ] &&
+			[ "$elapsed" -ge "$HEALTH_RECOVERY_AFTER" ] &&
+			is_associated; then
+			recovery_attempted=true
+			if [ -n "${STA_NETWORK:-}" ]; then
+				logger -t deck-wifi \
+					'association has no complete IP health; renewing station network'
+				ifup "$STA_NETWORK" >/dev/null 2>&1 ||
+					logger -t deck-wifi 'station network renewal command failed'
+			fi
+		fi
 		sleep "$HEALTH_INTERVAL"
 		elapsed=$((elapsed + HEALTH_INTERVAL))
 	done
@@ -87,12 +112,18 @@ wait_for_network() {
 
 find_sta_section() {
 	STA_SECTION=
+	STA_NETWORK=
 	index=0
 	while uci -q get "wireless.@wifi-iface[$index]" >/dev/null 2>&1; do
 		mode=$(uci -q get "wireless.@wifi-iface[$index].mode" 2>/dev/null)
 		disabled=$(uci -q get "wireless.@wifi-iface[$index].disabled" 2>/dev/null)
 		if [ "$mode" = sta ] && [ "${disabled:-0}" != 1 ]; then
 			STA_SECTION="@wifi-iface[$index]"
+			STA_NETWORK=$(uci -q get \
+				"wireless.@wifi-iface[$index].network" 2>/dev/null)
+			case "$STA_NETWORK" in
+				''|*[!A-Za-z0-9_-]*) STA_NETWORK= ;;
+			esac
 			return 0
 		fi
 		index=$((index + 1))
@@ -159,7 +190,8 @@ profile_ssid() {
 
 cleanup() {
 	rm -f "${SCAN_IW:-}" "${SCAN_RAW:-}" "${SCAN_HEX:-}" \
-		"${SCAN_SORTED:-}" "${CANDIDATES:-}" "${CURRENT_CANDIDATE:-}" \
+		"${SCAN_ALL:-}" "${SCAN_SORTED:-}" "${CANDIDATES:-}" \
+		"${CURRENT_CANDIDATE:-}" \
 		2>/dev/null || true
 	[ -n "${UCI_WORK:-}" ] && rm -rf "$UCI_WORK" 2>/dev/null || true
 	[ -n "${RESTORE_WORK:-}" ] && rm -f "$RESTORE_WORK" 2>/dev/null || true
@@ -247,6 +279,14 @@ scan_once() {
 	[ -s "$SCAN_SORTED" ]
 }
 
+candidate_already_added() {
+	wanted_hex=$1
+	awk -F "$TAB" -v wanted="$wanted_hex" '
+		$1 == wanted { found=1 }
+		END { exit !found }
+	' "$CANDIDATES" "$CURRENT_CANDIDATE" 2>/dev/null
+}
+
 build_candidate_list() {
 	: > "$CANDIDATES"
 	: > "$CURRENT_CANDIDATE"
@@ -254,8 +294,7 @@ build_candidate_list() {
 		[ "$advertises_psk" = 1 ] || continue
 		find_enabled_profile "$candidate_hex" || continue
 		load_profile_key "$SELECTED_PROFILE" || continue
-		if grep -F -q "$candidate_hex$TAB" "$CANDIDATES" "$CURRENT_CANDIDATE" \
-			2>/dev/null; then
+		if candidate_already_added "$candidate_hex"; then
 			continue
 		fi
 		if [ -n "$current_hex" ] && [ "$candidate_hex" = "$current_hex" ]; then
@@ -266,6 +305,27 @@ build_candidate_list() {
 				>> "$CANDIDATES"
 		fi
 	done < "$SCAN_SORTED"
+
+	# A scan is only a hint. Drivers and busy access points can omit an SSID
+	# from every result even though a directed association succeeds. Keep
+	# scan-ranked candidates first, then append every other usable saved PSK.
+	for profile in "$PROFILE_DIR"/*.psk; do
+		[ -f "$profile" ] || continue
+		profile_enabled "$profile" || continue
+		load_profile_key "$profile" || continue
+		candidate_hex=$(profile_hex "$profile")
+		[ -n "$candidate_hex" ] || continue
+		if candidate_already_added "$candidate_hex"; then
+			continue
+		fi
+		if [ -n "$current_hex" ] && [ "$candidate_hex" = "$current_hex" ]; then
+			printf '%s\t%s\n' "$candidate_hex" "$profile" \
+				>> "$CURRENT_CANDIDATE"
+		else
+			printf '%s\t%s\n' "$candidate_hex" "$profile" \
+				>> "$CANDIDATES"
+		fi
+	done
 	cat "$CURRENT_CANDIDATE" >> "$CANDIDATES"
 }
 
@@ -336,6 +396,7 @@ find_sta_section || {
 SCAN_IW=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-iw.$$
 SCAN_RAW=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-raw.$$
 SCAN_HEX=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-hex.$$
+SCAN_ALL=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-all.$$
 SCAN_SORTED=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-sorted.$$
 CANDIDATES=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-candidates.$$
 CURRENT_CANDIDATE=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-current.$$
@@ -347,8 +408,10 @@ else
 	current_hex=
 fi
 
+: > "$SCAN_ALL"
 write_status "SCANNING KNOWN WIFI" || true
 confirmation=0
+successful_scans=0
 while [ "$confirmation" -lt "$SCAN_CONFIRMATIONS" ]; do
 	if network_ready; then
 		write_status "CONNECTED" || true
@@ -356,9 +419,12 @@ while [ "$confirmation" -lt "$SCAN_CONFIRMATIONS" ]; do
 	fi
 	retry=0
 	scan_succeeded=false
+	write_status "WIFI SCAN $((confirmation + 1)) OF $SCAN_CONFIRMATIONS" || true
 	while [ "$retry" -lt "$SCAN_RETRIES" ]; do
 		if scan_once; then
 			scan_succeeded=true
+			cat "$SCAN_HEX" >> "$SCAN_ALL"
+			successful_scans=$((successful_scans + 1))
 			break
 		fi
 		retry=$((retry + 1))
@@ -370,13 +436,19 @@ while [ "$confirmation" -lt "$SCAN_CONFIRMATIONS" ]; do
 			exit 0
 		fi
 	done
-	if [ "$scan_succeeded" != true ]; then
-		write_status "WIFI SCAN FAILED" || true
-		exit 1
-	fi
+	[ "$scan_succeeded" = true ] ||
+		logger -t deck-wifi \
+			"wifi scan round $((confirmation + 1)) of $SCAN_CONFIRMATIONS failed"
 	confirmation=$((confirmation + 1))
 	[ "$confirmation" -ge "$SCAN_CONFIRMATIONS" ] || sleep "$SCAN_INTERVAL"
 done
+
+if [ "$successful_scans" -eq 0 ]; then
+	write_status "WIFI SCAN FAILED TRYING SAVED WIFI" || true
+	: > "$SCAN_SORTED"
+else
+	sort -rn -k1,1 "$SCAN_ALL" > "$SCAN_SORTED"
+fi
 
 build_candidate_list
 candidate_count=$(wc -l < "$CANDIDATES" 2>/dev/null) || candidate_count=0
@@ -384,7 +456,7 @@ case "$candidate_count" in
 	''|*[!0-9]*) candidate_count=0 ;;
 esac
 if [ "$candidate_count" -eq 0 ]; then
-	write_status "NO VISIBLE KNOWN WIFI" || true
+	write_status "NO USABLE SAVED WIFI" || true
 	exit 1
 fi
 
@@ -403,29 +475,46 @@ cp -p "$WIRELESS_CONFIG" "$backup" || {
 }
 chmod 0600 "$backup"
 
-attempt=0
-while IFS="$TAB" read -r _candidate_hex candidate_profile; do
-	attempt=$((attempt + 1))
-	if network_ready; then
-		write_status "CONNECTED" || true
-		exit 0
-	fi
-	write_status "TRYING KNOWN WIFI $attempt OF $candidate_count" || true
-	logger -t deck-wifi "trying visible known PSK profile $attempt of $candidate_count"
-	if ! apply_profile "$candidate_profile"; then
-		logger -t deck-wifi "could not apply known PSK profile $attempt"
-		continue
-	fi
-	if wait_for_network "$SWITCH_TIMEOUT"; then
-		write_status "CONNECTED" || true
-		logger -t deck-wifi "known PSK profile $attempt reached complete network health"
-		exit 0
-	fi
-	logger -t deck-wifi "known PSK profile $attempt failed its bounded health check"
-done < "$CANDIDATES"
+candidate_pass=0
+while [ "$candidate_pass" -lt "$CANDIDATE_PASSES" ]; do
+	candidate_pass=$((candidate_pass + 1))
+	attempt=0
+	while IFS="$TAB" read -r _candidate_hex candidate_profile; do
+		attempt=$((attempt + 1))
+		if network_ready; then
+			write_status "CONNECTED" || true
+			exit 0
+		fi
+		write_status \
+			"WIFI PASS $candidate_pass OF $CANDIDATE_PASSES NETWORK $attempt OF $candidate_count" || true
+		logger -t deck-wifi \
+			"trying known PSK profile $attempt of $candidate_count on pass $candidate_pass of $CANDIDATE_PASSES"
+		if ! apply_profile "$candidate_profile"; then
+			logger -t deck-wifi \
+				"could not apply known PSK profile $attempt on pass $candidate_pass"
+			continue
+		fi
+		if wait_for_network "$SWITCH_TIMEOUT"; then
+			write_status "CONNECTED" || true
+			logger -t deck-wifi \
+				"known PSK profile $attempt reached complete network health on pass $candidate_pass"
+			exit 0
+		fi
+		associated=no
+		ipv4=no
+		default_route=no
+		is_associated && associated=yes
+		has_ipv4 && ipv4=yes
+		has_default_route && default_route=yes
+		logger -t deck-wifi \
+			"known PSK profile $attempt failed pass $candidate_pass health: associated=$associated ipv4=$ipv4 default-route=$default_route"
+	done < "$CANDIDATES"
+	[ "$candidate_pass" -ge "$CANDIDATE_PASSES" ] ||
+		sleep "$CANDIDATE_PASS_INTERVAL"
+done
 
 write_status "RESTORING PREVIOUS WIFI" || true
-logger -t deck-wifi 'all visible known PSK profiles failed; restoring previous wireless config'
+logger -t deck-wifi 'all saved PSK profiles failed; restoring previous wireless config'
 if ! restore_wireless_config; then
 	write_status "WIFI RESTORE FAILED" || true
 	logger -t deck-wifi 'failed to restore previous wireless config'

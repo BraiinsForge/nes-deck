@@ -10,27 +10,37 @@ address on `wlan0`, and an IPv4 default route through `wlan0`.
 Canonical IWD `.psk` files live in `/etc/deck-wifi/profiles` with mode `0600`.
 The selector decodes IWD filenames, ignores profiles containing
 `AutoConnect=false`, and scans without logging SSIDs. Candidates must advertise
-a PSK authentication suite; SAE-only and unclassified BSSes are skipped. After
-one successful OpenWrt `iwinfo` scan, every visible known candidate is tried
-once in signal order, with alternatives ahead of the currently configured
-SSID. A raw `iw` scan remains as a compatibility fallback, and three bounded
-retries absorb transient driver-busy failures. Both IWD `Passphrase` and
-64-digit `PreSharedKey` profiles are supported. A complete
-network-health check immediately before every commit prevents a scan/reconnect
-race, and a healthy connection is never changed.
+a PSK authentication suite; SAE-only and unclassified BSSes are skipped. The
+selector merges three independent OpenWrt `iwinfo` scans so one missed beacon
+cannot erase a saved network seen by another scan. A raw `iw` scan remains as a
+compatibility fallback, and three bounded retries per round absorb transient
+driver-busy failures. Visible known candidates are tried in signal order, with
+alternatives ahead of the currently configured SSID. The complete candidate
+set receives a second pass before rollback. Every remaining usable saved PSK
+is appended as a directed-association fallback, because a driver or busy access
+point can omit a connectable SSID from every scan. Saved profiles are still
+tried when both scan providers fail completely. Both IWD `Passphrase` and
+64-digit `PreSharedKey` profiles are supported. A complete network-health check
+immediately before every commit prevents a scan/reconnect race, and a healthy
+connection is never changed.
 
 Every selection run is transactional. The previous UCI file is saved once
-immediately before the first candidate. Each candidate gets up to 60 seconds to
-establish complete network health. If every candidate fails, the selector
-atomically restores that immediate backup, allows a bounded 20-second recovery
-grace, and returns control to the watcher even when the unavailable original
-network does not recover. It never waits forever after rollback.
+immediately before the first candidate. A station that never associates is
+released after 30 seconds; an associated candidate gets up to 60 seconds per
+pass to establish complete network health. An associated station that is still
+missing IPv4 or its default route after 20 seconds receives one bounded netifd
+renewal. If both candidate passes fail, the selector atomically restores that
+immediate backup, allows a bounded 20-second recovery grace, and returns control
+to the watcher even when the unavailable original network does not recover. It
+never waits forever after rollback.
 
 The watcher and selector atomically maintain the root-only runtime state file
 `/var/run/deck-wifi/status`. It contains short credential-free states such as
-`BOOT GRACE 90 SECONDS`, `SCANNING KNOWN WIFI`, `TRYING KNOWN WIFI 1 OF 3`,
-and `NO KNOWN WIFI CONNECTED`. Each credential-free transition is also sent to
-logd for post-outage diagnosis. The dashboard displays this state beside the
+`BOOT GRACE 90 SECONDS`, `WIFI SCAN 2 OF 3`,
+`WIFI PASS 1 OF 2 NETWORK 1 OF 3`, and `NO KNOWN WIFI CONNECTED`. Each
+credential-free transition is also sent to logd for post-outage diagnosis.
+Failed health checks record only association, IPv4, and default-route booleans,
+never SSIDs or credentials. The dashboard displays current state beside the
 active SSID and the `wlan0` and `wg0` IPv4 addresses.
 
 `/etc/config/wireless`, its pre-switch backups, and the generated supplicant
