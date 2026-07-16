@@ -24,6 +24,7 @@ HEALTH_RECOVERY_AFTER=${DECK_WIFI_HEALTH_RECOVERY_AFTER:-20}
 ASSOCIATION_TIMEOUT=${DECK_WIFI_ASSOCIATION_TIMEOUT:-30}
 CANDIDATE_PASSES=${DECK_WIFI_CANDIDATE_PASSES:-2}
 CANDIDATE_PASS_INTERVAL=${DECK_WIFI_CANDIDATE_PASS_INTERVAL:-5}
+WIREGUARD_SERVICE=${DECK_WIFI_WIREGUARD_SERVICE:-/etc/init.d/deck-wireguard}
 
 write_status() {
 	status=$1
@@ -45,6 +46,19 @@ write_status() {
 	fi
 	rm -f "$temporary_status" 2>/dev/null || true
 	return 1
+}
+
+mark_recovered() {
+	if [ -x "$WIREGUARD_SERVICE" ]; then
+		write_status "REFRESHING WIREGUARD" || true
+		logger -t deck-wifi 'refreshing WireGuard after network recovery'
+		if "$WIREGUARD_SERVICE" restart >/dev/null 2>&1; then
+			logger -t deck-wifi 'WireGuard refresh command completed'
+		else
+			logger -t deck-wifi 'WireGuard refresh command failed'
+		fi
+	fi
+	write_status "CONNECTED" || true
 }
 
 secure_files() {
@@ -414,7 +428,7 @@ confirmation=0
 successful_scans=0
 while [ "$confirmation" -lt "$SCAN_CONFIRMATIONS" ]; do
 	if network_ready; then
-		write_status "CONNECTED" || true
+		mark_recovered
 		exit 0
 	fi
 	retry=0
@@ -432,7 +446,7 @@ while [ "$confirmation" -lt "$SCAN_CONFIRMATIONS" ]; do
 		write_status "WIFI SCAN RETRY $retry OF $SCAN_RETRIES" || true
 		sleep "$SCAN_RETRY_INTERVAL"
 		if network_ready; then
-			write_status "CONNECTED" || true
+			mark_recovered
 			exit 0
 		fi
 	done
@@ -461,7 +475,7 @@ if [ "$candidate_count" -eq 0 ]; then
 fi
 
 if network_ready; then
-	write_status "CONNECTED" || true
+	mark_recovered
 	exit 0
 fi
 
@@ -482,7 +496,7 @@ while [ "$candidate_pass" -lt "$CANDIDATE_PASSES" ]; do
 	while IFS="$TAB" read -r _candidate_hex candidate_profile; do
 		attempt=$((attempt + 1))
 		if network_ready; then
-			write_status "CONNECTED" || true
+			mark_recovered
 			exit 0
 		fi
 		write_status \
@@ -495,9 +509,9 @@ while [ "$candidate_pass" -lt "$CANDIDATE_PASSES" ]; do
 			continue
 		fi
 		if wait_for_network "$SWITCH_TIMEOUT"; then
-			write_status "CONNECTED" || true
 			logger -t deck-wifi \
 				"known PSK profile $attempt reached complete network health on pass $candidate_pass"
+			mark_recovered
 			exit 0
 		fi
 		associated=no
@@ -521,8 +535,8 @@ if ! restore_wireless_config; then
 	exit 1
 fi
 if wait_for_network "$ROLLBACK_GRACE"; then
-	write_status "CONNECTED" || true
 	logger -t deck-wifi 'previous wireless config recovered complete network health'
+	mark_recovered
 	exit 0
 fi
 

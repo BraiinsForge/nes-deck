@@ -32,7 +32,8 @@ missing IPv4 or its default route after 20 seconds receives one bounded netifd
 renewal. If both candidate passes fail, the selector atomically restores that
 immediate backup, allows a bounded 20-second recovery grace, and returns control
 to the watcher even when the unavailable original network does not recover. It
-never waits forever after rollback.
+never waits forever after rollback. Every recovered network path restarts the
+userspace WireGuard service so its UDP socket and routes follow the new uplink.
 
 The watcher and selector atomically maintain the root-only runtime state file
 `/var/run/deck-wifi/status`. It contains short credential-free states such as

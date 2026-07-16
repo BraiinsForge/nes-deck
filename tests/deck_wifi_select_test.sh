@@ -133,6 +133,12 @@ printf '1\n' > "$TEST_ASSOCIATED"
 printf '1\n' > "$TEST_READY"
 FAKE_IFUP
 
+cat > "$fixture/bin/deck-wireguard" <<'FAKE_WIREGUARD'
+#!/bin/sh
+[ "${1:-}" = restart ] || exit 1
+printf 'restart\n' >> "$TEST_WIREGUARD_RESTARTS"
+FAKE_WIREGUARD
+
 cat > "$fixture/bin/logger" <<'FAKE_LOGGER'
 #!/bin/sh
 exit 0
@@ -150,7 +156,8 @@ FAKE_DATE
 
 chmod 0700 "$fixture/bin/iw" "$fixture/bin/iwinfo" \
 	"$fixture/bin/ip" "$fixture/bin/uci" \
-	"$fixture/bin/wifi" "$fixture/bin/ifup" "$fixture/bin/logger" "$fixture/bin/sleep" \
+	"$fixture/bin/wifi" "$fixture/bin/ifup" \
+	"$fixture/bin/deck-wireguard" "$fixture/bin/logger" "$fixture/bin/sleep" \
 	"$fixture/bin/date"
 
 make_scenario() {
@@ -205,6 +212,7 @@ Cell 03 - Address: 00:00:00:00:00:03
 IWINFO_SCAN
 	: > "$scenario/attempts"
 	: > "$scenario/renewals"
+	: > "$scenario/wireguard-restarts"
 	printf '0\n' > "$scenario/scan-count"
 	printf '0\n' > "$scenario/associated"
 	printf '0\n' > "$scenario/ready"
@@ -228,6 +236,7 @@ run_selector() {
 	TEST_SCAN_COUNT=$scenario/scan-count \
 	TEST_ATTEMPTS=$scenario/attempts \
 	TEST_RENEWALS=$scenario/renewals \
+	TEST_WIREGUARD_RESTARTS=$scenario/wireguard-restarts \
 	TEST_GOOD_SSID=$good_ssid \
 	TEST_GOOD_AFTER=$good_after \
 	TEST_REQUIRE_IFUP=$require_ifup \
@@ -245,15 +254,17 @@ run_selector() {
 	DECK_WIFI_HEALTH_INTERVAL=1 \
 	DECK_WIFI_HEALTH_RECOVERY_AFTER=$health_recovery_after \
 	DECK_WIFI_CANDIDATE_PASS_INTERVAL=0 \
+	DECK_WIFI_WIREGUARD_SERVICE=$fixture/bin/deck-wireguard \
 	export TEST_ASSOCIATED TEST_READY TEST_SCAN TEST_IWINFO_SCAN \
 		TEST_IWINFO_FAIL TEST_IW_FAIL TEST_SCAN_COUNT TEST_ATTEMPTS \
-		TEST_RENEWALS TEST_GOOD_SSID TEST_GOOD_AFTER TEST_REQUIRE_IFUP \
+		TEST_RENEWALS TEST_WIREGUARD_RESTARTS TEST_GOOD_SSID \
+		TEST_GOOD_AFTER TEST_REQUIRE_IFUP \
 		DECK_WIFI_PATH DECK_WIFI_PROFILE_DIR DECK_WIFI_BACKUP_DIR \
 		DECK_WIFI_CONFIG DECK_WIFI_RUNTIME_CONFIG DECK_WIFI_STATUS_FILE \
 		DECK_WIFI_LOCK_DIR DECK_WIFI_TMP_DIR DECK_WIFI_SCAN_INTERVAL \
 		DECK_WIFI_SWITCH_TIMEOUT DECK_WIFI_ROLLBACK_GRACE \
 		DECK_WIFI_HEALTH_INTERVAL DECK_WIFI_HEALTH_RECOVERY_AFTER \
-		DECK_WIFI_CANDIDATE_PASS_INTERVAL
+		DECK_WIFI_CANDIDATE_PASS_INTERVAL DECK_WIFI_WIREGUARD_SERVICE
 	"$selector"
 }
 
@@ -266,6 +277,8 @@ grep -qx 'ssid=good' "$success/wireless" ||
 	fail 'successful profile was not committed'
 grep -qx 'CONNECTED' "$success/run/status" ||
 	fail 'success was not exposed in status'
+grep -qx 'restart' "$success/wireguard-restarts" ||
+	fail 'successful failover did not refresh WireGuard'
 [ "$(find "$success/backups" -type f -name 'wireless.*.before-switch' | wc -l)" -eq 1 ] ||
 	fail 'selector did not create exactly one pre-switch backup'
 [ "$(cat "$success/scan-count")" -eq 3 ] ||
