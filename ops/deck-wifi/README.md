@@ -14,19 +14,20 @@ a PSK authentication suite; SAE-only and unclassified BSSes are skipped. The
 selector merges three independent OpenWrt `iwinfo` scans so one missed beacon
 cannot erase a saved network seen by another scan. A raw `iw` scan remains as a
 compatibility fallback, and three bounded retries per round absorb transient
-driver-busy failures. Visible known candidates are tried in signal order, with
-alternatives ahead of the currently configured SSID. The complete candidate
-set receives a second pass before rollback. Every remaining usable saved PSK
-is appended as a directed-association fallback, because a driver or busy access
-point can omit a connectable SSID from every scan. Saved profiles are still
-tried when both scan providers fail completely. Both IWD `Passphrase` and
-64-digit `PreSharedKey` profiles are supported. A complete network-health check
-immediately before every commit prevents a scan/reconnect race, and a healthy
-connection is never changed.
+driver-busy failures. The currently configured SSID is the last profile that
+reached complete network health, so it is retried first. Visible alternatives
+follow in signal order. Every remaining usable saved PSK is appended as a
+directed-association fallback, because a driver or busy access point can omit a
+connectable SSID from every scan. The complete candidate set receives a second
+pass before rollback, and saved profiles are still tried when both scan
+providers fail completely. Both IWD `Passphrase` and 64-digit `PreSharedKey`
+profiles are supported. A complete network-health check immediately before
+every commit prevents a scan/reconnect race, and a healthy connection is never
+changed.
 
 Every selection run is transactional. The previous UCI file is saved once
 immediately before the first candidate. A station that never associates is
-released after 30 seconds; an associated candidate gets up to 60 seconds per
+released after 15 seconds; an associated candidate gets up to 60 seconds per
 pass to establish complete network health. An associated station that is still
 missing IPv4 or its default route after 20 seconds receives one bounded netifd
 renewal. If both candidate passes fail, the selector atomically restores that

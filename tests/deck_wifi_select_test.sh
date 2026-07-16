@@ -270,7 +270,7 @@ run_selector() {
 
 success=$(make_scenario success)
 run_selector "$success" good || fail 'multi-candidate selection failed'
-printf 'bad\ngood\n' > "$fixture/expected-attempts"
+printf 'old\nbad\ngood\n' > "$fixture/expected-attempts"
 cmp "$fixture/expected-attempts" "$success/attempts" ||
 	fail 'selector did not try the next visible profile after failure'
 grep -qx 'ssid=good' "$success/wireless" ||
@@ -283,6 +283,12 @@ grep -qx 'restart' "$success/wireguard-restarts" ||
 	fail 'selector did not create exactly one pre-switch backup'
 [ "$(cat "$success/scan-count")" -eq 3 ] ||
 	fail 'selector did not merge three independent scan rounds'
+
+current=$(make_scenario current)
+run_selector "$current" old || fail 'current profile reconnect failed'
+printf 'old\n' > "$fixture/expected-current-attempts"
+cmp "$fixture/expected-current-attempts" "$current/attempts" ||
+	fail 'selector did not try the last successful profile first'
 
 union=$(make_scenario union)
 cat > "$union/iwinfo-scan.1" <<'SCAN_UNKNOWN'
@@ -305,7 +311,7 @@ grep -qx 'good' "$union/attempts" ||
 transient=$(make_scenario transient)
 run_selector "$transient" good 0 1 2 ||
 	fail 'second candidate pass did not recover a transient association failure'
-printf 'bad\ngood\nold\nbad\ngood\n' > "$fixture/expected-transient-attempts"
+printf 'old\nbad\ngood\nold\nbad\ngood\n' > "$fixture/expected-transient-attempts"
 cmp "$fixture/expected-transient-attempts" "$transient/attempts" ||
 	fail 'selector did not retry the candidate set in stable order'
 
@@ -317,14 +323,14 @@ grep -qx 'wifi_sta' "$dhcp/renewals" ||
 
 fallback=$(make_scenario fallback)
 run_selector "$fallback" good 1 0 || fail 'raw iw scan fallback failed'
-printf 'bad\ngood\n' > "$fixture/expected-fallback-attempts"
+printf 'old\nbad\ngood\n' > "$fixture/expected-fallback-attempts"
 cmp "$fixture/expected-fallback-attempts" "$fallback/attempts" ||
 	fail 'raw iw fallback did not preserve candidate ordering'
 
 scan_failure=$(make_scenario scan-failure)
 run_selector "$scan_failure" good 1 1 ||
 	fail 'saved profiles did not recover a complete scan failure'
-printf 'bad\ngood\n' > "$fixture/expected-scan-failure-attempts"
+printf 'old\nbad\ngood\n' > "$fixture/expected-scan-failure-attempts"
 cmp "$fixture/expected-scan-failure-attempts" "$scan_failure/attempts" ||
 	fail 'scan failure did not fall back to saved profiles in stable order'
 

@@ -440,7 +440,7 @@ passphrases, WireGuard private keys, or ROM data.
   the workstation and Deck were rebooted, the Deck was reachable on both LAN
   and WireGuard; the earlier conclusion that Ethernet recovery was required
   was incorrect.
-- The installed scripts match the hardened repository copies: a 240-second
+- The installed scripts match the hardened repository copies: a 90-second
   grace, three confirming scans, PSK-only candidate selection, and automatic
   rollback. On 2026-07-13 the existing root-only `net1` profile was verified
   against the passphrase supplied by the user and had `AutoConnect=true`; the
@@ -453,6 +453,14 @@ passphrases, WireGuard private keys, or ROM data.
   WireGuard resumed with a fresh bidirectional handshake. All 32 imported
   root-only profiles remain stored, and automatic failover is active only after
   the current association has been lost repeatedly.
+- On 2026-07-16 Deck `.12` reached `Cechomor-Public` with the same canonical
+  profile as `.11`, but only after five stronger stale profiles each consumed
+  the old 30-second association window. The selector now retries the configured
+  last-successful SSID first and releases a station that never associates after
+  15 seconds. Three confirming scans, complete-health checks, two candidate
+  passes, and transactional rollback remain intact. The missing canonical
+  `net1` profile was also restored on `.12` without reloading wireless or
+  interrupting its healthy Cechomor association.
 
 ## WireGuard
 

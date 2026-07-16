@@ -21,7 +21,7 @@ SWITCH_TIMEOUT=${DECK_WIFI_SWITCH_TIMEOUT:-60}
 ROLLBACK_GRACE=${DECK_WIFI_ROLLBACK_GRACE:-20}
 HEALTH_INTERVAL=${DECK_WIFI_HEALTH_INTERVAL:-2}
 HEALTH_RECOVERY_AFTER=${DECK_WIFI_HEALTH_RECOVERY_AFTER:-20}
-ASSOCIATION_TIMEOUT=${DECK_WIFI_ASSOCIATION_TIMEOUT:-30}
+ASSOCIATION_TIMEOUT=${DECK_WIFI_ASSOCIATION_TIMEOUT:-15}
 CANDIDATE_PASSES=${DECK_WIFI_CANDIDATE_PASSES:-2}
 CANDIDATE_PASS_INTERVAL=${DECK_WIFI_CANDIDATE_PASS_INTERVAL:-5}
 WIREGUARD_SERVICE=${DECK_WIFI_WIREGUARD_SERVICE:-/etc/init.d/deck-wireguard}
@@ -340,7 +340,13 @@ build_candidate_list() {
 				>> "$CANDIDATES"
 		fi
 	done
-	cat "$CURRENT_CANDIDATE" >> "$CANDIDATES"
+	# The configured SSID is the last network that reached complete health.
+	# Retry it before stronger alternatives so stale saved networks cannot add
+	# one full association timeout each to every boot.
+	if [ -s "$CURRENT_CANDIDATE" ]; then
+		cat "$CANDIDATES" >> "$CURRENT_CANDIDATE"
+		mv "$CURRENT_CANDIDATE" "$CANDIDATES"
+	fi
 }
 
 apply_profile() {
