@@ -7,6 +7,7 @@ PATH=${DECK_WIFI_PATH:-/usr/sbin:/usr/bin:/sbin:/bin}
 
 PROFILE_DIR=${DECK_WIFI_PROFILE_DIR:-/etc/deck-wifi/profiles}
 BACKUP_DIR=${DECK_WIFI_BACKUP_DIR:-/etc/deck-wifi/backups}
+PREFERRED_FILE=${DECK_WIFI_PREFERRED_FILE:-${PROFILE_DIR%/*}/preferred}
 WIRELESS_CONFIG=${DECK_WIFI_CONFIG:-/etc/config/wireless}
 RUNTIME_CONFIG=${DECK_WIFI_RUNTIME_CONFIG:-/var/run/wpa_supplicant-wlan0.conf}
 STATUS_FILE=${DECK_WIFI_STATUS_FILE:-/var/run/deck-wifi/status}
@@ -25,6 +26,7 @@ ASSOCIATION_TIMEOUT=${DECK_WIFI_ASSOCIATION_TIMEOUT:-15}
 CANDIDATE_PASSES=${DECK_WIFI_CANDIDATE_PASSES:-2}
 CANDIDATE_PASS_INTERVAL=${DECK_WIFI_CANDIDATE_PASS_INTERVAL:-5}
 WIREGUARD_SERVICE=${DECK_WIFI_WIREGUARD_SERVICE:-/etc/init.d/deck-wireguard}
+PREFERRED_LIMIT=${DECK_WIFI_PREFERRED_LIMIT:-8}
 
 write_status() {
 	status=$1
@@ -49,6 +51,8 @@ write_status() {
 }
 
 mark_recovered() {
+	record_success ||
+		logger -t deck-wifi 'could not record successful Wi-Fi profile'
 	if [ -x "$WIREGUARD_SERVICE" ]; then
 		write_status "REFRESHING WIREGUARD" || true
 		logger -t deck-wifi 'refreshing WireGuard after network recovery'
@@ -64,11 +68,62 @@ mark_recovered() {
 secure_files() {
 	deck_wifi_root=${PROFILE_DIR%/*}
 	chmod 0700 "$deck_wifi_root" "$PROFILE_DIR" "$BACKUP_DIR" 2>/dev/null || true
-	chmod 0600 "$WIRELESS_CONFIG" "$RUNTIME_CONFIG" "$STATUS_FILE" 2>/dev/null || true
+	chmod 0600 "$WIRELESS_CONFIG" "$RUNTIME_CONFIG" "$STATUS_FILE" \
+		"$PREFERRED_FILE" 2>/dev/null || true
 	for profile in "$PROFILE_DIR"/*.psk; do
 		[ -f "$profile" ] || continue
 		chmod 0600 "$profile" 2>/dev/null || true
 	done
+}
+
+valid_profile_hex() {
+	value=$1
+	case "$value" in
+		''|*[!0-9a-f]*) return 1 ;;
+	esac
+	[ "${#value}" -le 64 ] && [ $((${#value} % 2)) -eq 0 ]
+}
+
+record_success() {
+	[ -n "${STA_SECTION:-}" ] || find_sta_section || return 1
+	ssid=$(uci -q get "wireless.${STA_SECTION}.ssid" 2>/dev/null) || return 1
+	[ -n "$ssid" ] || return 1
+	ssid_hex=$(printf '%s' "$ssid" | xxd -p | tr -d '\n' | tr 'A-F' 'a-f') ||
+		return 1
+	valid_profile_hex "$ssid_hex" || return 1
+
+	preferred_directory=${PREFERRED_FILE%/*}
+	[ "$preferred_directory" != "$PREFERRED_FILE" ] || return 1
+	mkdir -p "$preferred_directory" || return 1
+	chmod 0700 "$preferred_directory" 2>/dev/null || true
+	first=
+	if [ -r "$PREFERRED_FILE" ]; then
+		IFS= read -r first < "$PREFERRED_FILE" || first=
+	fi
+	[ "$first" = "$ssid_hex" ] && return 0
+
+	PREFERRED_TEMP=$PREFERRED_FILE.tmp.$$
+	if ! {
+		printf '%s\n' "$ssid_hex"
+		if [ -r "$PREFERRED_FILE" ]; then
+			awk -v current="$ssid_hex" -v limit="$PREFERRED_LIMIT" '
+				$0 != current && $0 ~ /^[0-9a-f]+$/ &&
+				length($0) <= 64 && length($0) % 2 == 0 && !seen[$0]++ &&
+				count < limit - 1 { print; count++ }
+			' "$PREFERRED_FILE"
+		fi
+	} > "$PREFERRED_TEMP"; then
+		rm -f "$PREFERRED_TEMP" 2>/dev/null || true
+		PREFERRED_TEMP=
+		return 1
+	fi
+	chmod 0600 "$PREFERRED_TEMP" || {
+		rm -f "$PREFERRED_TEMP" 2>/dev/null || true
+		PREFERRED_TEMP=
+		return 1
+	}
+	mv "$PREFERRED_TEMP" "$PREFERRED_FILE" || return 1
+	PREFERRED_TEMP=
 }
 
 is_associated() {
@@ -205,7 +260,8 @@ profile_ssid() {
 cleanup() {
 	rm -f "${SCAN_IW:-}" "${SCAN_RAW:-}" "${SCAN_HEX:-}" \
 		"${SCAN_ALL:-}" "${SCAN_SORTED:-}" "${CANDIDATES:-}" \
-		"${CURRENT_CANDIDATE:-}" \
+		"${CURRENT_CANDIDATE:-}" "${PREFERRED_CANDIDATES:-}" \
+		"${PREFERRED_TEMP:-}" \
 		2>/dev/null || true
 	[ -n "${UCI_WORK:-}" ] && rm -rf "$UCI_WORK" 2>/dev/null || true
 	[ -n "${RESTORE_WORK:-}" ] && rm -f "$RESTORE_WORK" 2>/dev/null || true
@@ -340,13 +396,28 @@ build_candidate_list() {
 				>> "$CANDIDATES"
 		fi
 	done
-	# The configured SSID is the last network that reached complete health.
-	# Retry it before stronger alternatives so stale saved networks cannot add
-	# one full association timeout each to every boot.
-	if [ -s "$CURRENT_CANDIDATE" ]; then
-		cat "$CANDIDATES" >> "$CURRENT_CANDIDATE"
-		mv "$CURRENT_CANDIDATE" "$CANDIDATES"
+
+	: > "$PREFERRED_CANDIDATES"
+	if [ -r "$PREFERRED_FILE" ]; then
+		while IFS= read -r preferred_hex; do
+			valid_profile_hex "$preferred_hex" || continue
+			[ "$preferred_hex" != "$current_hex" ] || continue
+			if awk -F "$TAB" -v wanted="$preferred_hex" '
+				$1 == wanted { print; found=1; exit }
+				END { exit !found }
+			' "$CANDIDATES" >> "$PREFERRED_CANDIDATES"; then
+				awk -F "$TAB" -v wanted="$preferred_hex" \
+					'$1 != wanted' "$CANDIDATES" > "$SCAN_RAW"
+				mv "$SCAN_RAW" "$CANDIDATES"
+			fi
+		done < "$PREFERRED_FILE"
 	fi
+
+	# Try the configured last-successful SSID first, then recent successes and
+	# networks explicitly added by the user, then scan-ranked alternatives.
+	cat "$CURRENT_CANDIDATE" "$PREFERRED_CANDIDATES" "$CANDIDATES" \
+		> "$SCAN_RAW"
+	mv "$SCAN_RAW" "$CANDIDATES"
 }
 
 apply_profile() {
@@ -396,6 +467,12 @@ secure_files
 case "${1:-}" in
 	--secure-only) exit 0 ;;
 	--health-check) network_ready ; exit $? ;;
+	--record-success)
+		network_ready || exit 1
+		find_sta_section || exit 1
+		record_success
+		exit $?
+		;;
 	"") ;;
 	*) exit 2 ;;
 esac
@@ -420,6 +497,7 @@ SCAN_ALL=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-all.$$
 SCAN_SORTED=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-sorted.$$
 CANDIDATES=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-candidates.$$
 CURRENT_CANDIDATE=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-current.$$
+PREFERRED_CANDIDATES=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-preferred.$$
 
 current_ssid=$(uci -q get "wireless.${STA_SECTION}.ssid" 2>/dev/null)
 if [ -n "$current_ssid" ]; then

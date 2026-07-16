@@ -8,6 +8,10 @@ asking the selector to investigate. Complete health means association, an IPv4
 address on `wlan0`, and an IPv4 default route through `wlan0`.
 
 Canonical IWD `.psk` files live in `/etc/deck-wifi/profiles` with mode `0600`.
+The root-only `/etc/deck-wifi/preferred` file retains at most eight SSID hex
+identifiers. The watcher records the active profile after complete network
+health, and the profile helper moves each newly entered SSID to the front. It
+contains no passphrases and is updated atomically without touching the radio.
 The selector decodes IWD filenames, ignores profiles containing
 `AutoConnect=false`, and scans without logging SSIDs. Candidates must advertise
 a PSK authentication suite; SAE-only and unclassified BSSes are skipped. The
@@ -15,15 +19,16 @@ selector merges three independent OpenWrt `iwinfo` scans so one missed beacon
 cannot erase a saved network seen by another scan. A raw `iw` scan remains as a
 compatibility fallback, and three bounded retries per round absorb transient
 driver-busy failures. The currently configured SSID is the last profile that
-reached complete network health, so it is retried first. Visible alternatives
-follow in signal order. Every remaining usable saved PSK is appended as a
-directed-association fallback, because a driver or busy access point can omit a
-connectable SSID from every scan. The complete candidate set receives a second
-pass before rollback, and saved profiles are still tried when both scan
-providers fail completely. Both IWD `Passphrase` and 64-digit `PreSharedKey`
-profiles are supported. A complete network-health check immediately before
-every commit prevents a scan/reconnect race, and a healthy connection is never
-changed.
+reached complete network health, so it is retried first. Recent successes and
+networks explicitly entered through the dashboard follow in private preference
+order, then visible alternatives follow in signal order. Every remaining usable
+saved PSK is appended as a directed-association fallback, because a driver or
+busy access point can omit a connectable SSID from every scan. The complete
+candidate set receives a second pass before rollback, and saved profiles are
+still tried when both scan providers fail completely. Both IWD `Passphrase` and
+64-digit `PreSharedKey` profiles are supported. A complete network-health check
+immediately before every commit prevents a scan/reconnect race, and a healthy
+connection is never changed.
 
 Every selection run is transactional. The previous UCI file is saved once
 immediately before the first candidate. A station that never associates is

@@ -11,6 +11,7 @@ BOOT_GRACE=${DECK_WIFI_BOOT_GRACE:-90}
 INTERVAL=${DECK_WIFI_WATCH_INTERVAL:-10}
 DISCONNECT_THRESHOLD=${DECK_WIFI_DISCONNECT_THRESHOLD:-2}
 misses=0
+recorded=false
 
 write_status() {
 	status=$1
@@ -67,8 +68,12 @@ while :; do
 
 	if network_ready; then
 		misses=0
+		if [ "$recorded" = false ] && "$SELECTOR" --record-success; then
+			recorded=true
+		fi
 		write_status "CONNECTED" || true
 	else
+		recorded=false
 		misses=$((misses + 1))
 		write_status "DISCONNECTED CHECK $misses OF $DISCONNECT_THRESHOLD" || true
 		if [ "$misses" -ge "$DISCONNECT_THRESHOLD" ]; then

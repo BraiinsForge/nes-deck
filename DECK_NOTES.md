@@ -461,6 +461,12 @@ passphrases, WireGuard private keys, or ROM data.
   passes, and transactional rollback remain intact. The missing canonical
   `net1` profile was also restored on `.12` without reloading wireless or
   interrupting its healthy Cechomor association.
+- When `.12` later lost Cechomor during a sustained transfer, the shorter
+  timeout worked but `net1` was still eleventh behind stale imported profiles.
+  A root-only eight-entry preference history now places recent successes and
+  dashboard-added networks before signal-ranked imports. This keeps the full
+  imported library as fallback without allowing unused networks to delay the
+  proven Cechomor and `net1` paths on subsequent recovery runs.
 
 ## WireGuard
 

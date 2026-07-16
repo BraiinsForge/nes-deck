@@ -7,6 +7,7 @@
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 LC_ALL=C
 PROFILE_DIR=${DECK_WIFI_PROFILE_DIR:-/etc/deck-wifi/profiles}
+PREFERRED_FILE=${DECK_WIFI_PREFERRED_FILE:-${PROFILE_DIR%/*}/preferred}
 LOCK_DIR=$PROFILE_DIR/.profile-add.lock
 
 export PATH LC_ALL
@@ -19,6 +20,7 @@ fail() {
 
 cleanup() {
 	rm -f "${TEMP_PROFILE:-}" 2>/dev/null || :
+	rm -f "${TEMP_PREFERRED:-}" 2>/dev/null || :
 	rm -rf "$LOCK_DIR" 2>/dev/null || :
 }
 
@@ -87,5 +89,31 @@ for profile in "$PROFILE_DIR"/*.psk; do
 done
 
 chmod 0600 "$destination" || fail
+
+# A newly entered network is an intentional fallback. Put it ahead of stale
+# imported profiles without reloading or roaming the live station.
+preferred_directory=${PREFERRED_FILE%/*}
+[ "$preferred_directory" != "$PREFERRED_FILE" ] || fail
+mkdir -p "$preferred_directory" || fail
+chmod 0700 "$preferred_directory" 2>/dev/null || :
+TEMP_PREFERRED=$PREFERRED_FILE.tmp.$$
+if ! {
+	printf '%s\n' "$ssid_hex"
+	if [ -r "$PREFERRED_FILE" ]; then
+		awk -v current="$ssid_hex" '
+			$0 != current && $0 ~ /^[0-9a-f]+$/ &&
+			length($0) <= 64 && length($0) % 2 == 0 && !seen[$0]++ &&
+			count < 7 { print; count++ }
+		' "$PREFERRED_FILE"
+	fi
+} > "$TEMP_PREFERRED"; then
+	rm -f "$TEMP_PREFERRED" 2>/dev/null || :
+	TEMP_PREFERRED=
+	fail
+fi
+chmod 0600 "$TEMP_PREFERRED" || fail
+mv "$TEMP_PREFERRED" "$PREFERRED_FILE" || fail
+TEMP_PREFERRED=
+
 printf '%s\n' 'wifi profile saved'
 exit 0

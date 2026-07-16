@@ -243,6 +243,7 @@ run_selector() {
 	DECK_WIFI_PATH=$fixture/bin:/usr/bin:/bin \
 	DECK_WIFI_PROFILE_DIR=$scenario/profiles \
 	DECK_WIFI_BACKUP_DIR=$scenario/backups \
+	DECK_WIFI_PREFERRED_FILE=$scenario/preferred \
 	DECK_WIFI_CONFIG=$scenario/wireless \
 	DECK_WIFI_RUNTIME_CONFIG=$scenario/runtime.conf \
 	DECK_WIFI_STATUS_FILE=$scenario/run/status \
@@ -260,6 +261,7 @@ run_selector() {
 		TEST_RENEWALS TEST_WIREGUARD_RESTARTS TEST_GOOD_SSID \
 		TEST_GOOD_AFTER TEST_REQUIRE_IFUP \
 		DECK_WIFI_PATH DECK_WIFI_PROFILE_DIR DECK_WIFI_BACKUP_DIR \
+		DECK_WIFI_PREFERRED_FILE \
 		DECK_WIFI_CONFIG DECK_WIFI_RUNTIME_CONFIG DECK_WIFI_STATUS_FILE \
 		DECK_WIFI_LOCK_DIR DECK_WIFI_TMP_DIR DECK_WIFI_SCAN_INTERVAL \
 		DECK_WIFI_SWITCH_TIMEOUT DECK_WIFI_ROLLBACK_GRACE \
@@ -279,6 +281,8 @@ grep -qx 'CONNECTED' "$success/run/status" ||
 	fail 'success was not exposed in status'
 grep -qx 'restart' "$success/wireguard-restarts" ||
 	fail 'successful failover did not refresh WireGuard'
+grep -qx '676f6f64' "$success/preferred" ||
+	fail 'successful profile was not recorded as preferred'
 [ "$(find "$success/backups" -type f -name 'wireless.*.before-switch' | wc -l)" -eq 1 ] ||
 	fail 'selector did not create exactly one pre-switch backup'
 [ "$(cat "$success/scan-count")" -eq 3 ] ||
@@ -289,6 +293,13 @@ run_selector "$current" old || fail 'current profile reconnect failed'
 printf 'old\n' > "$fixture/expected-current-attempts"
 cmp "$fixture/expected-current-attempts" "$current/attempts" ||
 	fail 'selector did not try the last successful profile first'
+
+preferred=$(make_scenario preferred)
+printf 'not-hex\n676f6f64\n676f6f64\n' > "$preferred/preferred"
+run_selector "$preferred" good || fail 'preferred profile reconnect failed'
+printf 'old\ngood\n' > "$fixture/expected-preferred-attempts"
+cmp "$fixture/expected-preferred-attempts" "$preferred/attempts" ||
+	fail 'selector did not try recent success before signal-ranked profiles'
 
 union=$(make_scenario union)
 cat > "$union/iwinfo-scan.1" <<'SCAN_UNKNOWN'
@@ -350,6 +361,7 @@ if TEST_ASSOCIATED=$health/associated TEST_READY=$health/ready \
 	DECK_WIFI_PATH=$fixture/bin:/usr/bin:/bin \
 	DECK_WIFI_PROFILE_DIR=$health/profiles \
 	DECK_WIFI_BACKUP_DIR=$health/backups \
+	DECK_WIFI_PREFERRED_FILE=$health/preferred \
 	DECK_WIFI_CONFIG=$health/wireless \
 	DECK_WIFI_RUNTIME_CONFIG=$health/runtime.conf \
 	DECK_WIFI_STATUS_FILE=$health/run/status \
@@ -363,10 +375,24 @@ TEST_ASSOCIATED=$health/associated TEST_READY=$health/ready \
 	DECK_WIFI_PATH=$fixture/bin:/usr/bin:/bin \
 	DECK_WIFI_PROFILE_DIR=$health/profiles \
 	DECK_WIFI_BACKUP_DIR=$health/backups \
+	DECK_WIFI_PREFERRED_FILE=$health/preferred \
 	DECK_WIFI_CONFIG=$health/wireless \
 	DECK_WIFI_RUNTIME_CONFIG=$health/runtime.conf \
 	DECK_WIFI_STATUS_FILE=$health/run/status \
 	DECK_WIFI_LOCK_DIR=$health/run/lock \
 	"$selector" --health-check || fail 'complete network health was rejected'
+
+TEST_ASSOCIATED=$health/associated TEST_READY=$health/ready \
+	DECK_WIFI_PATH=$fixture/bin:/usr/bin:/bin \
+	DECK_WIFI_PROFILE_DIR=$health/profiles \
+	DECK_WIFI_BACKUP_DIR=$health/backups \
+	DECK_WIFI_PREFERRED_FILE=$health/preferred \
+	DECK_WIFI_CONFIG=$health/wireless \
+	DECK_WIFI_RUNTIME_CONFIG=$health/runtime.conf \
+	DECK_WIFI_STATUS_FILE=$health/run/status \
+	DECK_WIFI_LOCK_DIR=$health/run/lock \
+	"$selector" --record-success || fail 'healthy profile was not recorded'
+grep -qx '6f6c64' "$health/preferred" ||
+	fail 'record-success did not persist the configured profile'
 
 echo 'deck-wifi-select-test: OK'
