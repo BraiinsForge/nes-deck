@@ -186,7 +186,7 @@ func testRGB(index int) string {
 func TestDashboardPaletteConfiguration(t *testing.T) {
 	store, overridePath := testPalette(t)
 	fields, icons, err := store.current()
-	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" || len(icons) != 10 || !icons[4].Selected {
+	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" || len(icons) != 11 || !icons[4].Selected {
 		t.Fatalf("fallback palette did not load: %#v %v", fields, err)
 	}
 	var stale strings.Builder

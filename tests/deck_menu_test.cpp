@@ -739,9 +739,9 @@ int main() {
       std::cerr << "duplicate settings icon rendering: "
                 << kSettingsIconDefinitions[icon].name << std::endl;
   }
-  expect(kSettingsIconDefinitionCount == 10 &&
+  expect(kSettingsIconDefinitionCount == 11 &&
              settings_icon_hashes.size() == kSettingsIconDefinitionCount,
-         "all ten configurable pixel cogs render distinctly");
+         "all eleven configurable pixel cogs render distinctly");
   reset_dashboard_palette();
 
   render_menu(tab_games, "nes", 0, std::string(), &canvas, &menu_layout);

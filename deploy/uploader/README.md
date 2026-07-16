@@ -15,7 +15,7 @@ atomically to `/mnt/data/nes-deck/uploads/games.tsv` before the dashboard is
 restarted.
 
 The authenticated page also edits all semantic dashboard colors as full
-`#RRGGBB` values and offers ten matching previews for the native pixel-cog
+`#RRGGBB` values and offers matching previews for the native pixel-cog
 settings button. It writes one complete, strictly validated S-expression to
 `/mnt/data/nes-deck/state/dashboard-palette.sexp` and restarts the dashboard.
 The launcher accepts existing version-2 color overrides, validates version-3

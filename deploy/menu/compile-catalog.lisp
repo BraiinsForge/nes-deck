@@ -27,7 +27,7 @@
 (defparameter +settings-icons+
   '("gear-classic" "gear-square" "gear-diamond" "gear-eight"
     "gear-spoke" "gear-ring" "gear-cross" "gear-compact"
-    "gear-heavy" "gear-rivet"))
+    "gear-heavy" "gear-rivet" "gear-outline"))
 
 (defun catalog-error (control &rest arguments)
   (error "Catalog error: ~?" control arguments))
@@ -217,7 +217,7 @@
 (defun validate-settings-icon (value context)
   (unless (and (stringp value)
                (member value +settings-icons+ :test #'string=))
-    (catalog-error "~A must name one of the ten built-in pixel cogs" context))
+    (catalog-error "~A must name a built-in pixel cog" context))
   value)
 
 (defun validate-game (form position)
