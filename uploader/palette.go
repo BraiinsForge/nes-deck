@@ -20,23 +20,31 @@ type paletteSpec struct {
 type settingsIconSpec struct {
 	name  string
 	label string
-	rows  [9]string
+	rows  []string
 }
 
-const defaultSettingsIcon = "gear-spoke"
+const defaultSettingsIcon = "gear-steel-outline"
 
 var settingsIconSpecs = []settingsIconSpec{
-	{name: "gear-classic", label: "Classic", rows: [9]string{"..##.##..", ".#######.", "###...###", "##.....##", "##.....##", "##.....##", "###...###", ".#######.", "..##.##.."}},
-	{name: "gear-square", label: "Square", rows: [9]string{".##...##.", ".##...##.", "#########", "##.....##", "##.....##", "##.....##", "#########", ".##...##.", ".##...##."}},
-	{name: "gear-diamond", label: "Diamond", rows: [9]string{"....#....", "..#####..", ".##...##.", "##.....##", "#.......#", "##.....##", ".##...##.", "..#####..", "....#...."}},
-	{name: "gear-eight", label: "Eight tooth", rows: [9]string{".##...##.", "###...###", ".#######.", "..#...#..", "..#...#..", "..#...#..", ".#######.", "###...###", ".##...##."}},
-	{name: "gear-spoke", label: "Spoked", rows: [9]string{"...###...", ".#.###.#.", "..#####..", "###.#.###", "####.####", "###.#.###", "..#####..", ".#.###.#.", "...###..."}},
-	{name: "gear-ring", label: "Ring", rows: [9]string{"...###...", ".#######.", "###...###", "##.....##", "##.....##", "##.....##", "###...###", ".#######.", "...###..."}},
-	{name: "gear-cross", label: "Cross", rows: [9]string{"...###...", "...###...", "..#####..", "###...###", "###...###", "###...###", "..#####..", "...###...", "...###..."}},
-	{name: "gear-compact", label: "Compact", rows: [9]string{".........", "...###...", "..#####..", ".##...##.", ".##...##.", ".##...##.", "..#####..", "...###...", "........."}},
-	{name: "gear-heavy", label: "Heavy", rows: [9]string{".###.###.", "#########", "###...###", "##.....##", "##.....##", "##.....##", "###...###", "#########", ".###.###."}},
-	{name: "gear-rivet", label: "Riveted", rows: [9]string{"..#...#..", ".#######.", "##.#.#.##", ".#.....#.", ".#.....#.", ".#.....#.", "##.#.#.##", ".#######.", "..#...#.."}},
-	{name: "gear-outline", label: "Classic outline", rows: [9]string{"..##.##..", "..#...#..", "##.###.##", "#.#...#.#", "#.#...#.#", "#.#...#.#", "##.###.##", "..#...#..", "..##.##.."}},
+	{name: "gear-classic", label: "Classic", rows: []string{"..##.##..", ".#######.", "###...###", "##.....##", "##.....##", "##.....##", "###...###", ".#######.", "..##.##.."}},
+	{name: "gear-square", label: "Square", rows: []string{".##...##.", ".##...##.", "#########", "##.....##", "##.....##", "##.....##", "#########", ".##...##.", ".##...##."}},
+	{name: "gear-diamond", label: "Diamond", rows: []string{"....#....", "..#####..", ".##...##.", "##.....##", "#.......#", "##.....##", ".##...##.", "..#####..", "....#...."}},
+	{name: "gear-eight", label: "Eight tooth", rows: []string{".##...##.", "###...###", ".#######.", "..#...#..", "..#...#..", "..#...#..", ".#######.", "###...###", ".##...##."}},
+	{name: "gear-spoke", label: "Spoked", rows: []string{"...###...", ".#.###.#.", "..#####..", "###.#.###", "####.####", "###.#.###", "..#####..", ".#.###.#.", "...###..."}},
+	{name: "gear-ring", label: "Ring", rows: []string{"...###...", ".#######.", "###...###", "##.....##", "##.....##", "##.....##", "###...###", ".#######.", "...###..."}},
+	{name: "gear-cross", label: "Cross", rows: []string{"...###...", "...###...", "..#####..", "###...###", "###...###", "###...###", "..#####..", "...###...", "...###..."}},
+	{name: "gear-compact", label: "Compact", rows: []string{".........", "...###...", "..#####..", ".##...##.", ".##...##.", ".##...##.", "..#####..", "...###...", "........."}},
+	{name: "gear-heavy", label: "Heavy", rows: []string{".###.###.", "#########", "###...###", "##.....##", "##.....##", "##.....##", "###...###", "#########", ".###.###."}},
+	{name: "gear-rivet", label: "Riveted", rows: []string{"..#...#..", ".#######.", "##.#.#.##", ".#.....#.", ".#.....#.", ".#.....#.", "##.#.#.##", ".#######.", "..#...#.."}},
+	{name: "gear-outline", label: "Classic outline", rows: []string{"..##.##..", "..#...#..", "##.###.##", "#.#...#.#", "#.#...#.#", "#.#...#.#", "##.###.##", "..#...#..", "..##.##.."}},
+	{name: "gear-steel-outline", label: "Steel outline", rows: []string{
+		".......................", ".......#.......#.......", ".......##.....##.......", ".......####.####.......",
+		".......#########.......", "......###########......", "......###.....###......", "..######.......######..",
+		"..#####.........#####..", "...###...........###...", "....##...........##....", ".....#...........#.....",
+		"....##...........##....", "...###...........###...", "..#####.........#####..", "..######.......######..",
+		"......###.....###......", "......###########......", ".......#########.......", ".......####.####.......",
+		".......##.....##.......", ".......#.......#.......", ".......................",
+	}},
 }
 
 var dashboardPaletteSpecs = []paletteSpec{
@@ -74,6 +82,7 @@ type settingsIconField struct {
 	Name     string
 	Label    string
 	Pixels   []bool
+	GridSize int
 	Selected bool
 }
 
@@ -329,13 +338,13 @@ func paletteFields(values map[string]string) []paletteField {
 func settingsIconFields(selected string) []settingsIconField {
 	fields := make([]settingsIconField, 0, len(settingsIconSpecs))
 	for _, spec := range settingsIconSpecs {
-		pixels := make([]bool, 0, 81)
+		pixels := make([]bool, 0, len(spec.rows)*len(spec.rows))
 		for _, row := range spec.rows {
 			for _, pixel := range row {
 				pixels = append(pixels, pixel == '#')
 			}
 		}
-		fields = append(fields, settingsIconField{Name: spec.name, Label: spec.label, Pixels: pixels, Selected: spec.name == selected})
+		fields = append(fields, settingsIconField{Name: spec.name, Label: spec.label, Pixels: pixels, GridSize: len(spec.rows), Selected: spec.name == selected})
 	}
 	return fields
 }

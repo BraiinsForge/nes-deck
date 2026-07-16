@@ -319,59 +319,73 @@ RgbColor kColorMuted = {0x94, 0x94, 0x94};
 
 struct SettingsIconDefinition {
   const char *name;
-  const char *rows[9];
+  int size;
+  const char *rows[23];
 };
 
 const SettingsIconDefinition kSettingsIconDefinitions[] = {
-    {"gear-classic",
+    {"gear-classic", 9,
      {"..##.##..", ".#######.", "###...###", "##.....##",
       "##.....##", "##.....##", "###...###", ".#######.",
       "..##.##.."}},
-    {"gear-square",
+    {"gear-square", 9,
      {".##...##.", ".##...##.", "#########", "##.....##",
       "##.....##", "##.....##", "#########", ".##...##.",
       ".##...##."}},
-    {"gear-diamond",
+    {"gear-diamond", 9,
      {"....#....", "..#####..", ".##...##.", "##.....##",
       "#.......#", "##.....##", ".##...##.", "..#####..",
       "....#...."}},
-    {"gear-eight",
+    {"gear-eight", 9,
      {".##...##.", "###...###", ".#######.", "..#...#..",
       "..#...#..", "..#...#..", ".#######.", "###...###",
       ".##...##."}},
-    {"gear-spoke",
+    {"gear-spoke", 9,
      {"...###...", ".#.###.#.", "..#####..", "###.#.###",
       "####.####", "###.#.###", "..#####..", ".#.###.#.",
       "...###..."}},
-    {"gear-ring",
+    {"gear-ring", 9,
      {"...###...", ".#######.", "###...###", "##.....##",
       "##.....##", "##.....##", "###...###", ".#######.",
       "...###..."}},
-    {"gear-cross",
+    {"gear-cross", 9,
      {"...###...", "...###...", "..#####..", "###...###",
       "###...###", "###...###", "..#####..", "...###...",
       "...###..."}},
-    {"gear-compact",
+    {"gear-compact", 9,
      {".........", "...###...", "..#####..", ".##...##.",
       ".##...##.", ".##...##.", "..#####..", "...###...",
       "........."}},
-    {"gear-heavy",
+    {"gear-heavy", 9,
      {".###.###.", "#########", "###...###", "##.....##",
       "##.....##", "##.....##", "###...###", "#########",
       ".###.###."}},
-    {"gear-rivet",
+    {"gear-rivet", 9,
      {"..#...#..", ".#######.", "##.#.#.##", ".#.....#.",
       ".#.....#.", ".#.....#.", "##.#.#.##", ".#######.",
       "..#...#.."}},
-    {"gear-outline",
+    {"gear-outline", 9,
      {"..##.##..", "..#...#..", "##.###.##", "#.#...#.#",
       "#.#...#.#", "#.#...#.#", "##.###.##", "..#...#..",
       "..##.##.."}},
+    {"gear-steel-outline", 23,
+     {".......................", ".......#.......#.......",
+      ".......##.....##.......", ".......####.####.......",
+      ".......#########.......", "......###########......",
+      "......###.....###......", "..######.......######..",
+      "..#####.........#####..", "...###...........###...",
+      "....##...........##....", ".....#...........#.....",
+      "....##...........##....", "...###...........###...",
+      "..#####.........#####..", "..######.......######..",
+      "......###.....###......", "......###########......",
+      ".......#########.......", ".......####.####.......",
+      ".......##.....##.......", ".......#.......#.......",
+      "......................."}},
 };
 
 const size_t kSettingsIconDefinitionCount =
     sizeof(kSettingsIconDefinitions) / sizeof(kSettingsIconDefinitions[0]);
-const size_t kDefaultSettingsIcon = 4;
+const size_t kDefaultSettingsIcon = 11;
 size_t gSettingsIcon = kDefaultSettingsIcon;
 
 bool settings_icon_index(const std::string &name, size_t *result) {
@@ -2504,13 +2518,15 @@ void draw_outline_arrow(Canvas *canvas, const Rect &bounds,
 }
 
 void draw_settings_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
-  const int pixel = 4;
-  const int left = bounds.x + (bounds.width - 9 * pixel) / 2;
-  const int top = bounds.y + (bounds.height - 9 * pixel) / 2;
   const SettingsIconDefinition &icon =
       kSettingsIconDefinitions[gSettingsIcon];
-  for (int row = 0; row < 9; ++row) {
-    for (int column = 0; column < 9; ++column) {
+  const int pixel =
+      std::max(1, std::min(4, std::min(bounds.width / icon.size,
+                                      bounds.height / icon.size)));
+  const int left = bounds.x + (bounds.width - icon.size * pixel) / 2;
+  const int top = bounds.y + (bounds.height - icon.size * pixel) / 2;
+  for (int row = 0; row < icon.size; ++row) {
+    for (int column = 0; column < icon.size; ++column) {
       if (icon.rows[row][column] == '#')
         fill_rect(canvas,
                   Rect{left + column * pixel, top + row * pixel, pixel, pixel},

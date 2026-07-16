@@ -27,7 +27,7 @@
 (defparameter +settings-icons+
   '("gear-classic" "gear-square" "gear-diamond" "gear-eight"
     "gear-spoke" "gear-ring" "gear-cross" "gear-compact"
-    "gear-heavy" "gear-rivet" "gear-outline"))
+    "gear-heavy" "gear-rivet" "gear-outline" "gear-steel-outline"))
 
 (defun catalog-error (control &rest arguments)
   (error "Catalog error: ~?" control arguments))

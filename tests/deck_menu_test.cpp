@@ -739,9 +739,13 @@ int main() {
       std::cerr << "duplicate settings icon rendering: "
                 << kSettingsIconDefinitions[icon].name << std::endl;
   }
-  expect(kSettingsIconDefinitionCount == 11 &&
+  expect(kSettingsIconDefinitionCount == 12 &&
              settings_icon_hashes.size() == kSettingsIconDefinitionCount,
-         "all eleven configurable pixel cogs render distinctly");
+         "all twelve configurable pixel cogs render distinctly");
+  expect(std::strcmp(kSettingsIconDefinitions[kDefaultSettingsIcon].name,
+                     "gear-steel-outline") == 0 &&
+             kSettingsIconDefinitions[kDefaultSettingsIcon].size == 23,
+         "the sourced 23-pixel cog is the native default");
   reset_dashboard_palette();
 
   render_menu(tab_games, "nes", 0, std::string(), &canvas, &menu_layout);

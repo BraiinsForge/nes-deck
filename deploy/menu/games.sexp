@@ -3,7 +3,7 @@
 ;; Each game has exactly five fields.  The compiler writes them to games.tsv
 ;; in this order: id, title, system, rom, color.
 (:version 6
- :settings-icon "gear-spoke"
+ :settings-icon "gear-steel-outline"
  :palette
   (:background "#000000"
    :text-dark "#121212"

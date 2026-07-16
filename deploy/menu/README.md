@@ -185,6 +185,9 @@ rows contain the colors. If ECL, the source catalog, or generation is
 unavailable, the launcher uses those files and logs the reason. No shell
 evaluates catalog content.
 
+Third-party artwork sources, licenses, and transformation details are recorded
+in [ASSETS.md](ASSETS.md).
+
 ## Pre-deployment check
 
 With ECL available on the build machine:

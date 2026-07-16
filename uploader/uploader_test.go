@@ -185,8 +185,18 @@ func testRGB(index int) string {
 func TestDashboardPaletteConfiguration(t *testing.T) {
 	store, overridePath := testPalette(t)
 	fields, icons, err := store.current()
-	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" || len(icons) != 11 || !icons[4].Selected {
+	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" || len(icons) != 12 || !icons[11].Selected {
 		t.Fatalf("fallback palette did not load: %#v %v", fields, err)
+	}
+	for _, spec := range settingsIconSpecs {
+		if len(spec.rows) != 9 && len(spec.rows) != 23 {
+			t.Fatalf("settings icon %s uses unsupported grid size %d", spec.name, len(spec.rows))
+		}
+		for _, row := range spec.rows {
+			if len(row) != len(spec.rows) {
+				t.Fatalf("settings icon %s is not square", spec.name)
+			}
+		}
 	}
 	var stale strings.Builder
 	for index, spec := range dashboardPaletteSpecs {
@@ -377,6 +387,7 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	if !strings.Contains(paletteResponse.Body.String(), `type="color"`) ||
 		!strings.Contains(paletteResponse.Body.String(), `value="#616263"`) ||
 		!strings.Contains(paletteResponse.Body.String(), `value="gear-diamond" checked`) ||
+		!strings.Contains(paletteResponse.Body.String(), `pixel-cog-23`) ||
 		!strings.Contains(paletteResponse.Body.String(), `/assets/palette.js`) {
 		t.Fatal("appearance response does not expose RGB and settings-icon controls")
 	}

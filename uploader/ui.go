@@ -57,7 +57,7 @@ const pageTemplate = `{{define "page"}}<!doctype html>
               {{range .SettingsIcons}}
                 <label class="settings-icon-choice">
                   <input type="radio" name="settings-icon" value="{{.Name}}" {{if .Selected}}checked{{end}} required>
-                  <span class="pixel-cog" aria-hidden="true">
+                  <span class="pixel-cog pixel-cog-{{.GridSize}}" aria-hidden="true">
                     {{range .Pixels}}<b class="{{if .}}on{{end}}"></b>{{end}}
                   </span>
                   <span>{{.Label}}</span>
@@ -268,17 +268,26 @@ input:focus, select:focus, button:focus, .skip-link:focus {
 
 .pixel-cog {
   display: grid;
-  grid-template-columns: repeat(9, 5px);
-  grid-template-rows: repeat(9, 5px);
-  width: 45px;
-  height: 45px;
+  place-content: center;
+  width: 46px;
+  height: 46px;
   color: #777;
+}
+
+.pixel-cog-9 {
+  grid-template-columns: repeat(9, 4px);
+  grid-template-rows: repeat(9, 4px);
+}
+
+.pixel-cog-23 {
+  grid-template-columns: repeat(23, 2px);
+  grid-template-rows: repeat(23, 2px);
 }
 
 .pixel-cog b {
   display: block;
-  width: 5px;
-  height: 5px;
+  width: 100%;
+  height: 100%;
 }
 
 .pixel-cog b.on { background: currentColor; }
