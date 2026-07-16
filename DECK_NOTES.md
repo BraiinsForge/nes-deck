@@ -467,6 +467,12 @@ passphrases, WireGuard private keys, or ROM data.
   dashboard-added networks before signal-ranked imports. This keeps the full
   imported library as fallback without allowing unused networks to delay the
   proven Cechomor and `net1` paths on subsequent recovery runs.
+- Live rollout then found that `.10` and `.11` also lacked canonical `net1`
+  profile files even though `.10` was associated through its UCI station
+  configuration. All three Decks now have matching canonical `net1` profiles,
+  the preference-aware selector, watcher, and profile helper, plus a private
+  two-entry hot path for `net1` and `Cechomor-Public`. Installation preserved
+  every active SSID and IPv4 address and did not restart the watcher or radio.
 
 ## WireGuard
 
