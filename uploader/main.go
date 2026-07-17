@@ -23,7 +23,7 @@ const (
 )
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage:\n  %s\n  %s --set-password PATH\n  %s --check-password-config PATH\n  %s --check-address PATH\n", os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage:\n  %s\n  %s --set-password PATH\n  %s --check-password-config PATH\n  %s --check-address PATH\n  %s --install-bmc-scene PATH\n", os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }
 
 func setPassword(path string) error {
@@ -112,6 +112,16 @@ func main() {
 		_, err = loadPasswordConfig(os.Args[2])
 	case len(os.Args) == 3 && os.Args[1] == "--check-address":
 		_, err = loadServiceAddress(os.Args[2])
+	case len(os.Args) == 3 && os.Args[1] == "--install-bmc-scene":
+		var changed bool
+		changed, err = installBMCScene(os.Args[2])
+		if err == nil {
+			if changed {
+				log.Printf("Retro Deck scene installed")
+			} else {
+				log.Printf("Retro Deck scene already present")
+			}
+		}
 	default:
 		usage()
 		os.Exit(2)

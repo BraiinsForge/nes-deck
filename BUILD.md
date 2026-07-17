@@ -167,6 +167,20 @@ rounded display. fbterm uses a 1248x448 viewport for the same reason. Every
 frontend rejects unexpected geometry or color channel layouts rather than
 guessing.
 
+On BMC compositor installations, Retro Deck is a fullscreen scene widget.
+The menu submits event-driven XRGB8888 shared-memory buffers through the Deck
+widget protocol, so the compositor can move it during scene swipes. A launched
+game maps a fullscreen black layer surface plus a centered game layer surface.
+The emulator keeps its native frame clock and submits frames independently of
+the widget callback limit. The compositor performs the final GPU scale. When
+the game exits, both layer surfaces disappear and scene swiping resumes.
+
+`ops/deploy.sh` installs the widget under `/mnt/data/bmc-widgets/retro-deck`.
+If `bmc-compositor` is present, deployment stops it, adds one idempotent Retro
+Deck scene to `/etc/bmc_config.json`, disables the legacy fbdev menu service,
+and restarts the compositor. The original configuration is retained once as
+`/etc/bmc_config.json.retro-deck.bak` before the first scene edit.
+
 Audio uses `/dev/dsp` through the Deck's ALSA OSS bridge. The hardware stream
 is S16_LE stereo. NES, ZX, CHIP-8, the timer, menu cues, and chiptunes use
 44.1 kHz. Gambatte produces 32768 Hz and is explicitly resampled to the Deck's
@@ -186,17 +200,20 @@ nes-deck/
 ├── chiptunes/                  CC0 seed tracks and provenance
 ├── deploy/
 │   ├── menu/                   catalog, launcher, and procd service
-│   └── terminal/               fbterm wrapper, fontconfig, and keymaps
+│   ├── terminal/               fbterm wrapper, fontconfig, and keymaps
+│   └── widget/                 BMC manifest, launcher, and scene installer
 ├── nix/                        ECL and runtime-specific Nix expressions
 ├── ops/
 │   ├── deck-menu/              covers, screenshots, and FOSS CHIP-8 fetcher
 │   ├── deck-wifi/              profile-only Wi-Fi helper
 │   └── deploy.sh               complete staged deployment
 ├── patches/                    pinned upstream fixes
+├── protocol/                   Deck widget and layer-shell client protocols
 ├── roms/                       private canonical ROM library and checksums
 ├── src/
 │   ├── deck_menu.cpp           dashboard, settings, and child supervision
-│   ├── deck_runtime.cpp        framebuffer, audio, and frame clock
+│   ├── deck_runtime.cpp        video selection, audio, and frame clock
+│   ├── deck_wayland.cpp        shared-memory widget and game surfaces
 │   ├── libretro_deck.cpp       NES, GB/GBC, and ZX host
 │   ├── chip8_deck.cpp          CHIP-8 frontend
 │   ├── chiptune_deck.cpp       GME and Ogg native music player

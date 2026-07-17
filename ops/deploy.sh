@@ -165,6 +165,7 @@ mkdir -p \
   "$payload/nes-deck/terminal/fonts" \
   "$payload/nes-deck/terminal/keymaps" \
   "$payload/nes-deck/uploader" \
+  "$payload/bmc-widgets/retro-deck/bin" \
   "$payload/nes-deck/ecl" \
   "$payload/chiptunes" \
   "$payload/roms" \
@@ -208,6 +209,11 @@ cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/palette.tsv \
   deploy/menu/compile-catalog.lisp deploy/menu/deck-menu-launcher \
   deploy/menu/fetch-covers "$payload/nes-deck/menu/"
 cp -a uploader/settings-icons/. "$payload/nes-deck/menu/settings-icons/"
+cp deploy/widget/manifest.json \
+  "$payload/bmc-widgets/retro-deck/manifest.json"
+cp deploy/widget/retro-deck \
+  "$payload/bmc-widgets/retro-deck/bin/retro-deck"
+chmod 0755 "$payload/bmc-widgets/retro-deck/bin/retro-deck"
 cp deploy/ecl "$payload/usr/bin/ecl"
 cp ops/deck-wifi/deck-wifi-profile-add \
   "$payload/usr/sbin/deck-wifi-profile-add"
@@ -309,12 +315,22 @@ grep -q ' /mnt/data ' /proc/mounts || {
 
 service_needs_restart=0
 uploader_needs_restart=0
+bmc_mode=0
+compositor_needs_restart=0
+if [ -x /etc/init.d/bmc-compositor ]; then
+  bmc_mode=1
+fi
 restore_service_after_failure() {
   result=$?
   trap - EXIT
   if [ "$result" -ne 0 ] && [ "$service_needs_restart" -eq 1 ]; then
     echo "Activation failed; restarting Retro Deck" >&2
     /etc/init.d/nes-deck start >/dev/null 2>&1 || :
+  fi
+  if [ "$result" -ne 0 ] && \
+     [ "$compositor_needs_restart" -eq 1 ]; then
+    echo "Activation failed; restarting BMC compositor" >&2
+    /etc/init.d/bmc-compositor restart >/dev/null 2>&1 || :
   fi
   if [ "$result" -ne 0 ] && [ "$uploader_needs_restart" -eq 1 ] && \
      [ -x /etc/init.d/nes-deck-uploader ]; then
@@ -345,6 +361,11 @@ for executable in \
 done
 [ -x "$stage/usr/sbin/deck-keyboard-quirks" ] || {
   echo "Staged keyboard quirk helper is missing" >&2
+  exit 1
+}
+  [ -s "$stage/bmc-widgets/retro-deck/manifest.json" ] && \
+  [ -x "$stage/bmc-widgets/retro-deck/bin/retro-deck" ] || {
+  echo "Staged Retro Deck widget is incomplete" >&2
   exit 1
 }
 for wifi_executable in deck-wifi-profile-add deck-wifi-select deck-wifi-watch; do
@@ -414,7 +435,7 @@ uploader_address_config=$stage/nes-deck/uploader/address.conf
 
 mkdir -p "$base" /mnt/data/roms /mnt/data/langs \
   /mnt/data/chiptunes "$base/langs" "$base/licenses" \
-  "$base/uploader" "$base/uploads"
+  "$base/uploader" "$base/uploads" /mnt/data/bmc-widgets
 
 if [ -x /etc/init.d/nes-deck-uploader ]; then
   /etc/init.d/nes-deck-uploader stop 2>/dev/null || :
@@ -422,7 +443,12 @@ fi
 uploader_needs_restart=1
 
 /etc/init.d/nes-deck stop 2>/dev/null || :
-service_needs_restart=1
+if [ "$bmc_mode" -eq 1 ]; then
+  /etc/init.d/bmc-compositor stop 2>/dev/null || :
+  compositor_needs_restart=1
+else
+  service_needs_restart=1
+fi
 
 cp -p "$stage/nes-deck/nes-deck" "$base/nes-deck"
 cp -p "$stage/nes-deck/gb-deck" "$base/gb-deck"
@@ -443,6 +469,21 @@ cp -Rp "$stage/nes-deck/menu/." "$base/menu/"
 cp -p "$stage/nes-deck/games/"* "$base/games/"
 cp -Rp "$stage/nes-deck/terminal/." "$base/terminal/"
 cp -Rp "$stage/nes-deck/licenses/." "$base/licenses/"
+
+rm -rf /mnt/data/bmc-widgets/retro-deck.new
+cp -Rp "$stage/bmc-widgets/retro-deck" \
+  /mnt/data/bmc-widgets/retro-deck.new
+rm -rf /mnt/data/bmc-widgets/retro-deck
+mv /mnt/data/bmc-widgets/retro-deck.new \
+  /mnt/data/bmc-widgets/retro-deck
+if [ "$bmc_mode" -eq 1 ]; then
+  [ -f /etc/bmc_config.json ] || {
+    echo "BMC configuration is missing" >&2
+    exit 1
+  }
+  "$stage/nes-deck/uploader/rom-uploader" \
+    --install-bmc-scene /etc/bmc_config.json
+fi
 
 rm -rf "$base/ecl.new" "$base/langs/chibi.new"
 mv "$stage/nes-deck/ecl" "$base/ecl.new"
@@ -481,10 +522,16 @@ if [ -x /etc/init.d/bmc ]; then
   /etc/init.d/bmc stop 2>/dev/null || :
   /etc/init.d/bmc disable 2>/dev/null || :
 fi
-/etc/init.d/nes-deck enable
 /etc/init.d/deck-wifi enable
 /etc/init.d/deck-wifi restart
-/etc/init.d/nes-deck start
+if [ "$bmc_mode" -eq 1 ]; then
+  /etc/init.d/nes-deck disable
+  service_needs_restart=0
+  /etc/init.d/bmc-compositor start
+else
+  /etc/init.d/nes-deck enable
+  /etc/init.d/nes-deck start
+fi
 /etc/init.d/nes-deck-uploader enable
 /etc/init.d/nes-deck-uploader start
 
@@ -493,8 +540,16 @@ fi
 # finish on the target CPU instead of rolling back a healthy installation.
 attempt=0
 while [ "$attempt" -lt 120 ]; do
-  if /etc/init.d/nes-deck status >/dev/null 2>&1 && \
-     pidof deck-menu >/dev/null 2>&1 && \
+  dashboard_ready=0
+  if [ "$bmc_mode" -eq 1 ] && \
+     /etc/init.d/bmc-compositor status >/dev/null 2>&1; then
+    dashboard_ready=1
+  elif [ "$bmc_mode" -eq 0 ] && \
+       /etc/init.d/nes-deck status >/dev/null 2>&1 && \
+       pidof deck-menu >/dev/null 2>&1; then
+    dashboard_ready=1
+  fi
+  if [ "$dashboard_ready" -eq 1 ] && \
      /etc/init.d/nes-deck-uploader status >/dev/null 2>&1 && \
      pidof rom-uploader >/dev/null 2>&1; then
     break
@@ -503,19 +558,26 @@ while [ "$attempt" -lt 120 ]; do
   sleep 1
 done
 
-/etc/init.d/nes-deck status >/dev/null 2>&1 || {
-  echo "Retro Deck service did not start" >&2
-  exit 1
-}
+if [ "$bmc_mode" -eq 1 ]; then
+  /etc/init.d/bmc-compositor status >/dev/null 2>&1 || {
+    echo "BMC compositor did not restart" >&2
+    exit 1
+  }
+else
+  /etc/init.d/nes-deck status >/dev/null 2>&1 || {
+    echo "Retro Deck service did not start" >&2
+    exit 1
+  }
+fi
 /etc/init.d/deck-wifi status >/dev/null 2>&1 || {
   echo "Deck Wi-Fi watcher did not start" >&2
   exit 1
 }
-pidof deck-menu >/dev/null 2>&1 || {
+if [ "$bmc_mode" -eq 0 ] && ! pidof deck-menu >/dev/null 2>&1; then
   echo "Retro Deck menu did not reach its ready state" >&2
   tail -n 80 "$base/log/deck-menu.log" >&2 || :
   exit 1
-}
+fi
 /etc/init.d/nes-deck-uploader status >/dev/null 2>&1 || {
   echo "ROM uploader service did not start" >&2
   exit 1
@@ -527,8 +589,13 @@ pidof rom-uploader >/dev/null 2>&1 || {
 
 service_needs_restart=0
 uploader_needs_restart=0
+compositor_needs_restart=0
 rm -rf "$stage"
-echo "Retro Deck and its ROM uploader are running."
+if [ "$bmc_mode" -eq 1 ]; then
+  echo "Retro Deck widget is installed and the BMC compositor is running."
+else
+  echo "Retro Deck and its ROM uploader are running."
+fi
 tail -n 12 "$base/log/deck-menu.log" || :
 REMOTE
 

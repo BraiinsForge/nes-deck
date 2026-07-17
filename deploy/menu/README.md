@@ -25,6 +25,12 @@ The separate uploader bundle installs `nes-deck-uploader.init` as
 `/etc/init.d/nes-deck-uploader` and the static service as
 `/mnt/data/nes-deck/uploader/rom-uploader`.
 
+On a BMC compositor installation, the deployment also installs the Retro Deck
+widget manifest and launcher under `/mnt/data/bmc-widgets/retro-deck`. The
+dashboard runs as a normal swipeable scene. Games and native Deck programs use
+temporary layer-shell surfaces over that scene, while fbdev remains the
+fallback on Decks without BMC.
+
 The launcher also expects:
 
 - `/mnt/data/nes-deck/menu/deck-menu`

@@ -1,0 +1,21 @@
+{
+  "uid": "73219c9d-f1ef-41dc-960c-d0711e42a6ac",
+  "version": "1.0.0",
+  "name": "Retro Deck",
+  "description": "Retro console dashboard and fullscreen game launcher",
+  "author": {
+    "name": "Retro Deck"
+  },
+  "binary": "bin/retro-deck",
+  "category": "media",
+  "supported_viewports": [
+    {
+      "type": "rectangular",
+      "min_width": 1280,
+      "max_width": 1280,
+      "min_height": 480,
+      "max_height": 480
+    }
+  ],
+  "params": {}
+}
