@@ -37,6 +37,28 @@
       pkgsCross = pkgs.pkgsCross.armv7l-hf-multiplatform;
       staticCross = pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsStatic;
 
+      waylandNativeInputs = [ pkgs.wayland-scanner ];
+      waylandStaticInputs = [ staticCross.wayland staticCross.libffi ];
+      waylandProtocolBuild = ''
+        wayland-scanner client-header \
+          ${./protocol/deck-widget-v1.xml} \
+          deck-widget-v1-client-protocol.h
+        wayland-scanner private-code \
+          ${./protocol/deck-widget-v1.xml} \
+          deck-widget-v1-protocol.c
+        wayland-scanner client-header \
+          ${./protocol/wlr-layer-shell-unstable-v1.xml} \
+          wlr-layer-shell-unstable-v1-client-protocol.h
+        wayland-scanner private-code \
+          ${./protocol/wlr-layer-shell-unstable-v1.xml} \
+          wlr-layer-shell-unstable-v1-protocol.c
+        $CC -std=c99 -Os -Wall -Wextra -Werror \
+          -c deck-widget-v1-protocol.c -o deck-widget-v1-protocol.o
+        $CC -std=c99 -Os -Wall -Wextra -Werror \
+          -c wlr-layer-shell-unstable-v1-protocol.c \
+          -o wlr-layer-shell-unstable-v1-protocol.o
+      '';
+
       # Read our deck-specific source files
       deckSystemSrc = builtins.readFile ./src/InfoNES_System_Deck.cpp;
       joypadSrc = builtins.readFile ./src/joypad_input.cpp;
@@ -52,11 +74,12 @@
           version = "0.1.0-20260714-deck";
 
           src = fceumm-src;
-          nativeBuildInputs = [ pkgs.gnumake pkgs.nukeReferences ];
+          nativeBuildInputs =
+            [ pkgs.gnumake pkgs.nukeReferences ] ++ waylandNativeInputs;
           buildInputs = [
             pkgsCross.glibc.static
             staticCross.zlib
-          ];
+          ] ++ waylandStaticInputs;
           allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3";
@@ -73,6 +96,7 @@
 
           buildPhase = ''
             runHook preBuild
+            ${waylandProtocolBuild}
             make -j$NIX_BUILD_CORES \
               platform=rpi2 \
               STATIC_LINKING=1 \
@@ -84,13 +108,17 @@
               -marm -march=armv7-a -mtune=cortex-a7 \
               -mfpu=neon-vfpv4 -mfloat-abi=hard \
               -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_NES=1 \
-              -Isrc/drivers/libretro/libretro-common/include -I${./src} \
+              -DRETRO_DECK_NES=1 -DRETRO_DECK_WAYLAND=1 \
+              -I. -Isrc/drivers/libretro/libretro-common/include -I${./src} \
               ${./src/libretro_deck.cpp} \
               ${./src/deck_runtime.cpp} \
+              ${./src/deck_wayland.cpp} \
               ${./src/joypad_input.cpp} \
+              deck-widget-v1-protocol.o \
+              wlr-layer-shell-unstable-v1-protocol.o \
               fceumm_libretro.a \
-              -static -Wl,-s -pthread -lm -lz -o nes-deck
+              -static -Wl,-s -pthread -lm -lz -lwayland-client -lffi \
+              -o nes-deck
             runHook postBuild
           '';
 
@@ -224,12 +252,12 @@
           version = "1.0.0";
 
           dontUnpack = true;
-          nativeBuildInputs = [ pkgs.nukeReferences ];
+          nativeBuildInputs = [ pkgs.nukeReferences ] ++ waylandNativeInputs;
           buildInputs = [
             pkgsCross.glibc.static
             staticCross.libpng
             staticCross.zlib
-          ];
+          ] ++ waylandStaticInputs;
           allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -Os";
@@ -237,12 +265,16 @@
 
           buildPhase = ''
             runHook preBuild
+            ${waylandProtocolBuild}
             cp ${./src/deck_menu.cpp} deck_menu.cpp
             cp ${./src/knekko_settings_icons_generated.inc} \
               knekko_settings_icons_generated.inc
             $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-              deck_menu.cpp \
-              -static -lpng -lz -o deck-menu
+              -DRETRO_DECK_WAYLAND=1 -I. -I${./src} \
+              deck_menu.cpp ${./src/deck_wayland.cpp} \
+              deck-widget-v1-protocol.o \
+              wlr-layer-shell-unstable-v1-protocol.o \
+              -static -lpng -lz -lwayland-client -lffi -o deck-menu
             runHook postBuild
           '';
 
@@ -265,12 +297,13 @@
           version = pkgs.game-music-emu.version;
 
           src = pkgs.game-music-emu.src;
-          nativeBuildInputs = [ pkgs.cmake pkgs.nukeReferences ];
+          nativeBuildInputs =
+            [ pkgs.cmake pkgs.nukeReferences ] ++ waylandNativeInputs;
           buildInputs = [
             pkgsCross.glibc.static
             staticCross.libvorbis
             staticCross.zlib
-          ];
+          ] ++ waylandStaticInputs;
           allowedReferences = [ ];
 
           cmakeFlags = [
@@ -281,12 +314,17 @@
           buildPhase = ''
             runHook preBuild
             cmake --build . --parallel $NIX_BUILD_CORES
+            ${waylandProtocolBuild}
             $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-              -I${./src} -I.. \
+              -DRETRO_DECK_WAYLAND=1 -I. -I${./src} -I.. \
               ${./src/chiptune_deck.cpp} \
               ${./src/deck_runtime.cpp} \
+              ${./src/deck_wayland.cpp} \
+              deck-widget-v1-protocol.o \
+              wlr-layer-shell-unstable-v1-protocol.o \
               gme/libgme.a \
               -static -Wl,-s -pthread -lvorbisfile -lvorbis -logg -lm -lz \
+              -lwayland-client -lffi \
               -o chiptune-deck
             runHook postBuild
           '';
@@ -320,8 +358,8 @@
           version = "1.0.0";
 
           dontUnpack = true;
-          nativeBuildInputs = [ pkgs.nukeReferences ];
-          buildInputs = [ pkgsCross.glibc.static ];
+          nativeBuildInputs = [ pkgs.nukeReferences ] ++ waylandNativeInputs;
+          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
           allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3";
@@ -329,11 +367,16 @@
 
           buildPhase = ''
             runHook preBuild
+            ${waylandProtocolBuild}
             $CXX -std=c++11 -O3 -Wall -Wextra -Wpedantic -Werror \
-              -I${./src} \
+              -DRETRO_DECK_WAYLAND=1 -I. -I${./src} \
               ${./src/ten_seconds_deck.cpp} \
               ${./src/deck_runtime.cpp} \
-              -static -pthread -lm -o ten-seconds-deck
+              ${./src/deck_wayland.cpp} \
+              deck-widget-v1-protocol.o \
+              wlr-layer-shell-unstable-v1-protocol.o \
+              -static -pthread -lm -lwayland-client -lffi \
+              -o ten-seconds-deck
             runHook postBuild
           '';
 
@@ -356,8 +399,9 @@
           version = "0.5.0-20260703-deck";
 
           src = gambatte-src;
-          nativeBuildInputs = [ pkgs.gnumake pkgs.nukeReferences ];
-          buildInputs = [ pkgsCross.glibc.static ];
+          nativeBuildInputs =
+            [ pkgs.gnumake pkgs.nukeReferences ] ++ waylandNativeInputs;
+          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
           allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3";
@@ -385,6 +429,7 @@
 
           buildPhase = ''
             runHook preBuild
+            ${waylandProtocolBuild}
             make \
               STATIC_LINKING=1 \
               platform=unix \
@@ -398,13 +443,16 @@
               -fomit-frame-pointer -marm -march=armv7-a -mtune=cortex-a7 \
               -mfpu=neon-vfpv4 -mfloat-abi=hard \
               -Wall -Wextra -Wpedantic -Werror \
-              -Ilibgambatte/libretro-common/include -I${./src} \
-              -DRETRO_DECK_GB=1 \
+              -I. -Ilibgambatte/libretro-common/include -I${./src} \
+              -DRETRO_DECK_GB=1 -DRETRO_DECK_WAYLAND=1 \
               ${./src/libretro_deck.cpp} \
               ${./src/deck_runtime.cpp} \
+              ${./src/deck_wayland.cpp} \
               ${./src/joypad_input.cpp} \
+              deck-widget-v1-protocol.o \
+              wlr-layer-shell-unstable-v1-protocol.o \
               gambatte_libretro.a \
-              -static -pthread -lm -o gb-deck
+              -static -pthread -lm -lwayland-client -lffi -o gb-deck
             runHook postBuild
           '';
 
@@ -430,8 +478,9 @@
           version = "1.6.0-20260420-deck";
 
           src = fuse-src;
-          nativeBuildInputs = [ pkgs.gnumake pkgs.nukeReferences ];
-          buildInputs = [ pkgsCross.glibc.static ];
+          nativeBuildInputs =
+            [ pkgs.gnumake pkgs.nukeReferences ] ++ waylandNativeInputs;
+          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
           allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3";
@@ -448,6 +497,7 @@
 
           buildPhase = ''
             runHook preBuild
+            ${waylandProtocolBuild}
             sed 's/HASH/bce196fb774835fe65b3e5b821887a4ccf657167/' \
               etc/version.c.templ > src/version.c
             make -f Makefile.libretro -j$NIX_BUILD_CORES \
@@ -459,18 +509,22 @@
               AR=$CC-ar
             cp ${./src/libretro_deck.cpp} deck_libretro_deck.cpp
             cp ${./src/deck_runtime.cpp} deck_runtime.cpp
+            cp ${./src/deck_wayland.cpp} deck_wayland.cpp
             cp ${./src/joypad_input.cpp} deck_joypad_input.cpp
             $CXX -std=c++11 -O3 -fomit-frame-pointer \
               -marm -march=armv7-a -mtune=cortex-a7 \
               -mfpu=neon-vfpv4 -mfloat-abi=hard \
               -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_ZX=1 \
-              -Isrc -I${./src} \
+              -DRETRO_DECK_ZX=1 -DRETRO_DECK_WAYLAND=1 \
+              -I. -Isrc -I${./src} \
               deck_libretro_deck.cpp \
               deck_runtime.cpp \
+              deck_wayland.cpp \
               deck_joypad_input.cpp \
+              deck-widget-v1-protocol.o \
+              wlr-layer-shell-unstable-v1-protocol.o \
               fuse_libretro.a \
-              -static -pthread -lm -o zx-deck
+              -static -pthread -lm -lwayland-client -lffi -o zx-deck
             runHook postBuild
           '';
 
@@ -500,8 +554,8 @@
           version = "1.2-deck";
 
           dontUnpack = true;
-          nativeBuildInputs = [ pkgs.nukeReferences ];
-          buildInputs = [ pkgsCross.glibc.static ];
+          nativeBuildInputs = [ pkgs.nukeReferences ] ++ waylandNativeInputs;
+          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
           allowedReferences = [ ];
 
           NIX_CFLAGS_COMPILE = "-static -O3";
@@ -509,19 +563,25 @@
 
           buildPhase = ''
             runHook preBuild
+            ${waylandProtocolBuild}
             cp ${./src/chip8_core.c} deck_chip8_core.c
             cp ${./src/chip8_deck.cpp} deck_chip8_deck.cpp
             cp ${./src/deck_runtime.cpp} deck_runtime.cpp
+            cp ${./src/deck_wayland.cpp} deck_wayland.cpp
             cp ${./src/joypad_input.cpp} deck_joypad_input.cpp
             $CC -std=c99 -O3 -Wall -Wextra -Werror \
               -I${c-octo-src}/src -I${./src} \
               -c deck_chip8_core.c -o chip8_core.o
             $CXX -std=c++11 -O3 -Wall -Wextra -Wpedantic -Werror \
-              -I${./src} \
+              -DRETRO_DECK_WAYLAND=1 -I. -I${./src} \
               deck_chip8_deck.cpp \
               deck_runtime.cpp \
+              deck_wayland.cpp \
               deck_joypad_input.cpp \
-              chip8_core.o -static -pthread -lm -o chip8-deck
+              deck-widget-v1-protocol.o \
+              wlr-layer-shell-unstable-v1-protocol.o \
+              chip8_core.o -static -pthread -lm -lwayland-client -lffi \
+              -o chip8-deck
             runHook postBuild
           '';
 

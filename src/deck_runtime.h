@@ -8,11 +8,15 @@
 #include <string>
 #include <vector>
 
+#ifdef RETRO_DECK_WAYLAND
+class DeckWaylandPresentation;
+#endif
+
 /*
- * Shared, dependency-free runtime for the Deck's framebuffer emulators.
- * The LCD is physically portrait but is exposed to games as a 1280x480
- * logical surface.  The 16-pixel safe area keeps content clear of the
- * rounded display corners.
+ * Shared runtime for the Deck's framebuffer and Wayland emulator frontends.
+ * Direct fbdev scanout is physically portrait; Wayland exposes the 1280x480
+ * logical display. The 16-pixel safe area keeps content clear of the rounded
+ * display corners.
  */
 
 struct DeckScaledLayout {
@@ -104,6 +108,9 @@ private:
   unsigned int last_source_height_;
   bool exit_hint_;
   std::vector<uint16_t> frame_;
+#ifdef RETRO_DECK_WAYLAND
+  DeckWaylandPresentation *wayland_;
+#endif
 };
 
 class DeckAudio {

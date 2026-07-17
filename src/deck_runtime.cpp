@@ -1,5 +1,9 @@
 #include "deck_runtime.h"
 
+#ifdef RETRO_DECK_WAYLAND
+#include "deck_wayland.h"
+#endif
+
 #include <algorithm>
 #include <cerrno>
 #include <climits>
@@ -134,12 +138,25 @@ bool DeckExitHintRequested() {
 DeckFramebuffer::DeckFramebuffer()
     : fd_(-1), memory_(NULL), map_size_(0), stride_(0),
       last_source_width_(0), last_source_height_(0),
-      exit_hint_(DeckExitHintRequested()) {}
+      exit_hint_(DeckExitHintRequested())
+#ifdef RETRO_DECK_WAYLAND
+      , wayland_(NULL)
+#endif
+{}
 
 DeckFramebuffer::~DeckFramebuffer() { close_device(); }
 
 bool DeckFramebuffer::open_device(std::string *error) {
   close_device();
+#ifdef RETRO_DECK_WAYLAND
+  const char *presentation = std::getenv("RETRO_DECK_PRESENTATION");
+  const char *wayland_display = std::getenv("WAYLAND_DISPLAY");
+  if (presentation && std::strcmp(presentation, "layer-shell") == 0 &&
+      wayland_display && wayland_display[0]) {
+    wayland_ = new DeckWaylandPresentation;
+    return true;
+  }
+#endif
   fd_ = open("/dev/fb0", O_RDWR | O_CLOEXEC);
   if (fd_ < 0) {
     if (error)
@@ -205,6 +222,10 @@ bool DeckFramebuffer::open_device(std::string *error) {
 }
 
 void DeckFramebuffer::close_device() {
+#ifdef RETRO_DECK_WAYLAND
+  delete wayland_;
+  wayland_ = NULL;
+#endif
   if (memory_) {
     munmap(memory_, map_size_);
     memory_ = NULL;
@@ -292,6 +313,13 @@ bool DeckFramebuffer::present_xrgb8888(const void *pixels,
                                        unsigned int width,
                                        unsigned int height, size_t pitch,
                                        std::string *error) {
+#ifdef RETRO_DECK_WAYLAND
+  if (wayland_) {
+    if (!wayland_->is_open() && !wayland_->open_gameplay(width, height, error))
+      return false;
+    return wayland_->present_xrgb8888(pixels, width, height, pitch, error);
+  }
+#endif
   if (!pixels || pitch < static_cast<size_t>(width) * sizeof(uint32_t)) {
     if (error)
       *error = "invalid XRGB8888 video frame";
@@ -315,6 +343,13 @@ bool DeckFramebuffer::present_xrgb8888(const void *pixels,
 bool DeckFramebuffer::present_rgb565(const void *pixels, unsigned int width,
                                      unsigned int height, size_t pitch,
                                      std::string *error) {
+#ifdef RETRO_DECK_WAYLAND
+  if (wayland_) {
+    if (!wayland_->is_open() && !wayland_->open_gameplay(width, height, error))
+      return false;
+    return wayland_->present_rgb565(pixels, width, height, pitch, error);
+  }
+#endif
   if (!pixels || pitch < static_cast<size_t>(width) * sizeof(uint16_t)) {
     if (error)
       *error = "invalid RGB565 video frame";
@@ -359,6 +394,14 @@ bool DeckFramebuffer::present_indexed(const uint8_t *pixels,
                                       const uint32_t *palette,
                                       size_t palette_size,
                                       std::string *error) {
+#ifdef RETRO_DECK_WAYLAND
+  if (wayland_) {
+    if (!wayland_->is_open() && !wayland_->open_gameplay(width, height, error))
+      return false;
+    return wayland_->present_indexed(pixels, width, height, pitch, palette,
+                                     palette_size, error);
+  }
+#endif
   if (!pixels || !palette || palette_size == 0 || pitch < width) {
     if (error)
       *error = "invalid indexed video frame";

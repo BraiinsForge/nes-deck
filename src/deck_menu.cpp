@@ -29,10 +29,9 @@
  * row is accepted.  Volume state is a canonical integer from 0 through 100;
  * terminal keymap state is exactly "us" or "cz".
  *
- * This program deliberately uses only Linux fbdev/evdev and C++11/POSIX APIs.
- * The Deck touch controller already reports the intended 1280x480 landscape
- * coordinate space, while the framebuffer is a 600x1280 portrait RGB565
- * surface.  Rendering therefore uses this transform:
+ * This program uses C++11/POSIX APIs with either the BMC Wayland compositor or
+ * Linux fbdev/evdev. The direct framebuffer is a 600x1280 portrait RGB565
+ * surface, so its fallback renderer uses this transform:
  *
  *   framebuffer column = logical y
  *   framebuffer row    = 1279 - logical x
@@ -75,6 +74,10 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
+
+#ifdef RETRO_DECK_WAYLAND
+#include "deck_wayland.h"
+#endif
 
 namespace {
 
@@ -3264,13 +3267,43 @@ void render_wifi(const WifiState &state, const NetworkStatus &network,
                      1, color_pixel(kColorMuted));
 }
 
+struct TouchReport {
+  int x;
+  int y;
+  bool down;
+  bool pressed;
+  bool released;
+};
+
 class Framebuffer {
 public:
-  Framebuffer() : fd_(-1), memory_(NULL), map_size_(0), stride_(0) {}
+  Framebuffer()
+      : fd_(-1), memory_(NULL), map_size_(0), stride_(0)
+#ifdef RETRO_DECK_WAYLAND
+        , wayland_(NULL)
+#endif
+  {}
   ~Framebuffer() { close_device(); }
 
   bool open_device(std::string *error) {
+#ifdef RETRO_DECK_WAYLAND
+    if (wayland_ && wayland_->is_open())
+      return true;
+#endif
     close_device();
+#ifdef RETRO_DECK_WAYLAND
+    const char *wayland_display = std::getenv("WAYLAND_DISPLAY");
+    if (wayland_display && wayland_display[0]) {
+      wayland_ = new DeckWaylandPresentation;
+      std::string wayland_error;
+      if (wayland_->open_widget(&wayland_error))
+        return true;
+      std::cerr << "deck-menu: Wayland widget unavailable: " << wayland_error
+                << "; trying fbdev" << std::endl;
+      delete wayland_;
+      wayland_ = NULL;
+    }
+#endif
     fd_ = open("/dev/fb0", O_RDWR | O_CLOEXEC);
     if (fd_ < 0) {
       if (error)
@@ -3340,6 +3373,12 @@ public:
   }
 
   bool present(const Canvas &canvas, std::string *error) {
+#ifdef RETRO_DECK_WAYLAND
+    if (wayland_)
+      return wayland_->present_rgb565(
+          &canvas[0], kLogicalWidth, kLogicalHeight,
+          static_cast<size_t>(kLogicalWidth) * sizeof(uint16_t), error);
+#endif
     if (!memory_ ||
         canvas.size() !=
             static_cast<size_t>(kLogicalWidth * kLogicalHeight)) {
@@ -3371,6 +3410,10 @@ public:
   }
 
   void close_device() {
+#ifdef RETRO_DECK_WAYLAND
+    delete wayland_;
+    wayland_ = NULL;
+#endif
     if (memory_) {
       munmap(memory_, map_size_);
       memory_ = NULL;
@@ -3384,12 +3427,68 @@ public:
     frame_.clear();
   }
 
+  void close_for_child() {
+#ifdef RETRO_DECK_WAYLAND
+    if (wayland_)
+      return;
+#endif
+    close_device();
+  }
+
+  bool uses_wayland() const {
+#ifdef RETRO_DECK_WAYLAND
+    return wayland_ != NULL;
+#else
+    return false;
+#endif
+  }
+
+  int input_fd() const {
+#ifdef RETRO_DECK_WAYLAND
+    return wayland_ ? wayland_->fd() : -1;
+#else
+    return -1;
+#endif
+  }
+
+  bool read_wayland_touch(std::vector<TouchReport> *reports,
+                           std::string *error) {
+#ifdef RETRO_DECK_WAYLAND
+    if (!wayland_ || !reports)
+      return false;
+    if (!wayland_->dispatch(error))
+      return false;
+    std::vector<DeckWaylandTouchReport> wayland_reports;
+    wayland_->take_touch_reports(&wayland_reports);
+    reports->clear();
+    for (size_t index = 0; index < wayland_reports.size(); ++index) {
+      TouchReport report;
+      report.x = wayland_reports[index].x;
+      report.y = wayland_reports[index].y;
+      report.down = wayland_reports[index].down;
+      report.pressed = wayland_reports[index].pressed;
+      report.released = wayland_reports[index].released;
+      reports->push_back(report);
+    }
+    if (wayland_->shutdown_requested())
+      g_shutdown_requested = 1;
+    return true;
+#else
+    (void)reports;
+    (void)error;
+    return false;
+#endif
+  }
+
 private:
   int fd_;
   unsigned char *memory_;
   size_t map_size_;
   int stride_;
   std::vector<uint16_t> frame_;
+#ifdef RETRO_DECK_WAYLAND
+  DeckWaylandPresentation *wayland_;
+#endif
 };
 
 bool bit_is_set(const unsigned long *bits, unsigned int bit) {
@@ -3397,14 +3496,6 @@ bool bit_is_set(const unsigned long *bits, unsigned int bit) {
   return (bits[bit / bits_per_word] &
           (1UL << (bit % bits_per_word))) != 0;
 }
-
-struct TouchReport {
-  int x;
-  int y;
-  bool down;
-  bool pressed;
-  bool released;
-};
 
 class TouchDevice {
 public:
@@ -4365,7 +4456,7 @@ ChildResult run_managed_child(
   result.exited_for_touch = false;
   result.status = 0;
 
-  framebuffer->close_device();
+  framebuffer->close_for_child();
   TtySnapshot tty;
   tty.capture();
   std::cerr << "deck-menu: launching " << label << std::endl;
@@ -4506,11 +4597,13 @@ ChildResult run_managed_child(
       term_sent_at = now;
     }
 
-    if (touch && touch->fd() < 0)
+    if (!framebuffer->uses_wayland() && touch && touch->fd() < 0)
       reconnect_touch(touch, &reconnect_attempt, &touch_error);
 
     struct pollfd descriptor;
-    descriptor.fd = touch ? touch->fd() : -1;
+    descriptor.fd = framebuffer->uses_wayland()
+                        ? framebuffer->input_fd()
+                        : (touch ? touch->fd() : -1);
     descriptor.events = POLLIN;
     descriptor.revents = 0;
     const int poll_result = poll(descriptor.fd >= 0 ? &descriptor : NULL,
@@ -4518,9 +4611,14 @@ ChildResult run_managed_child(
     std::vector<TouchReport> reports;
     if (poll_result > 0 && (descriptor.revents & (POLLIN | POLLERR | POLLHUP))) {
       std::string error;
-      if (!touch->read_reports(&reports, &error)) {
+      const bool read_ok =
+          framebuffer->uses_wayland()
+              ? framebuffer->read_wayland_touch(&reports, &error)
+              : touch->read_reports(&reports, &error);
+      if (!read_ok) {
         std::cerr << "deck-menu: " << error << std::endl;
-        touch->close_device();
+        if (!framebuffer->uses_wayland())
+          touch->close_device();
         corner_hold = false;
       }
     }
@@ -4528,7 +4626,8 @@ ChildResult run_managed_child(
     for (size_t i = 0; i < reports.size(); ++i) {
       update_corner_hold(reports[i].down, reports[i].x, reports[i].y);
     }
-    if (reports.empty() && touch && touch->fd() >= 0)
+    if (reports.empty() && !framebuffer->uses_wayland() && touch &&
+        touch->fd() >= 0)
       update_corner_hold(touch->down(), touch->x(), touch->y());
     if (corner_hold && !term_sent &&
         monotonic_ms() - corner_hold_started >= kExitHoldMs) {
@@ -4587,6 +4686,9 @@ ChildResult run_game(const std::string &emulator, const GameEntry &game,
       std::make_pair("RETRO_DECK_VOLUME_PERCENT", volume_text));
   if (game.system != "deck")
     environment.push_back(std::make_pair("RETRO_DECK_EXIT_HINT", "1"));
+  if (framebuffer->uses_wayland())
+    environment.push_back(
+        std::make_pair("RETRO_DECK_PRESENTATION", "layer-shell"));
   if (!volume_state.empty())
     environment.push_back(
         std::make_pair("RETRO_DECK_VOLUME_STATE", volume_state));
@@ -5262,8 +5364,14 @@ int application_main(const Options &options) {
     return 1;
   }
 
+  Framebuffer framebuffer;
+  if (!framebuffer.open_device(&error)) {
+    std::cerr << "deck-menu: " << error << std::endl;
+    return 1;
+  }
+
   TouchDevice touch;
-  if (!touch.discover(&error)) {
+  if (!framebuffer.uses_wayland() && !touch.discover(&error)) {
     std::cerr << "deck-menu: " << error << std::endl;
     return 1;
   }
@@ -5281,12 +5389,6 @@ int application_main(const Options &options) {
   if (!menu_keyboards.scan_if_due(true, &keyboard_error)) {
     std::cerr << "deck-menu: keyboard navigation unavailable: "
               << keyboard_error << std::endl;
-  }
-
-  Framebuffer framebuffer;
-  if (!framebuffer.open_device(&error)) {
-    std::cerr << "deck-menu: " << error << std::endl;
-    return 1;
   }
 
   Canvas canvas;
@@ -5332,7 +5434,7 @@ int application_main(const Options &options) {
       std::cerr << "deck-menu: controller input resumed after quiet period"
                 << std::endl;
     }
-    if (touch.fd() < 0) {
+    if (!framebuffer.uses_wayland() && touch.fd() < 0) {
       if (reconnect_touch(&touch, &reconnect_attempt, &last_touch_error)) {
         if (wifi_view)
           wifi_state.status = "TOUCHSCREEN RECONNECTED";
@@ -5367,7 +5469,8 @@ int application_main(const Options &options) {
 
     std::vector<struct pollfd> descriptors;
     struct pollfd touch_descriptor;
-    touch_descriptor.fd = touch.fd();
+    touch_descriptor.fd = framebuffer.uses_wayland() ? framebuffer.input_fd()
+                                                     : touch.fd();
     touch_descriptor.events = POLLIN;
     touch_descriptor.revents = 0;
     descriptors.push_back(touch_descriptor);
@@ -5417,9 +5520,15 @@ int application_main(const Options &options) {
       continue;
 
     std::vector<TouchReport> reports;
-    if (touch_ready && !touch.read_reports(&reports, &error)) {
+    const bool touch_ok =
+        !touch_ready ||
+        (framebuffer.uses_wayland()
+             ? framebuffer.read_wayland_touch(&reports, &error)
+             : touch.read_reports(&reports, &error));
+    if (!touch_ok) {
       std::cerr << "deck-menu: " << error << std::endl;
-      touch.close_device();
+      if (!framebuffer.uses_wayland())
+        touch.close_device();
       pressed_target = MenuTargetNone;
       if (wifi_view) {
         wifi_state.status = "WAITING FOR TOUCHSCREEN";
