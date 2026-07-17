@@ -117,6 +117,7 @@ Run shell checks on deployment code with:
 nix shell nixpkgs#shellcheck -c shellcheck \
   ops/configure-deck.sh ops/deploy.sh deploy/menu/nes-deck-swap.init \
   tests/run-host-tests.sh tests/deploy_config_test.sh \
+  tests/nes_deck_swap_test.sh \
   tests/verify-arm-builds.sh
 ```
 

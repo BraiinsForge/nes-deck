@@ -42,6 +42,7 @@ jobs:
             deploy/menu/deck-menu-launcher \
             deploy/menu/nes-deck-swap.init \
             deploy/uploader/nes-deck-uploader.init \
+            tests/nes_deck_swap_test.sh \
             tests/run-host-tests.sh \
             tests/verify-arm-builds.sh
 

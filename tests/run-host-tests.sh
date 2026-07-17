@@ -68,6 +68,7 @@ tests/deck_wifi_profile_add_test.sh
 tests/deck_wifi_select_test.sh
 tests/deck_keyboard_quirks_test.sh
 tests/retro_terminal_test.sh
+tests/nes_deck_swap_test.sh
 
 compile_cpp_test tests/deck_runtime_test.cpp deck-runtime-test \
   src/deck_runtime.cpp -pthread

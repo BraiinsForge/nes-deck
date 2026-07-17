@@ -11,17 +11,21 @@ START=90
 # bmc-compositor stops at 80. Keep swap available until its clients are gone.
 # shellcheck disable=SC2034
 STOP=90
-# shellcheck disable=SC2034
-USE_PROCD=0
 
-SWAP_FILE=/mnt/data/nes-deck/state/retro-deck.swap
-SWAP_SIZE_MIB=64
+SWAP_FILE=${NES_DECK_SWAP_FILE:-/mnt/data/nes-deck/state/retro-deck.swap}
+SWAP_SIZE_MIB=${NES_DECK_SWAP_SIZE_MIB:-64}
+SWAPS_FILE=${NES_DECK_SWAPS_FILE:-/proc/swaps}
+DD_COMMAND=${NES_DECK_DD_COMMAND:-dd}
+MKSWAP_COMMAND=${NES_DECK_MKSWAP_COMMAND:-/sbin/mkswap}
+SWAPON_COMMAND=${NES_DECK_SWAPON_COMMAND:-/sbin/swapon}
+SWAPOFF_COMMAND=${NES_DECK_SWAPOFF_COMMAND:-/sbin/swapoff}
+LOGGER_COMMAND=${NES_DECK_LOGGER_COMMAND:-logger}
 
 swap_is_active() {
 	awk -v path="$SWAP_FILE" '
 		NR > 1 && $1 == path { found = 1 }
 		END { exit found ? 0 : 1 }
-	' /proc/swaps
+	' "$SWAPS_FILE"
 }
 
 start() {
@@ -31,18 +35,20 @@ start() {
 
 	state_dir=${SWAP_FILE%/*}
 	if ! mkdir -p "$state_dir" || ! chmod 0700 "$state_dir"; then
-		logger -t nes-deck-swap "cannot prepare swap state directory"
+		"$LOGGER_COMMAND" -t nes-deck-swap \
+			"cannot prepare swap state directory"
 		return 1
 	fi
 
 	if [ -e "$SWAP_FILE" ]; then
 		if [ ! -f "$SWAP_FILE" ] || [ -L "$SWAP_FILE" ]; then
-			logger -t nes-deck-swap "refusing unsafe existing swap path"
+			"$LOGGER_COMMAND" -t nes-deck-swap \
+				"refusing unsafe existing swap path"
 			return 1
 		fi
 		chmod 0600 "$SWAP_FILE" || return 1
-		if ! /sbin/swapon "$SWAP_FILE"; then
-			logger -t nes-deck-swap \
+		if ! "$SWAPON_COMMAND" "$SWAP_FILE"; then
+			"$LOGGER_COMMAND" -t nes-deck-swap \
 				"existing swapfile is invalid; leaving it untouched"
 			return 1
 		fi
@@ -52,21 +58,22 @@ start() {
 	temporary=$SWAP_FILE.new.$$
 	trap 'rm -f "$temporary"' EXIT INT TERM HUP
 	umask 077
-	if ! dd if=/dev/zero of="$temporary" bs=1048576 \
+	if ! "$DD_COMMAND" if=/dev/zero of="$temporary" bs=1048576 \
 		count="$SWAP_SIZE_MIB" 2>/dev/null ||
-		! /sbin/mkswap "$temporary" >/dev/null ||
+		! "$MKSWAP_COMMAND" "$temporary" >/dev/null ||
 		! mv "$temporary" "$SWAP_FILE" ||
-		! /sbin/swapon "$SWAP_FILE"; then
-		logger -t nes-deck-swap "cannot create or enable Retro Deck swapfile"
+		! "$SWAPON_COMMAND" "$SWAP_FILE"; then
+		"$LOGGER_COMMAND" -t nes-deck-swap \
+			"cannot create or enable Retro Deck swapfile"
 		return 1
 	fi
 	trap - EXIT INT TERM HUP
-	logger -t nes-deck-swap \
+	"$LOGGER_COMMAND" -t nes-deck-swap \
 		"enabled ${SWAP_SIZE_MIB} MiB swapfile for BMC memory headroom"
 }
 
 stop() {
 	if swap_is_active; then
-		/sbin/swapoff "$SWAP_FILE"
+		"$SWAPOFF_COMMAND" "$SWAP_FILE"
 	fi
 }
