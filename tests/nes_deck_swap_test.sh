@@ -57,6 +57,10 @@ if [[ ${USE_PROCD+x} ]]; then
   echo 'Swap service must use rc.common start and stop functions' >&2
   exit 1
 fi
+if ((START <= 90 || START >= 95)); then
+  echo 'Swap service must start after data mount and before BMC' >&2
+  exit 1
+fi
 
 start
 [[ -f $NES_DECK_SWAP_FILE ]]

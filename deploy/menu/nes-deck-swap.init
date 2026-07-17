@@ -7,7 +7,8 @@
 
 # rc.common consumes these declarations after sourcing this file.
 # shellcheck disable=SC2034
-START=90
+START=91
+# pre-exec-mount mounts /mnt/data at S90; bmc-compositor starts at S95.
 # bmc-compositor stops at 80. Keep swap available until its clients are gone.
 # shellcheck disable=SC2034
 STOP=90
