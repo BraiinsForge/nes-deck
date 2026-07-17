@@ -117,7 +117,7 @@ func remoteHost(remoteAddress string) string {
 
 func (app *application) securityHeaders(response http.ResponseWriter) {
 	response.Header().Set("Cache-Control", "no-store")
-	response.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	response.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 	response.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 	response.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	response.Header().Set("Referrer-Policy", "no-referrer")

@@ -431,6 +431,7 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	if iconResponse.Code != http.StatusOK ||
 		!strings.HasPrefix(iconResponse.Header().Get("Content-Type"), "image/png") ||
 		iconResponse.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" ||
+		!strings.Contains(iconResponse.Header().Get("Content-Security-Policy"), "img-src 'self'") ||
 		!bytes.HasPrefix(iconResponse.Body.Bytes(), []byte("\x89PNG\r\n\x1a\n")) {
 		t.Fatalf("embedded settings icon returned %d", iconResponse.Code)
 	}
