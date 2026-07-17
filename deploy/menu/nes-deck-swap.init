@@ -1,0 +1,72 @@
+#!/bin/sh /etc/rc.common
+
+# Give the BMC compositor and Retro Deck enough ordinary-memory headroom on
+# the 256 MiB Deck. Half of physical RAM is reserved for CMA, so a stock BMC
+# widget plus Retro Deck can otherwise trigger the global OOM killer while
+# the first Wayland frame is being faulted in.
+
+# rc.common consumes these declarations after sourcing this file.
+# shellcheck disable=SC2034
+START=90
+# bmc-compositor stops at 80. Keep swap available until its clients are gone.
+# shellcheck disable=SC2034
+STOP=90
+# shellcheck disable=SC2034
+USE_PROCD=0
+
+SWAP_FILE=/mnt/data/nes-deck/state/retro-deck.swap
+SWAP_SIZE_MIB=64
+
+swap_is_active() {
+	awk -v path="$SWAP_FILE" '
+		NR > 1 && $1 == path { found = 1 }
+		END { exit found ? 0 : 1 }
+	' /proc/swaps
+}
+
+start() {
+	if swap_is_active; then
+		return 0
+	fi
+
+	state_dir=${SWAP_FILE%/*}
+	if ! mkdir -p "$state_dir" || ! chmod 0700 "$state_dir"; then
+		logger -t nes-deck-swap "cannot prepare swap state directory"
+		return 1
+	fi
+
+	if [ -e "$SWAP_FILE" ]; then
+		if [ ! -f "$SWAP_FILE" ] || [ -L "$SWAP_FILE" ]; then
+			logger -t nes-deck-swap "refusing unsafe existing swap path"
+			return 1
+		fi
+		chmod 0600 "$SWAP_FILE" || return 1
+		if ! /sbin/swapon "$SWAP_FILE"; then
+			logger -t nes-deck-swap \
+				"existing swapfile is invalid; leaving it untouched"
+			return 1
+		fi
+		return 0
+	fi
+
+	temporary=$SWAP_FILE.new.$$
+	trap 'rm -f "$temporary"' EXIT INT TERM HUP
+	umask 077
+	if ! dd if=/dev/zero of="$temporary" bs=1048576 \
+		count="$SWAP_SIZE_MIB" 2>/dev/null ||
+		! /sbin/mkswap "$temporary" >/dev/null ||
+		! mv "$temporary" "$SWAP_FILE" ||
+		! /sbin/swapon "$SWAP_FILE"; then
+		logger -t nes-deck-swap "cannot create or enable Retro Deck swapfile"
+		return 1
+	fi
+	trap - EXIT INT TERM HUP
+	logger -t nes-deck-swap \
+		"enabled ${SWAP_SIZE_MIB} MiB swapfile for BMC memory headroom"
+}
+
+stop() {
+	if swap_is_active; then
+		/sbin/swapoff "$SWAP_FILE"
+	fi
+}

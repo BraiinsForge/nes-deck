@@ -221,6 +221,7 @@ cp ops/deck-wifi/deck-wifi-select ops/deck-wifi/deck-wifi-watch \
   "$payload/usr/sbin/"
 cp ops/deck-wifi/deck-wifi.init "$payload/etc/init.d/deck-wifi"
 cp deploy/menu/nes-deck.init "$payload/etc/init.d/nes-deck"
+cp deploy/menu/nes-deck-swap.init "$payload/etc/init.d/nes-deck-swap"
 mkdir -p "$payload/etc/hotplug.d/usb"
 cp deploy/menu/nes-deck-keyboard.hotplug \
   "$payload/etc/hotplug.d/usb/90-nes-deck-keyboard"
@@ -274,6 +275,7 @@ chmod 0700 "$payload/usr/bin/ecl" \
   "$payload/etc/hotplug.d/usb/90-nes-deck-keyboard" \
   "$payload/etc/init.d/deck-wifi" \
   "$payload/etc/init.d/nes-deck" \
+  "$payload/etc/init.d/nes-deck-swap" \
   "$payload/etc/init.d/nes-deck-uploader"
 
 remote_stage=/mnt/data/.nes-deck-deploy-$$
@@ -376,6 +378,10 @@ for wifi_executable in deck-wifi-profile-add deck-wifi-select deck-wifi-watch; d
 done
 [ -x "$stage/etc/init.d/deck-wifi" ] || {
   echo "Staged Wi-Fi service is missing" >&2
+  exit 1
+}
+[ -x "$stage/etc/init.d/nes-deck-swap" ] || {
+  echo "Staged swap service is missing" >&2
   exit 1
 }
 [ -x "$stage/etc/hotplug.d/usb/90-nes-deck-keyboard" ] || {
@@ -511,12 +517,14 @@ cp -p "$stage/usr/sbin/deck-wifi-select" /usr/sbin/deck-wifi-select
 cp -p "$stage/usr/sbin/deck-wifi-watch" /usr/sbin/deck-wifi-watch
 cp -p "$stage/etc/init.d/deck-wifi" /etc/init.d/deck-wifi
 cp -p "$stage/etc/init.d/nes-deck" /etc/init.d/nes-deck
+cp -p "$stage/etc/init.d/nes-deck-swap" /etc/init.d/nes-deck-swap
 cp -p "$stage/etc/init.d/nes-deck-uploader" \
   /etc/init.d/nes-deck-uploader
 chmod 0700 /usr/bin/ecl /usr/sbin/deck-wifi-profile-add \
   /usr/sbin/deck-wifi-select /usr/sbin/deck-wifi-watch \
   /etc/init.d/deck-wifi \
-  /etc/init.d/nes-deck /etc/init.d/nes-deck-uploader
+  /etc/init.d/nes-deck /etc/init.d/nes-deck-swap \
+  /etc/init.d/nes-deck-uploader
 
 if [ -x /etc/init.d/bmc ]; then
   /etc/init.d/bmc stop 2>/dev/null || :
@@ -526,9 +534,14 @@ fi
 /etc/init.d/deck-wifi restart
 if [ "$bmc_mode" -eq 1 ]; then
   /etc/init.d/nes-deck disable
+  /etc/init.d/nes-deck-swap enable
+  /etc/init.d/nes-deck-swap start
   service_needs_restart=0
+  /etc/init.d/bmc-compositor enable
   /etc/init.d/bmc-compositor start
 else
+  /etc/init.d/nes-deck-swap stop 2>/dev/null || :
+  /etc/init.d/nes-deck-swap disable
   /etc/init.d/nes-deck enable
   /etc/init.d/nes-deck start
 fi

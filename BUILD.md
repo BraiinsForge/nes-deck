@@ -115,8 +115,9 @@ Run shell checks on deployment code with:
 
 ```sh
 nix shell nixpkgs#shellcheck -c shellcheck \
-  ops/configure-deck.sh ops/deploy.sh tests/run-host-tests.sh \
-  tests/deploy_config_test.sh tests/verify-arm-builds.sh
+  ops/configure-deck.sh ops/deploy.sh deploy/menu/nes-deck-swap.init \
+  tests/run-host-tests.sh tests/deploy_config_test.sh \
+  tests/verify-arm-builds.sh
 ```
 
 ## Validate language and music runtimes on a Deck
@@ -178,8 +179,12 @@ the game exits, both layer surfaces disappear and scene swiping resumes.
 `ops/deploy.sh` installs the widget under `/mnt/data/bmc-widgets/retro-deck`.
 If `bmc-compositor` is present, deployment stops it, adds one idempotent Retro
 Deck scene to `/etc/bmc_config.json`, disables the legacy fbdev menu service,
-and restarts the compositor. The original configuration is retained once as
-`/etc/bmc_config.json.retro-deck.bak` before the first scene edit.
+enables a 64 MiB swapfile before BMC starts, and restarts the compositor. The
+swap is needed because 128 MiB of the Deck's 256 MiB RAM is reserved for CMA;
+without it, a stock BMC widget plus Retro Deck can trigger global OOM while
+the first fullscreen SHM frame is faulted in. Existing swapfiles are left
+untouched if they cannot be enabled. The original configuration is retained
+once as `/etc/bmc_config.json.retro-deck.bak` before the first scene edit.
 
 Audio uses `/dev/dsp` through the Deck's ALSA OSS bridge. The hardware stream
 is S16_LE stereo. NES, ZX, CHIP-8, the timer, menu cues, and chiptunes use

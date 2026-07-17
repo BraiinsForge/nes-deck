@@ -20,6 +20,7 @@ Copy these files to the Deck without changing their basenames:
 | `deck-keyboard-quirks` | `/usr/sbin/deck-keyboard-quirks` |
 | `nes-deck-keyboard.hotplug` | `/etc/hotplug.d/usb/90-nes-deck-keyboard` |
 | `nes-deck.init` | `/etc/init.d/nes-deck` |
+| `nes-deck-swap.init` | `/etc/init.d/nes-deck-swap` |
 
 The separate uploader bundle installs `nes-deck-uploader.init` as
 `/etc/init.d/nes-deck-uploader` and the static service as
@@ -30,6 +31,12 @@ widget manifest and launcher under `/mnt/data/bmc-widgets/retro-deck`. The
 dashboard runs as a normal swipeable scene. Games and native Deck programs use
 temporary layer-shell surfaces over that scene, while fbdev remains the
 fallback on Decks without BMC.
+
+The BMC installation also enables a private 64 MiB swapfile at
+`/mnt/data/nes-deck/state/retro-deck.swap` before the compositor starts. The
+256 MiB Deck reserves half of RAM for CMA, and the swap headroom prevents the
+kernel from killing a stock BMC widget when Retro Deck faults in its first
+fullscreen Wayland buffer. Existing swapfiles are never reformatted.
 
 The launcher also expects:
 

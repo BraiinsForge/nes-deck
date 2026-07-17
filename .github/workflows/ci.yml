@@ -40,6 +40,7 @@ jobs:
           nix shell nixpkgs#shellcheck -c shellcheck \
             ops/deploy.sh \
             deploy/menu/deck-menu-launcher \
+            deploy/menu/nes-deck-swap.init \
             deploy/uploader/nes-deck-uploader.init \
             tests/run-host-tests.sh \
             tests/verify-arm-builds.sh
