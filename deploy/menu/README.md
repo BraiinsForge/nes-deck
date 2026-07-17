@@ -36,7 +36,9 @@ The BMC installation also enables a private 64 MiB swapfile at
 `/mnt/data/nes-deck/state/retro-deck.swap` before the compositor starts. The
 256 MiB Deck reserves half of RAM for CMA, and the swap headroom prevents the
 kernel from killing a stock BMC widget when Retro Deck faults in its first
-fullscreen Wayland buffer. Existing swapfiles are never reformatted.
+fullscreen Wayland buffer. The service waits for the persistent data mount
+and will not create a swapfile on the root overlay. Existing swapfiles are
+never reformatted.
 
 The launcher also expects:
 

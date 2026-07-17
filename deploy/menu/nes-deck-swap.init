@@ -16,11 +16,34 @@ STOP=90
 SWAP_FILE=${NES_DECK_SWAP_FILE:-/mnt/data/nes-deck/state/retro-deck.swap}
 SWAP_SIZE_MIB=${NES_DECK_SWAP_SIZE_MIB:-64}
 SWAPS_FILE=${NES_DECK_SWAPS_FILE:-/proc/swaps}
+DATA_MOUNT=${NES_DECK_DATA_MOUNT:-/mnt/data}
+MOUNTS_FILE=${NES_DECK_MOUNTS_FILE:-/proc/mounts}
+MOUNT_WAIT_SECONDS=${NES_DECK_MOUNT_WAIT_SECONDS:-120}
 DD_COMMAND=${NES_DECK_DD_COMMAND:-dd}
 MKSWAP_COMMAND=${NES_DECK_MKSWAP_COMMAND:-/sbin/mkswap}
 SWAPON_COMMAND=${NES_DECK_SWAPON_COMMAND:-/sbin/swapon}
 SWAPOFF_COMMAND=${NES_DECK_SWAPOFF_COMMAND:-/sbin/swapoff}
 LOGGER_COMMAND=${NES_DECK_LOGGER_COMMAND:-logger}
+
+data_mount_is_ready() {
+	awk -v target="$DATA_MOUNT" '
+		$2 == target { found = 1 }
+		END { exit found ? 0 : 1 }
+	' "$MOUNTS_FILE"
+}
+
+wait_for_data_mount() {
+	waited=0
+	while ! data_mount_is_ready; do
+		if [ "$waited" -ge "$MOUNT_WAIT_SECONDS" ]; then
+			"$LOGGER_COMMAND" -t nes-deck-swap \
+				"persistent data mount is unavailable; refusing root overlay"
+			return 1
+		fi
+		sleep 1
+		waited=$((waited + 1))
+	done
+}
 
 swap_is_active() {
 	awk -v path="$SWAP_FILE" '
@@ -33,6 +56,7 @@ start() {
 	if swap_is_active; then
 		return 0
 	fi
+	wait_for_data_mount || return 1
 
 	state_dir=${SWAP_FILE%/*}
 	if ! mkdir -p "$state_dir" || ! chmod 0700 "$state_dir"; then

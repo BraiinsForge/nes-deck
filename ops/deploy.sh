@@ -532,6 +532,8 @@ if [ -x /etc/init.d/bmc ]; then
 fi
 /etc/init.d/deck-wifi enable
 /etc/init.d/deck-wifi restart
+# Remove links created with an older START or STOP value before re-enabling.
+rm -f /etc/rc.d/S??nes-deck-swap /etc/rc.d/K??nes-deck-swap
 if [ "$bmc_mode" -eq 1 ]; then
   /etc/init.d/nes-deck disable
   /etc/init.d/nes-deck-swap enable

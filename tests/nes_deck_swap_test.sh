@@ -36,14 +36,18 @@ trap 'rm -rf "$work"' EXIT INT TERM HUP
 export TEST_SWAPS=$work/swaps
 export TEST_LOG=$work/log
 printf 'Filename Type Size Used Priority\n' >"$TEST_SWAPS"
+mkdir "$work/data"
+printf '/dev/fake %s ext4 rw 0 0\n' "$work/data" >"$work/mounts"
 for helper in mkswap swapon swapoff logger; do
   ln -s "$repo_root/tests/nes_deck_swap_test.sh" "$work/$helper"
 done
 export NES_DECK_SWAP_TEST_HELPER=1
 
-export NES_DECK_SWAP_FILE=$work/state/retro-deck.swap
+export NES_DECK_SWAP_FILE=$work/data/state/retro-deck.swap
 export NES_DECK_SWAP_SIZE_MIB=1
 export NES_DECK_SWAPS_FILE=$TEST_SWAPS
+export NES_DECK_DATA_MOUNT=$work/data
+export NES_DECK_MOUNTS_FILE=$work/mounts
 export NES_DECK_MKSWAP_COMMAND=$work/mkswap
 export NES_DECK_SWAPON_COMMAND=$work/swapon
 export NES_DECK_SWAPOFF_COMMAND=$work/swapoff
@@ -78,7 +82,7 @@ if grep -q "^$NES_DECK_SWAP_FILE " "$TEST_SWAPS"; then
   exit 1
 fi
 
-invalid=$work/state/invalid.swap
+invalid=$work/data/state/invalid.swap
 printf 'do not replace me\n' >"$invalid"
 NES_DECK_SWAP_FILE=$invalid
 # Used by the sourced service functions.
@@ -89,5 +93,16 @@ if start; then
   exit 1
 fi
 [[ $(cat "$invalid") == 'do not replace me' ]]
+
+: >"$work/mounts"
+unmounted=$work/unmounted/state/retro-deck.swap
+SWAP_FILE=$unmounted
+MOUNT_WAIT_SECONDS=0
+if start; then
+  echo 'Swap service wrote outside the persistent data mount' >&2
+  exit 1
+fi
+[[ ! -e $unmounted ]]
+grep -q 'persistent data mount is unavailable' "$TEST_LOG"
 
 echo 'nes-deck-swap-test: OK'
