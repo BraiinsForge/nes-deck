@@ -60,6 +60,11 @@ development machine's `/var/lib/iwd` directory by default. It never imports
 `.open` or `.8021x` profiles. Before and after installation it compares the
 live UCI file hash, `wlan0` address, and full default route, and refuses to
 continue to application deployment if any of them changed.
+The initial private preference history contains up to seven enabled PSK
+profiles ordered by source modification time, followed by `BraiinsRecovery`
+when that profile is present. The active profile moves to the front after the
+watcher observes complete network health. An existing preference history is
+never replaced by an idempotent provisioning rerun.
 
 `deck-wifi-profile-add` is the write-only companion used by the Retro Deck
 menu. It reads exactly two lines from stdin (SSID and PSK passphrase), validates

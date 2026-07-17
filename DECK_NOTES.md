@@ -500,6 +500,19 @@ passphrases, WireGuard private keys, or ROM data.
   restarting the WireGuard service over the controlling tunnel. After reboot,
   a fresh handshake occurred more than seven minutes after Deck boot;
   bidirectional ping and SSH over `10.0.0.10` were verified again.
+- On 2026-07-17 a fresh Deck at `192.168.1.185` was provisioned as
+  `10.0.0.15/32` while associated with `Zyxel_7B79_5G`. Its private key stayed
+  on the Deck, the server peer was persisted and applied without restarting the
+  server tunnel, and the local and WireGuard SSH host fingerprints matched.
+  Network provisioning and an idempotent rerun both preserved the wireless
+  configuration hash, SSID, `192.168.1.185/24` address, default route, and
+  private preference history.
+- The new Deck received 33 personal PSK profiles, including an explicit
+  `BraiinsRecovery` profile; 12 open or enterprise source profiles were not
+  staged. Its fast path was seeded with Zyxel, `net1`, TP-Link, Cechomor, and
+  `BraiinsRecovery` while leaving Zyxel connected. The full dashboard, five
+  console ROM libraries, uploader, 36 Knekko icons, WireGuard, and guarded
+  Wi-Fi watcher were independently verified over `10.0.0.15`.
 
 ## Useful checks
 

@@ -64,7 +64,7 @@ done
 target=$(awk -F= '$1 == "DECK_SSH_TARGET" { print substr($0, index($0, "=") + 1) }' "$config")
 wireguard_address=$(awk -F= '$1 == "DECK_WIREGUARD_ADDRESS" { print substr($0, index($0, "=") + 1) }' "$config")
 
-for command in awk find install mktemp sha256sum ssh tar; do
+for command in awk find install mktemp sha256sum sort ssh stat tar tr wc xxd; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -87,6 +87,9 @@ mkdir -p "$profile_stage" \
   "$payload/wireguard/bin" "$payload/wifi/profiles"
 
 profile_count=0
+profile_rank=$work/profile-rank
+: >"$profile_rank"
+recovery_hex=42726169696e735265636f76657279
 shopt -s nullglob
 for profile in "$wifi_profiles"/*.psk; do
   [[ -f $profile && ! -L $profile ]] || {
@@ -94,6 +97,24 @@ for profile in "$wifi_profiles"/*.psk; do
     exit 1
   }
   install -m 0600 -- "$profile" "$profile_stage/${profile##*/}"
+  profile_name=${profile##*/}
+  profile_name=${profile_name%.psk}
+  case $profile_name in
+    =*) profile_hex=$(tr 'A-F' 'a-f' <<<"${profile_name#=}") ;;
+    *) profile_hex=$(printf '%s' "$profile_name" | xxd -p | tr -d '\n' |
+         tr 'A-F' 'a-f') ;;
+  esac
+  if [[ -z $profile_hex || $profile_hex == *[!0-9a-f]* ||
+        $(( ${#profile_hex} % 2 )) -ne 0 || ${#profile_hex} -gt 64 ]]; then
+    echo "Refusing malformed Wi-Fi profile filename: ${profile##*/}" >&2
+    exit 1
+  fi
+  autoconnect=$(awk -F= '$1 == "AutoConnect" {value=$2} END {print value}' \
+    "$profile")
+  if [[ $autoconnect != false ]]; then
+    printf '%020d\t%s\n' "$(stat -c %Y -- "$profile")" "$profile_hex" \
+      >>"$profile_rank"
+  fi
   profile_count=$((profile_count + 1))
 done
 shopt -u nullglob
@@ -101,6 +122,20 @@ shopt -u nullglob
   echo "No personal PSK profiles found in $wifi_profiles" >&2
   exit 1
 }
+
+preferred_stage=$payload/wifi/preferred
+sort -rn -k1,1 "$profile_rank" |
+  awk -F '\t' -v recovery="$recovery_hex" '
+    $2 == recovery { recovery_present=1; next }
+    count < 7 && !seen[$2]++ { print $2; count++ }
+    END { if (recovery_present) print recovery }
+  ' >"$preferred_stage"
+preferred_count=$(wc -l <"$preferred_stage")
+[[ $preferred_count -gt 0 ]] || {
+  echo "No enabled personal PSK profiles are available for preference seeding" >&2
+  exit 1
+}
+chmod 0600 "$preferred_stage"
 
 ignored_count=$(find "$wifi_profiles" -maxdepth 1 -type f \
   \( -name '*.8021x' -o -name '*.open' \) -print | wc -l)
@@ -130,6 +165,7 @@ cp -p "$profile_stage/"*.psk "$payload/wifi/profiles/"
 
 echo "Provision plan: $target -> $wireguard_address via $wireguard_server"
 echo "Wi-Fi intake: $profile_count personal PSK profiles; $ignored_count open/enterprise profiles ignored"
+echo "Wi-Fi preference seed: $preferred_count recent profiles; recovery profile last when present"
 if [[ $check_only -eq 1 ]]; then
   echo "Provision inputs are valid; no remote state was changed."
   exit 0
@@ -214,10 +250,14 @@ cp -p "$stage/wifi/deck-wifi-select" /usr/sbin/deck-wifi-select
 cp -p "$stage/wifi/deck-wifi-watch" /usr/sbin/deck-wifi-watch
 cp -p "$stage/wifi/deck-wifi.init" /etc/init.d/deck-wifi
 cp -p "$stage/wifi/profiles/"*.psk /etc/deck-wifi/profiles/
+if [ ! -s /etc/deck-wifi/preferred ]; then
+  cp -p "$stage/wifi/preferred" /etc/deck-wifi/preferred
+fi
 chmod 0700 /usr/sbin/deck-wifi-profile-add \
   /usr/sbin/deck-wifi-select /usr/sbin/deck-wifi-watch \
   /etc/init.d/deck-wifi
 chmod 0600 /etc/deck-wifi/profiles/*.psk
+chmod 0600 /etc/deck-wifi/preferred
 /mnt/data/nes-deck/wireguard/bin/wg pubkey \
   </etc/wireguard/wg0.key
 DECK
