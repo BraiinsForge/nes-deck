@@ -12,6 +12,13 @@ fi
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+cxx=${CXX:-g++}
+for command in "$cxx" montage realpath; do
+	command -v "$command" >/dev/null 2>&1 || {
+		echo "Missing required command: $command" >&2
+		exit 1
+	}
+done
 catalog=$(realpath "$1")
 covers=$(realpath "$2")
 output=$3
@@ -20,13 +27,18 @@ timer_renderer=$(mktemp "${TMPDIR:-/tmp}/retro-deck-timer-screen.XXXXXX")
 staging=$(mktemp -d "${TMPDIR:-/tmp}/retro-deck-screen-output.XXXXXX")
 trap 'rm -f "$temporary" "$timer_renderer"; rm -rf "$staging"' EXIT INT TERM
 
-g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-	"$script_dir/render-screenshots.cpp" -lpng -lz -pthread -o "$temporary"
-g++ -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
+"$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
+	"$script_dir/render-screenshots.cpp" \
+	"$repo_root/src/menu_sound.cpp" \
+	"$repo_root/src/menu_credits.cpp" \
+	"$repo_root/src/menu_ui.cpp" \
+	-lpng -lz -pthread -o "$temporary"
+"$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
 	"$script_dir/render-timer-screenshot.cpp" \
 	"$repo_root/src/deck_runtime.cpp" \
 	-lpng -pthread -o "$timer_renderer"
-next_number=$("$temporary" "$catalog" "$covers" "$staging")
+next_number=$("$temporary" "$catalog" "$covers" \
+	"$repo_root/deploy/menu/credits.tsv" "$staging")
 timer_name=$(printf '%02d-timer.png' "$next_number")
 "$timer_renderer" "$staging/$timer_name"
 

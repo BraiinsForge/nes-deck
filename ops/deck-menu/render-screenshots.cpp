@@ -100,15 +100,17 @@ bool save_canvas(const std::string &directory, size_t number,
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 4) {
+  if (argc != 5) {
     std::fprintf(stderr,
-                 "Usage: %s CATALOG.tsv COVER-DIRECTORY OUTPUT-DIRECTORY\n",
+                 "Usage: %s CATALOG.tsv COVER-DIRECTORY CREDITS.tsv "
+                 "OUTPUT-DIRECTORY\n",
                  argv[0]);
     return 2;
   }
   const std::string catalog(argv[1]);
   const std::string covers(argv[2]);
-  const std::string output(argv[3]);
+  const std::string credits_path(argv[3]);
+  const std::string output(argv[4]);
   if (mkdir(output.c_str(), 0755) != 0 && errno != EEXIST) {
     std::fprintf(stderr, "cannot create %s: %s\n", output.c_str(),
                  std::strerror(errno));
@@ -121,6 +123,12 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "%s\n", error.c_str());
     return 1;
   }
+  std::vector<ProjectCredit> credits;
+  if (!load_project_credits(credits_path, &credits, &error)) {
+    std::fprintf(stderr, "%s\n", error.c_str());
+    return 1;
+  }
+  const CreditsCrawl credits_crawl = make_project_credits_crawl(credits);
   games.push_back(built_in_lua_entry("/terminal"));
   games.push_back(built_in_lisp_entry("/terminal"));
   games.push_back(built_in_python_entry("/terminal"));
@@ -177,6 +185,26 @@ int main(int argc, char **argv) {
   render_menu(games, "deck", 7, kRebootConfirmationText, &canvas,
               &menu_layout);
   if (!save_canvas(output, number++, "reboot-confirmation", canvas, &error))
+    return 1;
+
+  CreditsLayout credits_layout;
+  render_project_credits(
+      credits_crawl, false, 2000, color_pixel(kColorBackground),
+      color_pixel(kColorTitle), color_pixel(kColorText),
+      color_pixel(kColorMuted), &canvas, &credits_layout);
+  if (!save_canvas(output, number++, "foss-credits-intro", canvas, &error))
+    return 1;
+  render_project_credits(
+      credits_crawl, false, 20000, color_pixel(kColorBackground),
+      color_pixel(kColorTitle), color_pixel(kColorText),
+      color_pixel(kColorMuted), &canvas, &credits_layout);
+  if (!save_canvas(output, number++, "foss-credits-crawl", canvas, &error))
+    return 1;
+  render_project_credits(
+      credits_crawl, true, 0, color_pixel(kColorBackground),
+      color_pixel(kColorTitle), color_pixel(kColorText),
+      color_pixel(kColorMuted), &canvas, &credits_layout);
+  if (!save_canvas(output, number++, "foss-credits-static", canvas, &error))
     return 1;
 
   WifiState wifi;

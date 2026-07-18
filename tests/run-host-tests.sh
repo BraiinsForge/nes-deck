@@ -10,7 +10,7 @@ cd "$repo_root"
 
 cxx=${CXX:-g++}
 cc=${CC:-cc}
-for command in "$cxx" "$cc" nix pkg-config; do
+for command in "$cxx" "$cc" montage nix pkg-config; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -69,6 +69,7 @@ png_flags=$(pkg-config --cflags --libs libpng)
 tests/rom_library_test.sh
 tests/catalog_test.sh
 tests/licenses_test.sh
+tests/render_screenshots_test.sh
 tests/fetch_covers_test.sh
 tests/settings_icons_test.sh
 tests/deploy_config_test.sh

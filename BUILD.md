@@ -18,12 +18,12 @@ details for development.
 ## Prerequisites
 
 Install Nix with flakes enabled. Host tests also require a C and C++ compiler,
-`pkg-config`, and libpng development headers.
+`pkg-config`, libpng development headers, and ImageMagick.
 
 On Debian or Ubuntu:
 
 ```sh
-sudo apt-get install build-essential pkg-config libpng-dev
+sudo apt-get install build-essential imagemagick pkg-config libpng-dev
 ```
 
 Then clone the private repository:
@@ -154,8 +154,9 @@ ops/deck-menu/render-screenshots.sh deploy/menu/games.tsv \
   /tmp/deck-covers "$HOME/retro-deck-screens"
 ```
 
-The output contains every game selection, settings variants, the Wi-Fi
-keyboard, reboot confirmation, timer, and a contact sheet.
+The output contains every game selection, settings variants, animated and
+reduced-motion FOSS credits, the Wi-Fi keyboard, reboot confirmation, timer,
+and a contact sheet.
 
 ## Platform details
 
@@ -233,7 +234,7 @@ retrodeck/
 ├── roms/                       private canonical ROM library and checksums
 ├── src/
 │   ├── deck_menu.cpp           dashboard, settings, and child supervision
-│   ├── menu_credits.cpp        FOSS manifest parsing and animated crawl
+│   ├── menu_credits.cpp        FOSS manifest and perspective crawl
 │   ├── menu_ui.cpp             shared dashboard drawing primitives
 │   ├── deck_runtime.cpp        video selection, audio, and frame clock
 │   ├── deck_wayland.cpp        shared-memory widget and game surfaces
