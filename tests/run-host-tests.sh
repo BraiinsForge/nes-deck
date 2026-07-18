@@ -52,11 +52,12 @@ png_flags=$(pkg-config --cflags --libs libpng)
 # pkg-config output is intentionally split into compiler arguments.
 # shellcheck disable=SC2086
 "$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-  src/deck_menu.cpp $png_flags -o "$work/deck-menu-host"
+  src/deck_menu.cpp src/menu_sound.cpp $png_flags -o "$work/deck-menu-host"
 "$work/deck-menu-host" --geometry-test
 # shellcheck disable=SC2086
 "$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-  tests/deck_menu_test.cpp $png_flags -o "$work/deck-menu-test"
+  tests/deck_menu_test.cpp src/menu_sound.cpp $png_flags \
+  -o "$work/deck-menu-test"
 "$work/deck-menu-test"
 
 tests/rom_library_test.sh

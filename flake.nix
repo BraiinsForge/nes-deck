@@ -267,11 +267,13 @@
             runHook preBuild
             ${waylandProtocolBuild}
             cp ${./src/deck_menu.cpp} deck_menu.cpp
+            cp ${./src/menu_sound.cpp} menu_sound.cpp
+            cp ${./src/menu_sound.h} menu_sound.h
             cp ${./src/knekko_settings_icons_generated.inc} \
               knekko_settings_icons_generated.inc
             $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
               -DRETRO_DECK_WAYLAND=1 -I. -I${./src} \
-              deck_menu.cpp ${./src/deck_wayland.cpp} \
+              deck_menu.cpp menu_sound.cpp ${./src/deck_wayland.cpp} \
               deck-widget-v1-protocol.o \
               wlr-layer-shell-unstable-v1-protocol.o \
               -static -lpng -lz -lwayland-client -lffi -o deck-menu
