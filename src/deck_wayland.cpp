@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <linux/memfd.h>
 #include <poll.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -48,7 +49,7 @@ int create_anonymous_file(size_t size, std::string *error) {
   int fd = -1;
 #if defined(SYS_memfd_create)
   fd = static_cast<int>(
-      syscall(SYS_memfd_create, "retro-deck-wayland", O_CLOEXEC));
+      syscall(SYS_memfd_create, "retro-deck-wayland", MFD_CLOEXEC));
 #endif
   if (fd < 0) {
     const char *runtime = std::getenv("XDG_RUNTIME_DIR");
