@@ -61,16 +61,12 @@ int main() {
   unsigned int volume = 0;
   std::string error;
   unsetenv("RETRO_DECK_VOLUME_PERCENT");
-  unsetenv("INFONES_VOLUME_PERCENT");
   assert(DeckReadVolumePercent(&volume, &error) && volume == 42);
-  setenv("INFONES_VOLUME_PERCENT", "31", 1);
-  assert(DeckReadVolumePercent(&volume, &error) && volume == 31);
   setenv("RETRO_DECK_VOLUME_PERCENT", "57", 1);
   assert(DeckReadVolumePercent(&volume, &error) && volume == 57);
   setenv("RETRO_DECK_VOLUME_PERCENT", "101", 1);
   assert(!DeckReadVolumePercent(&volume, &error));
   unsetenv("RETRO_DECK_VOLUME_PERCENT");
-  unsetenv("INFONES_VOLUME_PERCENT");
 
   std::cout << "deck_runtime_test: OK\n";
   return 0;

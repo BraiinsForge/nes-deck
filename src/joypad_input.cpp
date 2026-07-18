@@ -207,7 +207,7 @@ static void publish_states(void) {
   if (input_diagnostics_enabled) {
     for (size_t player = 0; player < kPlayerCount; ++player) {
       if (changed[player])
-        printf("InfoNES: input diagnostic P%zu state=0x%02x\n", player + 1,
+        printf("Retro Deck: input diagnostic P%zu state=0x%02x\n", player + 1,
                next_state[player]);
     }
     fflush(stdout);
@@ -318,7 +318,7 @@ static void attach_candidate(size_t player, GamepadCandidate *candidate) {
   gamepad.state = 0;
   gamepad.dropping_events = false;
   resynchronize_gamepad(&gamepad);
-  printf("InfoNES: Player %zu THEGamepad on %s (%s)\n", player + 1,
+  printf("Retro Deck: Player %zu THEGamepad on %s (%s)\n", player + 1,
          gamepad.path.c_str(), gamepad.physical_path.c_str());
 }
 
@@ -486,7 +486,7 @@ static bool initialize_keyboard(void) {
     if (is_keyboard(candidate)) {
       kb_fd = candidate;
       kb_fd_owned = true;
-      printf("InfoNES: Using keyboard on %s\n", tty_files[index]);
+      printf("Retro Deck: Using keyboard on %s\n", tty_files[index]);
       break;
     }
     close(candidate);
@@ -497,7 +497,7 @@ static bool initialize_keyboard(void) {
       if (is_keyboard(fd)) {
         kb_fd = fd;
         kb_fd_owned = false;
-        printf("InfoNES: Using keyboard on fd %d\n", fd);
+        printf("Retro Deck: Using keyboard on fd %d\n", fd);
         break;
       }
     }
@@ -645,11 +645,11 @@ static void *input_thread_func(void *) {
       const int player = descriptor_player[index];
       if (player < 0) {
         if (!drain_keyboard()) {
-          printf("InfoNES: Keyboard input disconnected\n");
+          printf("Retro Deck: Keyboard input disconnected\n");
           close_keyboard();
         }
       } else if (!drain_gamepad(static_cast<size_t>(player))) {
-        printf("InfoNES: Player %d gamepad disconnected\n", player + 1);
+        printf("Retro Deck: Player %d gamepad disconnected\n", player + 1);
         close_gamepad(static_cast<size_t>(player), true);
       }
     }
@@ -678,35 +678,35 @@ static void input_cleanup(void) {
 /*===================================================================*/
 
 extern "C" int InitJoypadInput(void) {
-  printf("InfoNES: Initializing keyboard and two-player gamepad input...\n");
+  printf("Retro Deck: Initializing keyboard and two-player gamepad input...\n");
   atexit(input_cleanup);
 
-  const char *diagnostics = getenv("INFONES_INPUT_DIAGNOSTICS");
+  const char *diagnostics = getenv("RETRO_DECK_INPUT_DIAGNOSTICS");
   input_diagnostics_enabled = diagnostics && strcmp(diagnostics, "1") == 0;
   if (input_diagnostics_enabled)
-    printf("InfoNES: Input state diagnostics enabled\n");
+    printf("Retro Deck: Input state diagnostics enabled\n");
 
   if (!initialize_keyboard())
-    printf("InfoNES: No raw keyboard available; gamepads remain enabled\n");
+    printf("Retro Deck: No raw keyboard available; gamepads remain enabled\n");
   scan_gamepads();
 
   size_t gamepad_count = 0;
   for (size_t player = 0; player < kPlayerCount; ++player)
     gamepad_count += gamepads[player].fd >= 0 ? 1 : 0;
-  printf("InfoNES: %zu THEGamepad controller(s) ready\n", gamepad_count);
-  printf("InfoNES: THEGamepad D-pad=move, A/X=primary, B/Y=secondary, "
+  printf("Retro Deck: %zu THEGamepad controller(s) ready\n", gamepad_count);
+  printf("Retro Deck: THEGamepad D-pad=move, A/X=primary, B/Y=secondary, "
          "L/R=shoulders, Back=Select, Start=Start\n");
 #if defined(RETRO_DECK_ZX)
-  printf("InfoNES: Keyboard passed through as a ZX Spectrum keyboard\n");
+  printf("Retro Deck: Keyboard passed through as a ZX Spectrum keyboard\n");
 #else
-  printf("InfoNES: Keyboard Arrows/WASD=move, Space=A, Shift=B, "
+  printf("Retro Deck: Keyboard Arrows/WASD=move, Space=A, Shift=B, "
          "Control=Select, Enter=Start\n");
 #endif
 
   input_running = 1;
   if (pthread_create(&input_thread, NULL, input_thread_func, NULL) != 0) {
     input_running = 0;
-    printf("InfoNES: Cannot start input thread\n");
+    printf("Retro Deck: Cannot start input thread\n");
     input_cleanup();
     return -1;
   }

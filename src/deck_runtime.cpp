@@ -92,8 +92,6 @@ bool DeckReadVolumePercent(unsigned int *volume, std::string *error) {
   *volume = 42;
   const char *text = std::getenv("RETRO_DECK_VOLUME_PERCENT");
   if (!text)
-    text = std::getenv("INFONES_VOLUME_PERCENT");
-  if (!text)
     return true;
   if (!*text) {
     if (error)
@@ -459,7 +457,7 @@ bool DeckAudio::open_device(unsigned int source_rate,
     return false;
   }
 
-  // Match the live-proven InfoNES OSS ring: eight 1024-byte S16 periods,
+  // Match the live-proven OSS ring: eight 1024-byte S16 periods,
   // roughly 93 ms at 44.1 kHz mono.  The earlier four 512-byte periods left
   // only about 23 ms and audibly underrran during framebuffer updates.
   int fragment = (8 << 16) | 10;

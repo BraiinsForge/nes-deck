@@ -37,22 +37,10 @@ passphrases, WireGuard private keys, or ROM data.
   Deck reports a maximum of 20. Dashboard settings maps persistent 10-point
   percentages onto that live range and clamps at 10 percent so an accidental
   touch cannot make the screen appear dead.
-- InfoNES renders the 256x240 frame at integer 2x scale. Its 512x480 output is
-  centered at logical x=384..895 and fills the active y=0..479 panel. Earlier
-  offsets shifted it 25 pixels left, left a 40-pixel gap above it, and clipped
-  the final 20 NES scanlines.
-- A 2026-07-13 Mario benchmark found that the original per-pixel mapped writes
-  consumed 10.8 to 11.0 ms per frame, with a 14.9 ms observed maximum, despite
-  audio pacing holding roughly 60 FPS. Building a complete 491,520-byte frame
-  in cacheable RAM and publishing contiguous rows reduced the same path to
-  4.7 ms average and 7.4 ms maximum. The `stmdrmfb` driver implements
-  `FBIO_WAITFORVSYNC`, but synchronous use raised the average to roughly
-  11.8 ms and introduced 20 to 23 ms phase-miss spikes. It is therefore an
-  opt-in `INFONES_VSYNC=1` diagnostic; fast staged publication is the default.
-  A follow-up long Mario probe captured distinct framebuffer hashes at 3, 20,
-  and 40 seconds, confirming changing gameplay/demo frames. Every complete
-  120-frame window stayed between 59.73 and 60.53 FPS while render averages
-  remained between 4.41 and 4.77 ms.
+- FCEUmm crops eight overscan rows from the top and bottom of its 256x240 NES
+  frame. The resulting 256x224 image renders at integer 2x scale as a centered
+  512x448 surface. Both fbdev and Wayland presentation preserve nearest-neighbor
+  pixels.
 
 ## Touchscreen
 
@@ -63,7 +51,7 @@ passphrases, WireGuard private keys, or ROM data.
   `/dev/input/event0` and Goodix moved to `/dev/input/event1`. The menu discovers
   Goodix by name and capabilities instead of assuming an event number.
 - The S99 menu exclusively grabs the Goodix event device while it is active.
-  It releases the framebuffer before starting InfoNES but retains touch input
+  It releases the framebuffer before starting a game but retains touch input
   so a continuous two-second hold can terminate the game and return to the
   menu. Console emulators stamp an outlined cross at the top-left safe inset to
   make that gesture visible; the complete screen remains a valid hold target.
@@ -92,7 +80,7 @@ passphrases, WireGuard private keys, or ROM data.
   reconnects, hotplug, dropped-event resynchronization, and independent P1/P2
   state are covered by the host test. Physical L/R are also exposed to the
   Spectrum frontend during gameplay. Setting
-  `INFONES_INPUT_DIAGNOSTICS=1`
+  `RETRO_DECK_INPUT_DIAGNOSTICS=1`
   prints state changes for an explicit hardware audit without enabling routine
   input logging.
 - On 2026-07-13 the current path-sorted build assigned

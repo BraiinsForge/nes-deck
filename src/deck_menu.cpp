@@ -3,7 +3,7 @@
  *
  * Runtime interface:
  *
- *   deck-menu --nes-emulator /absolute/path/to/infones \
+ *   deck-menu --nes-emulator /absolute/path/to/nes-deck \
  *             --gb-emulator /absolute/path/to/gb-deck \
  *             --zx-emulator /absolute/path/to/zx-deck \
  *             --chip8-emulator /absolute/path/to/chip8-deck \
@@ -4415,8 +4415,8 @@ ChildResult run_managed_child(
 }
 
 ChildResult run_game(const std::string &emulator, const GameEntry &game,
-                     unsigned int volume,
-                     TouchDevice *touch, Framebuffer *framebuffer,
+                     unsigned int volume, TouchDevice *touch,
+                     Framebuffer *framebuffer,
                      const std::string &volume_state = std::string()) {
   ChildResult result;
   result.started = false;
@@ -4432,8 +4432,6 @@ ChildResult run_game(const std::string &emulator, const GameEntry &game,
   if (game.system != "deck")
     arguments.push_back(game.rom);
   std::vector<std::pair<std::string, std::string> > environment;
-  environment.push_back(
-      std::make_pair("INFONES_VOLUME_PERCENT", volume_text));
   environment.push_back(
       std::make_pair("RETRO_DECK_VOLUME_PERCENT", volume_text));
   if (game.system != "deck")
@@ -4726,25 +4724,27 @@ bool inherited_volume(unsigned int *volume, std::string *error) {
   if (!volume)
     return false;
   *volume = 42;
-  const char *text = getenv("INFONES_VOLUME_PERCENT");
+  const char *text = getenv("RETRO_DECK_VOLUME_PERCENT");
   if (!text)
     return true;
   if (!*text) {
     if (error)
-      *error = "INFONES_VOLUME_PERCENT is empty; expected 0 through 100";
+      *error = "RETRO_DECK_VOLUME_PERCENT is empty; expected 0 through 100";
     return false;
   }
   unsigned int value = 0;
   for (const char *cursor = text; *cursor; ++cursor) {
     if (*cursor < '0' || *cursor > '9') {
       if (error)
-        *error = "INFONES_VOLUME_PERCENT must be an integer from 0 through 100";
+        *error =
+            "RETRO_DECK_VOLUME_PERCENT must be an integer from 0 through 100";
       return false;
     }
     value = value * 10 + static_cast<unsigned int>(*cursor - '0');
     if (value > 100) {
       if (error)
-        *error = "INFONES_VOLUME_PERCENT must be an integer from 0 through 100";
+        *error =
+            "RETRO_DECK_VOLUME_PERCENT must be an integer from 0 through 100";
       return false;
     }
   }

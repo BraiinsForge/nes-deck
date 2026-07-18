@@ -539,26 +539,26 @@ int main() {
          "unsupported terminal keymap is rejected");
 
   unsigned int enabled_volume = 0;
-  unsetenv("INFONES_VOLUME_PERCENT");
+  unsetenv("RETRO_DECK_VOLUME_PERCENT");
   error.clear();
   expect(inherited_volume(&enabled_volume, &error) && enabled_volume == 42,
          "missing enabled volume defaults to 42");
-  setenv("INFONES_VOLUME_PERCENT", "63", 1);
+  setenv("RETRO_DECK_VOLUME_PERCENT", "63", 1);
   expect(inherited_volume(&enabled_volume, &error) && enabled_volume == 63,
          "enabled volume is inherited");
-  setenv("INFONES_VOLUME_PERCENT", "101", 1);
+  setenv("RETRO_DECK_VOLUME_PERCENT", "101", 1);
   expect(!inherited_volume(&enabled_volume, &error),
          "out-of-range enabled volume is rejected");
-  setenv("INFONES_VOLUME_PERCENT", "loud", 1);
+  setenv("RETRO_DECK_VOLUME_PERCENT", "loud", 1);
   expect(!inherited_volume(&enabled_volume, &error),
          "non-numeric enabled volume is rejected");
-  unsetenv("INFONES_VOLUME_PERCENT");
+  unsetenv("RETRO_DECK_VOLUME_PERCENT");
 
   const std::string emulator = directory + "/capture-volume.sh";
   const std::string captured = rom + ".volume";
   const std::string helper =
       "#!/bin/sh\n"
-      "printf '%s' \"$INFONES_VOLUME_PERCENT\" > \"$1.volume\"\n"
+      "printf '%s' \"$RETRO_DECK_VOLUME_PERCENT\" > \"$1.volume\"\n"
       "printf '%s' \"${RETRO_DECK_EXIT_HINT:-}\" > \"$1.exit-hint\"\n"
       "printf '%s' \"${RETRO_DECK_VOLUME_STATE:-}\" > \"$1.volume-state\"\n";
   expect(write_file(emulator, helper.data(), helper.size()),

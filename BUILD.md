@@ -198,9 +198,8 @@ kernel OSS path bypasses ALSA userspace soft volume.
 
 The framebuffer has no page-flip API. Frontends build complete frames in
 cacheable memory and copy finished rows to fb0 to reduce tearing and protect
-audio timing. `INFONES_RUNTIME_DIAGNOSTICS=1` logs 120-frame timing windows.
-`INFONES_VSYNC=1` remains an experimental opt-in because the audited driver can
-stall sound and frame pacing.
+audio timing. `RETRO_DECK_RUNTIME_DIAGNOSTICS=1` logs 60-frame timing windows
+from the shared libretro frontend.
 
 ## Source layout
 
