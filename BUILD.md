@@ -176,9 +176,19 @@ game maps a fullscreen black layer surface plus a centered game layer surface.
 The emulator keeps its native frame clock and submits frames independently of
 the widget callback limit. The client expands gameplay frames to their
 integer-scaled layer size with nearest-neighbor sampling, then the compositor
-maps the resulting buffer 1:1. This keeps NES, GB, GBC, ZX, and CHIP-8 pixels
-sharp without relying on the compositor's texture filter. When the game exits,
-both layer surfaces disappear and scene swiping resumes.
+maps the resulting buffer 1:1. BMC's Smithay renderer defaults to linear
+minification and magnification, which can still soften pixel boundaries during
+the rotated composition pass. Apply the tracked local patch before building a
+BMC image for Retro Deck:
+
+```sh
+ops/bmc/apply-local-patches.sh /root/bmc-main
+nix build --no-link /root/bmc-main#deck-packages.core.pkg
+```
+
+The patch selects nearest-neighbor filtering for both directions. The script
+is idempotent and refuses a source tree whose patch context does not match.
+When the game exits, both layer surfaces disappear and scene swiping resumes.
 
 `ops/deploy.sh` installs the widget under `/mnt/data/bmc-widgets/retro-deck`.
 If `bmc-compositor` is present, deployment stops it, adds one idempotent Retro
@@ -212,6 +222,7 @@ retrodeck/
 │   └── widget/                 BMC manifest, launcher, and scene installer
 ├── nix/                        ECL and runtime-specific Nix expressions
 ├── ops/
+│   ├── bmc/                    external BMC patch application
 │   ├── deck-menu/              covers, screenshots, and FOSS CHIP-8 fetcher
 │   ├── deck-wifi/              profile-only Wi-Fi helper
 │   └── deploy.sh               complete staged deployment
