@@ -12,6 +12,11 @@ int main() {
   assert(layout.x == 400 && layout.y == 24);
   assert(layout.width == 480 && layout.height == 432);
 
+  assert(DeckComputeScaledLayout(256, 224, &layout));
+  assert(layout.scale == 2);
+  assert(layout.x == 384 && layout.y == 16);
+  assert(layout.width == 512 && layout.height == 448);
+
   assert(DeckComputeScaledLayout(288, 216, &layout));
   assert(layout.scale == 2);
   assert(layout.x == 352 && layout.y == 24);

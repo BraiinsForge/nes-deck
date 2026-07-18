@@ -502,17 +502,17 @@ struct DeckWaylandPresentation::Impl {
 
   template <typename Reader>
   bool present(unsigned int source_width, unsigned int source_height,
-               bool scale_gameplay, const Reader &read_pixel,
-               std::string *error) {
+               const Reader &read_pixel, std::string *error) {
     if (!configured || !surface) {
       if (error)
         *error = "Wayland surface is not configured";
       return false;
     }
-    const unsigned int target_width =
-        widget || scale_gameplay ? width : source_width;
-    const unsigned int target_height =
-        widget || scale_gameplay ? height : source_height;
+    // Submit a buffer matching the configured surface so the compositor maps
+    // it 1:1. Letting the compositor enlarge a native game frame makes its
+    // texture filter blur otherwise sharp pixel edges.
+    const unsigned int target_width = width;
+    const unsigned int target_height = height;
     if (!ensure_slots(target_width, target_height, error))
       return false;
     BufferSlot *slot = available_slot();
@@ -804,7 +804,7 @@ bool DeckWaylandPresentation::present_rgb565(const void *pixels,
     return false;
   }
   const uint8_t *bytes = static_cast<const uint8_t *>(pixels);
-  return impl_->present(width, height, false,
+  return impl_->present(width, height,
                         [bytes, pitch](unsigned int x, unsigned int y) {
                           const uint16_t *row = reinterpret_cast<const uint16_t *>(
                               bytes + static_cast<size_t>(y) * pitch);
@@ -824,7 +824,7 @@ bool DeckWaylandPresentation::present_xrgb8888(const void *pixels,
     return false;
   }
   const uint8_t *bytes = static_cast<const uint8_t *>(pixels);
-  return impl_->present(width, height, false,
+  return impl_->present(width, height,
                         [bytes, pitch](unsigned int x, unsigned int y) {
                           const uint32_t *row = reinterpret_cast<const uint32_t *>(
                               bytes + static_cast<size_t>(y) * pitch);
@@ -843,7 +843,7 @@ bool DeckWaylandPresentation::present_indexed(
     return false;
   }
   return impl_->present(
-      width, height, true,
+      width, height,
       [pixels, pitch, palette, palette_size](unsigned int x, unsigned int y) {
         const uint8_t index = pixels[static_cast<size_t>(y) * pitch + x];
         const uint32_t color = index < palette_size ? palette[index] : 0;

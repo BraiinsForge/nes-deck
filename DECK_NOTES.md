@@ -333,12 +333,17 @@ passphrases, WireGuard private keys, or ROM data.
   one complete physical row at a time. GB's 160x144 image renders at 3x, ZX's
   288x216 medium-border image at 2x, 64x32 CHIP-8 at 14x, and 128x64
   high-resolution modes at 7x.
-- On BMC compositor installations, the Wayland path copies 1:1 source frames
-  without per-pixel coordinate division. A live Kirby probe improved from
-  1.43-1.60 seconds per 60 frames to 0.985-1.013 seconds, restoring a healthy
-  NES audio queue with no dropped samples. Indexed CHIP-8 frames are expanded
-  with nearest-neighbor integer scaling before submission; a live Outlaw probe
-  confirmed three 896x448 game buffers. The client now passes `MFD_CLOEXEC` to
+- On BMC compositor installations, the Wayland path expands all gameplay
+  frames to their configured integer-scaled layer size with an optimized
+  nearest-neighbor loop. The loop converts each source pixel once, duplicates
+  pixels horizontally, and copies completed rows vertically. This prevents
+  compositor filtering from blurring NES and the other RGB cores without
+  restoring the per-output-pixel coordinate division that made a live Kirby
+  probe take 1.43-1.60 seconds per 60 frames. A 45-second Kirby validation
+  after enabling this path for RGB frames averaged 0.998244 seconds across 45
+  consecutive 60-frame windows, ranged from 0.982 to 1.017 seconds, and
+  dropped no audio frames. A live Outlaw probe confirmed three 896x448 game
+  buffers. The client now passes `MFD_CLOEXEC` to
   `memfd_create`. This avoids Fuse's dummy `mkstemp` fallback, which previously
   made ZX games fail before their first video frame.
 - Live Elite and Knight Lore runs detected the two stable controller paths,
