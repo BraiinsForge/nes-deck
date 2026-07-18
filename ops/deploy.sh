@@ -152,6 +152,7 @@ python=$(build_flake .#python-deck)
 chibi=$(build_flake .#chibi-deck)
 chiptune=$(build_flake .#chiptune-deck)
 uploader=$(build_flake .#rom-uploader)
+runtime_licenses=$(build_flake .#runtime-licenses)
 ecl=$(nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix | tail -n 1)
 
 ops/deck-menu/fetch-foss-games.sh "$foss"
@@ -232,7 +233,7 @@ cp deploy/uploader/nes-deck-uploader.init \
   "$payload/etc/init.d/nes-deck-uploader"
 
 for result in "$nes" "$gb" "$zx" "$chip8" "$fbterm" "$rlwrap" "$lua" \
-              "$python" "$chibi" "$chiptune"; do
+              "$python" "$chibi" "$chiptune" "$runtime_licenses" "$ecl"; do
   if [[ -d $result/share/licenses ]]; then
     cp -a "$result/share/licenses/." "$payload/nes-deck/licenses/"
   fi
@@ -399,6 +400,11 @@ done
 }
 [ -s "$stage/nes-deck/menu/palette.tsv" ] || {
   echo "Staged dashboard palette is empty" >&2
+  exit 1
+}
+[ -s "$stage/nes-deck/licenses/runtime/Wayland-COPYING" ] && \
+  [ -s "$stage/nes-deck/licenses/ecl-deck/ECL-LICENSE" ] || {
+  echo "Staged third-party license archive is incomplete" >&2
   exit 1
 }
 [ "$(find "$stage/nes-deck/menu/settings-icons" -maxdepth 1 \

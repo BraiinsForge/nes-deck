@@ -78,12 +78,24 @@ verify_package chibi-deck bin/chibi-scheme
 verify_package chiptune-deck bin/chiptune-deck
 verify_package rom-uploader bin/rom-uploader
 
+runtime_licenses=$(build_flake .#runtime-licenses)
+verify_closure_free runtime-licenses "$runtime_licenses"
+[[ -s $runtime_licenses/share/licenses/runtime/Wayland-COPYING ]] || {
+  echo "runtime-licenses is missing the Wayland notice" >&2
+  exit 1
+}
+echo "runtime-licenses: OK"
+
 ecl=$(nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix |
   tail -n 1)
 verify_closure_free ecl-arm-static "$ecl"
 verify_arm_executable ecl-arm-static "$ecl" bin/ecl.bin
 [[ -s $ecl/lib/ecl/help.doc ]] || {
   echo "ecl-arm-static is missing lib/ecl/help.doc" >&2
+  exit 1
+}
+[[ -s $ecl/share/licenses/ecl-deck/ECL-LICENSE ]] || {
+  echo "ecl-arm-static is missing its license archive" >&2
   exit 1
 }
 echo "ecl-arm-static: OK"

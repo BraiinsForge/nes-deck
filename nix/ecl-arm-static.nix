@@ -13,6 +13,7 @@ let
   cross = pkgs.pkgsCross.armv7l-hf-multiplatform;
 
   gmpStatic = cross.gmp.override { withStatic = true; };
+  libc = cross.stdenv.cc.libc;
   buildEcl = cross.buildPackages.ecl;
 
   eclStatic = (cross.ecl.override {
@@ -20,7 +21,7 @@ let
     threadSupport = false;
   }).overrideAttrs (old: {
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ buildEcl ];
-    buildInputs = (old.buildInputs or [ ]) ++ [ cross.stdenv.cc.libc.static ];
+    buildInputs = (old.buildInputs or [ ]) ++ [ libc.static ];
     propagatedBuildInputs = [ gmpStatic ];
 
     ECL_TO_RUN = "${buildEcl}/bin/ecl";
@@ -53,6 +54,8 @@ let
   });
 
   version = eclStatic.version;
+  gmpVersion = gmpStatic.version;
+  libcVersion = libc.version;
   targetPrefix = cross.stdenv.cc.targetPrefix;
   targetBinutils = cross.stdenv.cc.bintools;
 in
@@ -60,7 +63,13 @@ assert pkgs.lib.assertMsg (version == "26.5.5")
   "ecl-arm-static.nix expects ECL 26.5.5 from nixpkgs ${nixpkgsRev}";
 pkgs.runCommand "ecl-arm-static-runtime-${version}" {
   inherit version;
-  nativeBuildInputs = [ pkgs.nukeReferences ];
+  nativeBuildInputs = [
+    pkgs.nukeReferences
+    pkgs.gnutar
+    pkgs.gzip
+    pkgs.bzip2
+    pkgs.xz
+  ];
 
   # The payload must remain independent of its build-time ECL/glibc closure.
   allowedReferences = [ ];
@@ -81,6 +90,34 @@ pkgs.runCommand "ecl-arm-static-runtime-${version}" {
   install -Dm755 ${eclStatic}/bin/ecl $out/bin/ecl.bin
   install -Dm444 ${eclStatic}/lib/ecl-${version}/help.doc \
     $out/lib/ecl/help.doc
+
+  licenses=$out/share/licenses/ecl-deck
+  mkdir -p "$licenses"
+  tar -xOf ${eclStatic.src} ecl-${version}/LICENSE \
+    > "$licenses/ECL-LICENSE"
+  tar -xOf ${eclStatic.src} ecl-${version}/COPYING \
+    > "$licenses/ECL-COPYING"
+  tar -xOf ${eclStatic.src} ecl-${version}/contrib/asdf/asdf.lisp | \
+    sed -n '/;;; -- LICENSE START/,/;;; -- LICENSE END/p' \
+    > "$licenses/ASDF-LICENSE"
+  tar -xOf ${eclStatic.src} ecl-${version}/src/bdwgc/README.md \
+    > "$licenses/Boehm-GC-README.md"
+  tar -xOf ${eclStatic.src} \
+    ecl-${version}/src/bdwgc/libatomic_ops/LICENSE \
+    > "$licenses/libatomic_ops-LICENSE"
+  tar -xOf ${eclStatic.src} \
+    ecl-${version}/src/bdwgc/libatomic_ops/COPYING \
+    > "$licenses/libatomic_ops-COPYING"
+  tar -xOf ${gmpStatic.src} gmp-${gmpVersion}/README \
+    > "$licenses/GMP-README"
+  for name in COPYING COPYING.LESSERv3 COPYINGv2 COPYINGv3; do
+    tar -xOf ${gmpStatic.src} gmp-${gmpVersion}/$name \
+      > "$licenses/GMP-$name"
+  done
+  tar -xOf ${libc.src} glibc-${libcVersion}/COPYING \
+    > "$licenses/glibc-${libcVersion}-COPYING"
+  tar -xOf ${libc.src} glibc-${libcVersion}/COPYING.LIB \
+    > "$licenses/glibc-${libcVersion}-COPYING.LIB"
 
   ${targetBinutils}/bin/${targetPrefix}strip --strip-all $out/bin/ecl.bin
 

@@ -10,9 +10,11 @@ libogg	Ogg container support	BSD-3-Clause
 libvorbis	Ogg Vorbis decoding	BSD-3-Clause
 Lua	Lua REPL	MIT
 MicroPython	Python REPL	MIT
-ECL	Common Lisp REPL	MIT
-GNU MP	ECL arithmetic	LGPL-3.0-only OR GPL-2.0-only
+ECL	Common Lisp REPL	LGPL-2.1-or-later
+ASDF and UIOP	Common Lisp system support	MIT
+GNU MP	ECL arithmetic	LGPL-3.0-or-later OR GPL-2.0-or-later
 Boehm GC	ECL garbage collector	Boehm-GC
+libatomic_ops	ECL atomic operations	MIT AND Boehm-GC
 Chibi Scheme	Scheme REPL	BSD-3-Clause
 rlwrap	REPL line editing	GPL-2.0-or-later
 fbterm	Framebuffer terminal	GPL-2.0-or-later

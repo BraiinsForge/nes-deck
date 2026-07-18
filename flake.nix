@@ -54,10 +54,16 @@
           -c wlr-layer-shell-unstable-v1-protocol.c \
           -o wlr-layer-shell-unstable-v1-protocol.o
       '';
+      runtimeLicenses = import ./nix/runtime-licenses.nix {
+        inherit pkgs pkgsCross staticCross;
+        nixpkgsSource = nixpkgs.outPath;
+      };
 
     in
     {
       packages.${system} = {
+        runtime-licenses = runtimeLicenses;
+
         nes-deck = pkgsCross.stdenv.mkDerivation {
           pname = "nes-deck";
           version = "0.1.0-20260714-deck";
