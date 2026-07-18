@@ -122,11 +122,11 @@ Run shell checks on deployment code with:
 
 ```sh
 nix shell nixpkgs#shellcheck -c shellcheck -x \
-  ops/lib/deck-config.sh ops/configure-deck.sh ops/deploy.sh \
+  ops/lib/deck-config.sh ops/check-deck.sh ops/configure-deck.sh ops/deploy.sh \
   ops/deploy/activate.sh ops/provision-deck.sh \
   deploy/menu/nes-deck-swap.init \
   tests/run-host-tests.sh tests/deploy_config_test.sh \
-  tests/deploy_activation_test.sh \
+  tests/deploy_activation_test.sh tests/check_deck_test.sh \
   tests/nes_deck_swap_test.sh \
   tests/verify-arm-builds.sh
 ```
@@ -238,6 +238,7 @@ retrodeck/
 │   ├── deck-wifi/              profile-only Wi-Fi helper
 │   ├── deploy/                 validated on-Deck activation transaction
 │   ├── lib/                    shared strict deployment configuration parser
+│   ├── check-deck.sh           read-only installed health report
 │   └── deploy.sh               local build, staging, and transfer
 ├── patches/                    pinned upstream fixes
 ├── protocol/                   Deck widget and layer-shell client protocols

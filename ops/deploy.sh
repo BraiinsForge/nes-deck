@@ -240,4 +240,4 @@ ssh "$target" sh -s -- "$remote_stage" <"$activate_script"
 
 echo
 echo "Deployment complete. Verify with:"
-echo "  ssh $target 'pidof deck-menu; pidof rom-uploader; tail -n 40 /mnt/data/nes-deck/log/deck-menu.log'"
+printf '  %q --config %q %q\n' "$script_dir/check-deck.sh" "$config" "$target"

@@ -68,10 +68,13 @@ than spawning a process per filename.
 Verify the result:
 
 ```sh
-ssh root@10.0.0.10 'pidof deck-menu; \
-  pidof rom-uploader; \
-  tail -n 40 /mnt/data/nes-deck/log/deck-menu.log'
+./ops/check-deck.sh --config deck.conf
 ```
+
+The health check is read-only. It understands both BMC compositor and direct
+framebuffer installations, reports processes and network identity, prints the
+last 20 dashboard log lines, and exits unsuccessfully when a required component
+is missing.
 
 To update an already-provisioned Deck, pull the repository and run
 `./ops/deploy.sh --config PATH`. A positional `root@DECK-IP` temporarily
@@ -222,8 +225,7 @@ produce automatic save files.
 Check the service and its bounded persistent log:
 
 ```sh
-ssh root@10.0.0.10 'pidof deck-menu; \
-  tail -n 100 /mnt/data/nes-deck/log/deck-menu.log'
+./ops/check-deck.sh --config deck.conf
 ```
 
 Restart the dashboard without rebooting the Deck:
