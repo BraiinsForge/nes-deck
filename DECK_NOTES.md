@@ -161,9 +161,10 @@ details when they are needed for archaeology.
 - Without BMC, `/etc/init.d/nes-deck` supervises the fbdev launcher directly.
 - `/etc/init.d/nes-deck-uploader`, `/etc/init.d/deck-wifi`, and
   `/etc/init.d/deck-wireguard` are independent services.
-- `ops/deploy.sh` builds a complete static ARM payload, uploads to a private
-  staging directory, validates it before stopping services, and attempts to
-  restart stopped services if activation fails.
+- `ops/deploy.sh` builds a complete static ARM payload and uploads it to a
+  private staging directory. `ops/deploy/activate.sh` validates that tree before
+  stopping services, installs it, and attempts to restart stopped services if
+  activation fails.
 - Application deployment does not edit Wi-Fi. Initial provisioning performs
   guarded Wi-Fi and WireGuard setup before calling the same application
   deployer.

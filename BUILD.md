@@ -122,8 +122,10 @@ Run shell checks on deployment code with:
 
 ```sh
 nix shell nixpkgs#shellcheck -c shellcheck \
-  ops/configure-deck.sh ops/deploy.sh deploy/menu/nes-deck-swap.init \
+  ops/configure-deck.sh ops/deploy.sh ops/deploy/activate.sh \
+  deploy/menu/nes-deck-swap.init \
   tests/run-host-tests.sh tests/deploy_config_test.sh \
+  tests/deploy_activation_test.sh \
   tests/nes_deck_swap_test.sh \
   tests/verify-arm-builds.sh
 ```
@@ -233,7 +235,8 @@ retrodeck/
 │   ├── bmc/                    external BMC patch application
 │   ├── deck-menu/              covers, screenshots, and FOSS CHIP-8 fetcher
 │   ├── deck-wifi/              profile-only Wi-Fi helper
-│   └── deploy.sh               complete staged deployment
+│   ├── deploy/                 validated on-Deck activation transaction
+│   └── deploy.sh               local build, staging, and transfer
 ├── patches/                    pinned upstream fixes
 ├── protocol/                   Deck widget and layer-shell client protocols
 ├── roms/                       private canonical ROM library and checksums

@@ -68,8 +68,8 @@ than spawning a process per filename.
 Verify the result:
 
 ```sh
-ssh root@10.0.0.10 '/etc/init.d/nes-deck status; \
-  /etc/init.d/nes-deck-uploader status; \
+ssh root@10.0.0.10 'pidof deck-menu; \
+  pidof rom-uploader; \
   tail -n 40 /mnt/data/nes-deck/log/deck-menu.log'
 ```
 
@@ -222,7 +222,7 @@ produce automatic save files.
 Check the service and its bounded persistent log:
 
 ```sh
-ssh root@10.0.0.10 '/etc/init.d/nes-deck status; \
+ssh root@10.0.0.10 'pidof deck-menu; \
   tail -n 100 /mnt/data/nes-deck/log/deck-menu.log'
 ```
 
