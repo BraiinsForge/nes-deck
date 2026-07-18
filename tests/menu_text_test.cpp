@@ -30,6 +30,11 @@ int main() {
   assert(display_ascii("\xc4\x8c") == "?");
   assert(display_ascii("A\xc4\x8c B") == "A? B");
 
+  const std::vector<std::string> fields = split_tabs("one\ttwo\t");
+  assert(fields.size() == 3);
+  assert(fields[0] == "one" && fields[1] == "two" && fields[2].empty());
+  assert(split_tabs("").size() == 1 && split_tabs("")[0].empty());
+
   std::cout << "menu_text_test: OK\n";
   return 0;
 }

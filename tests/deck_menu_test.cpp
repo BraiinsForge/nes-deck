@@ -1,4 +1,5 @@
 #include <iterator>
+#include <set>
 
 #define main deck_menu_cli_main
 #include "../src/deck_menu.cpp"
@@ -520,7 +521,7 @@ int main() {
          "all game titles use one compact fixed font scale");
   expect(kMaximumCoverWidth == 600 && kMaximumCoverHeight == 378,
          "cover decoding stays within the bounded art budget");
-  expect(kMaxGames == 64,
+  expect(kMaximumCatalogGames == 64,
          "catalog capacity leaves room for additional filed ROMs");
 
   std::string keymap;

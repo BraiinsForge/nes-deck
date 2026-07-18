@@ -71,6 +71,8 @@
         ./src/deck_wayland.cpp
         ./src/deck_wayland.h
         ./src/knekko_settings_icons_generated.inc
+        ./src/menu_catalog.cpp
+        ./src/menu_catalog.h
         ./src/menu_credits.cpp
         ./src/menu_credits.h
         ./src/menu_io.cpp
@@ -208,6 +210,8 @@
             cp ${menuSources}/deck_menu.cpp deck_menu.cpp
             cp ${menuSources}/menu_sound.cpp menu_sound.cpp
             cp ${menuSources}/menu_sound.h menu_sound.h
+            cp ${menuSources}/menu_catalog.cpp menu_catalog.cpp
+            cp ${menuSources}/menu_catalog.h menu_catalog.h
             cp ${menuSources}/menu_credits.cpp menu_credits.cpp
             cp ${menuSources}/menu_credits.h menu_credits.h
             cp ${menuSources}/menu_io.cpp menu_io.cpp
@@ -224,7 +228,8 @@
               knekko_settings_icons_generated.inc
             $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
               -DRETRO_DECK_WAYLAND=1 -I. -I${menuSources} \
-              deck_menu.cpp menu_sound.cpp menu_credits.cpp menu_io.cpp \
+              deck_menu.cpp menu_sound.cpp menu_catalog.cpp \
+              menu_credits.cpp menu_io.cpp \
               menu_network.cpp menu_state.cpp menu_text.cpp menu_ui.cpp \
               ${menuSources}/deck_wayland.cpp \
               deck-widget-v1-protocol.o \

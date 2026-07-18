@@ -251,6 +251,7 @@ retrodeck/
 ├── roms/                       private canonical ROM library and checksums
 ├── src/
 │   ├── deck_menu.cpp           dashboard, settings, and child supervision
+│   ├── menu_catalog.cpp        game model, manifest, and ROM validation
 │   ├── menu_credits.cpp        FOSS manifest and perspective crawl
 │   ├── menu_io.cpp             checked low-level menu I/O primitives
 │   ├── menu_network.cpp        sanitized Wi-Fi and interface status

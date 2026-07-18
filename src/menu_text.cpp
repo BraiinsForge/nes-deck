@@ -90,3 +90,17 @@ std::string display_ascii(const std::string &text) {
   }
   return result;
 }
+
+std::vector<std::string> split_tabs(const std::string &line) {
+  std::vector<std::string> fields;
+  size_t start = 0;
+  while (true) {
+    const size_t tab = line.find('\t', start);
+    if (tab == std::string::npos) {
+      fields.push_back(line.substr(start));
+      return fields;
+    }
+    fields.push_back(line.substr(start, tab - start));
+    start = tab + 1;
+  }
+}

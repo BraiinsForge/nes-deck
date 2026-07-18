@@ -31,20 +31,6 @@ std::string system_error(const std::string &what) {
   return what + ": " + std::strerror(errno);
 }
 
-std::vector<std::string> split_tabs(const std::string &line) {
-  std::vector<std::string> fields;
-  size_t begin = 0;
-  while (true) {
-    const size_t tab = line.find('\t', begin);
-    if (tab == std::string::npos) {
-      fields.push_back(line.substr(begin));
-      return fields;
-    }
-    fields.push_back(line.substr(begin, tab - begin));
-    begin = tab + 1;
-  }
-}
-
 bool valid_field(const std::string &field, size_t maximum) {
   if (field.empty() || field.size() > maximum)
     return false;
