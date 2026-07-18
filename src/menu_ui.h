@@ -24,8 +24,6 @@ struct Rect {
 
 typedef std::vector<uint16_t> Canvas;
 
-std::string display_ascii(const std::string &text);
-
 void fill_rect(Canvas *canvas, const Rect &rect, uint16_t color);
 void stroke_rect(Canvas *canvas, const Rect &rect, int thickness,
                  uint16_t color);

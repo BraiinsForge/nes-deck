@@ -10,8 +10,8 @@ if [ "$#" -ne 3 ]; then
 	exit 2
 fi
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/../.." && pwd)
 cxx=${CXX:-g++}
 for command in "$cxx" montage realpath; do
 	command -v "$command" >/dev/null 2>&1 || {
@@ -31,6 +31,8 @@ trap 'rm -f "$temporary" "$timer_renderer"; rm -rf "$staging"' EXIT INT TERM
 	"$script_dir/render-screenshots.cpp" \
 	"$repo_root/src/menu_sound.cpp" \
 	"$repo_root/src/menu_credits.cpp" \
+	"$repo_root/src/menu_network.cpp" \
+	"$repo_root/src/menu_text.cpp" \
 	"$repo_root/src/menu_ui.cpp" \
 	-lpng -lz -pthread -o "$temporary"
 "$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \

@@ -23,8 +23,6 @@ int main() {
   assert(canvas[20 * kLogicalWidth + 10] == foreground);
   assert(canvas[22 * kLogicalWidth + 12] == background);
 
-  assert(display_ascii("ASCII") == "ASCII");
-  assert(display_ascii("\xc4\x8c") == "?");
   assert(text_width("AB", 2) == 22);
   assert(fit_text_scale("ABCDE", 29, 3, 1) == 1);
   assert(fit_text_width("ABCDEFGHIJ", 29, 1) == "AB...");

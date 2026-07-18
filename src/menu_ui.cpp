@@ -1,28 +1,8 @@
 #include "menu_ui.h"
 
-#include <algorithm>
+#include "menu_text.h"
 
-std::string display_ascii(const std::string &text) {
-  std::string result;
-  for (size_t i = 0; i < text.size();) {
-    const unsigned char first = static_cast<unsigned char>(text[i]);
-    if (first < 0x80) {
-      result.push_back(static_cast<char>(first));
-      ++i;
-      continue;
-    }
-    size_t length = 1;
-    if ((first & 0xe0) == 0xc0)
-      length = 2;
-    else if ((first & 0xf0) == 0xe0)
-      length = 3;
-    else if ((first & 0xf8) == 0xf0)
-      length = 4;
-    result.push_back('?');
-    i += std::min(length, text.size() - i);
-  }
-  return result;
-}
+#include <algorithm>
 
 void fill_rect(Canvas *canvas, const Rect &rect, uint16_t color) {
   if (!canvas || canvas->size() !=

@@ -245,6 +245,8 @@ retrodeck/
 ├── src/
 │   ├── deck_menu.cpp           dashboard, settings, and child supervision
 │   ├── menu_credits.cpp        FOSS manifest and perspective crawl
+│   ├── menu_network.cpp        sanitized Wi-Fi and interface status
+│   ├── menu_text.cpp           path and display-text validation
 │   ├── menu_ui.cpp             shared dashboard drawing primitives
 │   ├── deck_runtime.cpp        video selection, audio, and frame clock
 │   ├── deck_wayland.cpp        shared-memory widget and game surfaces

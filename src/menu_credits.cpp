@@ -1,5 +1,7 @@
 #include "menu_credits.h"
 
+#include "menu_text.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <cmath>

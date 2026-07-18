@@ -38,7 +38,6 @@
  */
 
 #include <algorithm>
-#include <arpa/inet.h>
 #include <cerrno>
 #include <cctype>
 #include <climits>
@@ -49,13 +48,11 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
-#include <ifaddrs.h>
 #include <fstream>
 #include <iostream>
 #include <linux/fb.h>
 #include <linux/input.h>
 #include <linux/kd.h>
-#include <linux/wireless.h>
 #include <poll.h>
 #include <png.h>
 #include <limits>
@@ -64,7 +61,6 @@
 #include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -76,6 +72,8 @@
 
 #include "menu_sound.h"
 #include "menu_credits.h"
+#include "menu_network.h"
+#include "menu_text.h"
 #include "menu_ui.h"
 
 #ifdef RETRO_DECK_WAYLAND
@@ -160,72 +158,6 @@ bool write_all(int fd, const char *data, size_t size) {
   }
   return true;
 }
-
-bool is_absolute_path(const std::string &path) {
-  return !path.empty() && path[0] == '/' && path.size() < PATH_MAX;
-}
-
-std::string trim_ascii_space(const std::string &text) {
-  size_t begin = 0;
-  while (begin < text.size() &&
-         std::isspace(static_cast<unsigned char>(text[begin])))
-    ++begin;
-  size_t end = text.size();
-  while (end > begin &&
-         std::isspace(static_cast<unsigned char>(text[end - 1])))
-    --end;
-  return text.substr(begin, end - begin);
-}
-
-bool valid_utf8_text(const std::string &text, size_t max_codepoints,
-                     bool allow_empty) {
-  if (text.empty())
-    return allow_empty;
-
-  size_t count = 0;
-  for (size_t i = 0; i < text.size();) {
-    const unsigned char first = static_cast<unsigned char>(text[i]);
-    uint32_t codepoint = 0;
-    size_t length = 0;
-    if (first < 0x80) {
-      codepoint = first;
-      length = 1;
-    } else if ((first & 0xe0) == 0xc0) {
-      codepoint = first & 0x1f;
-      length = 2;
-    } else if ((first & 0xf0) == 0xe0) {
-      codepoint = first & 0x0f;
-      length = 3;
-    } else if ((first & 0xf8) == 0xf0) {
-      codepoint = first & 0x07;
-      length = 4;
-    } else {
-      return false;
-    }
-    if (i + length > text.size())
-      return false;
-    for (size_t j = 1; j < length; ++j) {
-      const unsigned char next = static_cast<unsigned char>(text[i + j]);
-      if ((next & 0xc0) != 0x80)
-        return false;
-      codepoint = (codepoint << 6) | (next & 0x3f);
-    }
-    if ((length == 2 && codepoint < 0x80) ||
-        (length == 3 && codepoint < 0x800) ||
-        (length == 4 && codepoint < 0x10000) ||
-        codepoint > 0x10ffff ||
-        (codepoint >= 0xd800 && codepoint <= 0xdfff))
-      return false;
-    if (codepoint < 0x20 || codepoint == 0x7f)
-      return false;
-    ++count;
-    if (count > max_codepoints)
-      return false;
-    i += length;
-  }
-  return true;
-}
-
 
 uint16_t rgb565(unsigned int red, unsigned int green, unsigned int blue) {
   return static_cast<uint16_t>(((red & 0xf8) << 8) |
@@ -898,96 +830,6 @@ bool load_dashboard_palette(const std::string &path, std::string *error) {
     *kPaletteTokens[token].value = values[token];
   gSettingsIcon = settings_icon;
   return true;
-}
-
-struct NetworkStatus {
-  std::string ssid;
-  std::string wlan_ipv4;
-  std::string wireguard_ipv4;
-  std::string selector;
-
-  bool operator==(const NetworkStatus &other) const {
-    return ssid == other.ssid && wlan_ipv4 == other.wlan_ipv4 &&
-           wireguard_ipv4 == other.wireguard_ipv4 &&
-           selector == other.selector;
-  }
-
-  bool operator!=(const NetworkStatus &other) const {
-    return !(*this == other);
-  }
-};
-
-std::string interface_ipv4(const char *interface_name) {
-  struct ifaddrs *addresses = NULL;
-  if (getifaddrs(&addresses) != 0)
-    return std::string();
-  std::string result;
-  for (const struct ifaddrs *entry = addresses; entry; entry = entry->ifa_next) {
-    if (!entry->ifa_addr || !entry->ifa_name ||
-        std::strcmp(entry->ifa_name, interface_name) != 0 ||
-        entry->ifa_addr->sa_family != AF_INET)
-      continue;
-    char text[INET_ADDRSTRLEN] = {};
-    const struct sockaddr_in *address =
-        reinterpret_cast<const struct sockaddr_in *>(entry->ifa_addr);
-    if (inet_ntop(AF_INET, &address->sin_addr, text, sizeof(text))) {
-      result = text;
-      break;
-    }
-  }
-  freeifaddrs(addresses);
-  return result;
-}
-
-std::string wireless_ssid(const char *interface_name) {
-  const int socket_fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-  if (socket_fd < 0)
-    return std::string();
-  struct iwreq request;
-  std::memset(&request, 0, sizeof(request));
-  std::strncpy(request.ifr_name, interface_name, IFNAMSIZ - 1);
-  char value[IW_ESSID_MAX_SIZE + 1] = {};
-  request.u.essid.pointer = value;
-  request.u.essid.length = IW_ESSID_MAX_SIZE;
-  request.u.essid.flags = 0;
-  const bool read = ioctl(socket_fd, SIOCGIWESSID, &request) == 0;
-  close(socket_fd);
-  if (!read)
-    return std::string();
-  const size_t length = std::min<size_t>(request.u.essid.length,
-                                         IW_ESSID_MAX_SIZE);
-  std::string ssid(value, value + length);
-  while (!ssid.empty() && ssid[ssid.size() - 1] == '\0')
-    ssid.erase(ssid.size() - 1);
-  return valid_utf8_text(ssid, 32, true) ? display_ascii(ssid)
-                                         : std::string("?");
-}
-
-std::string read_wifi_selector_status(const std::string &path) {
-  if (!is_absolute_path(path))
-    return "STATUS UNAVAILABLE";
-  struct stat info;
-  if (lstat(path.c_str(), &info) != 0 || !S_ISREG(info.st_mode) ||
-      info.st_size < 1 || info.st_size > 128)
-    return "STATUS UNAVAILABLE";
-  std::ifstream input(path.c_str(), std::ios::in | std::ios::binary);
-  std::string line;
-  if (!input || !std::getline(input, line) || input.bad())
-    return "STATUS UNAVAILABLE";
-  if (!line.empty() && line[line.size() - 1] == '\r')
-    line.erase(line.size() - 1);
-  if (trim_ascii_space(line) != line || !valid_utf8_text(line, 64, false))
-    return "STATUS INVALID";
-  return display_ascii(line);
-}
-
-NetworkStatus read_network_status(const std::string &selector_status_path) {
-  NetworkStatus status;
-  status.ssid = wireless_ssid("wlan0");
-  status.wlan_ipv4 = interface_ipv4("wlan0");
-  status.wireguard_ipv4 = interface_ipv4("wg0");
-  status.selector = read_wifi_selector_status(selector_status_path);
-  return status;
 }
 
 bool valid_id(const std::string &id) {
