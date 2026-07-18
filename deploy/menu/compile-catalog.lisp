@@ -154,17 +154,22 @@
                 ((eq system :gbc) ".gbc")
                 ((eq system :zx) ".tap")
                 ((eq system :chip8) ".ch8")
-                ((eq system :deck) ".sexp")
+                ((eq system :deck) nil)
                 (t (catalog-error "unsupported game system ~S" system)))))
     (unless (and (string-prefix-p expected-prefix value)
-               (string-suffix-p expected-suffix value)
+               (or (null expected-suffix)
+                   (string-suffix-p expected-suffix value))
                (every #'rom-path-character-p value)
                (not (search "//" value))
                (not (search "/./" value))
                (not (search "/../" value)))
-      (catalog-error
-       "game :rom must be a normalized ~A path below ~A"
-       expected-suffix expected-prefix)))
+      (if expected-suffix
+          (catalog-error
+           "game :rom must be a normalized ~A path below ~A"
+           expected-suffix expected-prefix)
+          (catalog-error
+           "game :rom must be a normalized path below ~A"
+           expected-prefix))))
   value)
 
 (defun hexadecimal-character-p (character)
@@ -323,14 +328,24 @@
     (write-string (second entry) stream)
     (terpri stream)))
 
+(defun process-id ()
+  #+ecl (ext:getpid)
+  #+sbcl (sb-unix:unix-getpid)
+  #-(or ecl sbcl) (catalog-error "unsupported Common Lisp implementation"))
+
+(defun replace-file (source destination)
+  #+ecl (rename-file source destination :if-exists :supersede)
+  #+sbcl (sb-unix:unix-rename source destination)
+  #-(or ecl sbcl) (catalog-error "unsupported Common Lisp implementation"))
+
 (defun emit-outputs-atomically
     (games palette settings-icon games-output palette-output)
   ;; Temporary files remain beside their outputs so both final renames are
   ;; atomic on the Deck's persistent filesystem.
   (let* ((games-temporary
-           (format nil "~A.tmp.~D" games-output (ext:getpid)))
+           (format nil "~A.tmp.~D" games-output (process-id)))
          (palette-temporary
-           (format nil "~A.tmp.~D" palette-output (ext:getpid)))
+           (format nil "~A.tmp.~D" palette-output (process-id)))
          (games-committed nil)
          (palette-committed nil))
     (unwind-protect
@@ -347,10 +362,9 @@
                                    :if-does-not-exist :create)
              (write-palette-tsv palette settings-icon stream)
              (finish-output stream))
-           (rename-file palette-temporary palette-output
-                        :if-exists :supersede)
+           (replace-file palette-temporary palette-output)
            (setf palette-committed t)
-           (rename-file games-temporary games-output :if-exists :supersede)
+           (replace-file games-temporary games-output)
            (setf games-committed t))
       (unless games-committed
         (when (probe-file games-temporary)
@@ -359,10 +373,15 @@
         (when (probe-file palette-temporary)
           (ignore-errors (delete-file palette-temporary)))))))
 
+(defun command-arguments ()
+  #+ecl (ext:command-args)
+  #+sbcl sb-ext:*posix-argv*
+  #-(or ecl sbcl) (catalog-error "unsupported Common Lisp implementation"))
+
 (defun last-four-command-arguments ()
   ;; ECL includes its own options in EXT:COMMAND-ARGS.  The four fixed launcher
   ;; arguments are intentionally taken from the tail.
-  (let* ((arguments (ext:command-args))
+  (let* ((arguments (command-arguments))
          (count (length arguments)))
     (when (< count 4)
       (catalog-error
@@ -392,11 +411,16 @@
                 "catalog: wrote ~D games, ~D palette roles, and icon ~A~%"
                 (length games) (length palette) settings-icon)))))
 
+(defun quit-process (status)
+  #+ecl (ext:quit status)
+  #+sbcl (sb-ext:exit :code status)
+  #-(or ecl sbcl) (error "unsupported Common Lisp implementation"))
+
 (handler-case
     (progn
       (main)
-      (ext:quit 0))
+      (quit-process 0))
   (error (condition)
     (format *error-output* "catalog: ~A~%" condition)
     (finish-output *error-output*)
-    (ext:quit 1)))
+    (quit-process 1)))
