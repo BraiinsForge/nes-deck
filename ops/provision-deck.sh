@@ -18,6 +18,7 @@ EOF
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+config_library=$script_dir/lib/deck-config.sh
 config=$repo_root/deck.conf
 wireguard_server=root@10.0.0.1
 wifi_profiles=/var/lib/iwd
@@ -60,9 +61,15 @@ done
   exit 1
 }
 
-"$repo_root/ops/deploy.sh" --config "$config" --check-config >/dev/null
-target=$(awk -F= '$1 == "DECK_SSH_TARGET" { print substr($0, index($0, "=") + 1) }' "$config")
-wireguard_address=$(awk -F= '$1 == "DECK_WIREGUARD_ADDRESS" { print substr($0, index($0, "=") + 1) }' "$config")
+[[ -f $config_library && ! -L $config_library ]] || {
+  echo "Deck configuration library is missing or unsafe: $config_library" >&2
+  exit 1
+}
+# shellcheck source=ops/lib/deck-config.sh
+source "$config_library"
+deck_config_load "$config"
+target=$DECK_SSH_TARGET
+wireguard_address=$DECK_WIREGUARD_ADDRESS
 
 for command in awk find install mktemp sha256sum sort ssh stat tar tr wc xxd; do
   command -v "$command" >/dev/null 2>&1 || {

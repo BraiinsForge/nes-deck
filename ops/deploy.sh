@@ -13,6 +13,7 @@ usage() {
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 activate_script=$script_dir/deploy/activate.sh
+config_library=$script_dir/lib/deck-config.sh
 config=$repo_root/deck.conf
 check_config=0
 target_override=
@@ -37,83 +38,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -f $config && ! -L $config ]] || {
-  echo "Missing private Deck configuration: $config" >&2
-  echo "Create it with: $repo_root/ops/configure-deck.sh $config" >&2
+[[ -f $config_library && ! -L $config_library ]] || {
+  echo "Deck configuration library is missing or unsafe: $config_library" >&2
   exit 1
 }
-config_mode=$(stat -c %a -- "$config")
-if (( (8#$config_mode & 077) != 0 )); then
-  echo "Deck configuration must not be accessible by group or others: $config" >&2
-  exit 1
-fi
-
-target=
-wireguard_address=
-uploader_password=
-target_seen=0
-wireguard_seen=0
-password_seen=0
-line_number=0
-while IFS= read -r line || [[ -n $line ]]; do
-  line_number=$((line_number + 1))
-  [[ -z $line || $line == \#* ]] && continue
-  [[ $line == *=* ]] || {
-    echo "Malformed configuration line $line_number in $config" >&2
-    exit 1
-  }
-  key=${line%%=*}
-  value=${line#*=}
-  case $key in
-    DECK_SSH_TARGET)
-      [[ $target_seen -eq 0 ]] || {
-        echo "Duplicate DECK_SSH_TARGET in $config" >&2
-        exit 1
-      }
-      target=$value
-      target_seen=1
-      ;;
-    DECK_WIREGUARD_ADDRESS)
-      [[ $wireguard_seen -eq 0 ]] || {
-        echo "Duplicate DECK_WIREGUARD_ADDRESS in $config" >&2
-        exit 1
-      }
-      wireguard_address=$value
-      wireguard_seen=1
-      ;;
-    ROM_UPLOADER_PASSWORD)
-      [[ $password_seen -eq 0 ]] || {
-        echo "Duplicate ROM_UPLOADER_PASSWORD in $config" >&2
-        exit 1
-      }
-      uploader_password=$value
-      password_seen=1
-      ;;
-    *)
-      echo "Unknown configuration key on line $line_number in $config: $key" >&2
-      exit 1
-      ;;
-  esac
-done <"$config"
-
-if [[ -n $target_override ]]; then
-  target=$target_override
-fi
-[[ $target =~ ^root@[A-Za-z0-9._:-]+$ ]] || {
-  echo "DECK_SSH_TARGET must have the form root@DECK-IP" >&2
-  exit 1
-}
-if [[ ! $wireguard_address =~ ^10\.0\.0\.([0-9]{1,3})$ ||
-      ${BASH_REMATCH[1]} -lt 2 || ${BASH_REMATCH[1]} -gt 253 ]]; then
-  echo "DECK_WIREGUARD_ADDRESS must be a usable 10.0.0.0/24 peer address" >&2
-  exit 1
-fi
-if [[ $password_seen -eq 0 || ${#uploader_password} -lt 8 ||
-      ${#uploader_password} -gt 128 || $uploader_password == *$'\r'* ||
-      $uploader_password == *$'\n'* ]]; then
-  echo "ROM_UPLOADER_PASSWORD must contain 8 through 128 bytes without line breaks" >&2
-  exit 1
-fi
+# shellcheck source=ops/lib/deck-config.sh
+source "$config_library"
+deck_config_load "$config" "$target_override"
+target=$DECK_SSH_TARGET
+wireguard_address=$DECK_WIREGUARD_ADDRESS
+uploader_password=$ROM_UPLOADER_PASSWORD
 
 if [[ $check_config -eq 1 ]]; then
   echo "Deck configuration is valid for $target at $wireguard_address"

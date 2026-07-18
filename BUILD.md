@@ -121,8 +121,9 @@ boundaries, ROM validation, atomic storage, and the Paper UI contract.
 Run shell checks on deployment code with:
 
 ```sh
-nix shell nixpkgs#shellcheck -c shellcheck \
-  ops/configure-deck.sh ops/deploy.sh ops/deploy/activate.sh \
+nix shell nixpkgs#shellcheck -c shellcheck -x \
+  ops/lib/deck-config.sh ops/configure-deck.sh ops/deploy.sh \
+  ops/deploy/activate.sh ops/provision-deck.sh \
   deploy/menu/nes-deck-swap.init \
   tests/run-host-tests.sh tests/deploy_config_test.sh \
   tests/deploy_activation_test.sh \
@@ -236,6 +237,7 @@ retrodeck/
 │   ├── deck-menu/              covers, screenshots, and FOSS CHIP-8 fetcher
 │   ├── deck-wifi/              profile-only Wi-Fi helper
 │   ├── deploy/                 validated on-Deck activation transaction
+│   ├── lib/                    shared strict deployment configuration parser
 │   └── deploy.sh               local build, staging, and transfer
 ├── patches/                    pinned upstream fixes
 ├── protocol/                   Deck widget and layer-shell client protocols

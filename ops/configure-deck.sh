@@ -7,7 +7,15 @@ export LC_ALL=C
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+config_library=$script_dir/lib/deck-config.sh
 config=${1:-$repo_root/deck.conf}
+
+[[ -f $config_library && ! -L $config_library ]] || {
+  echo "Deck configuration library is missing or unsafe: $config_library" >&2
+  exit 1
+}
+# shellcheck source=ops/lib/deck-config.sh
+source "$config_library"
 
 if [[ $# -gt 1 ]]; then
   echo "Usage: $0 [CONFIG]" >&2
@@ -23,15 +31,14 @@ if [[ ! -d $(dirname -- "$config") ]]; then
 fi
 
 read -r -p 'Deck SSH target (root@IP): ' target
-[[ $target =~ ^root@[A-Za-z0-9._:-]+$ ]] || {
-  echo "Invalid Deck SSH target" >&2
+deck_config_valid_ssh_target "$target" || {
+  echo "Deck SSH target must have the form root@IP" >&2
   exit 1
 }
 
 read -r -p 'Deck WireGuard address (10.0.0.2-253): ' wireguard_address
-if [[ ! $wireguard_address =~ ^10\.0\.0\.([0-9]{1,3})$ ||
-      ${BASH_REMATCH[1]} -lt 2 || ${BASH_REMATCH[1]} -gt 253 ]]; then
-  echo "Invalid Deck WireGuard address" >&2
+if ! deck_config_valid_wireguard_address "$wireguard_address"; then
+  echo "Deck WireGuard address must be between 10.0.0.2 and 10.0.0.253" >&2
   exit 1
 fi
 
@@ -43,9 +50,8 @@ if [[ $uploader_password != "$confirmation" ]]; then
   echo "Passwords do not match" >&2
   exit 1
 fi
-if [[ ${#uploader_password} -lt 8 || ${#uploader_password} -gt 128 ||
-      $uploader_password == *$'\r'* || $uploader_password == *$'\n'* ]]; then
-  echo "Password must contain 8 through 128 bytes without line breaks" >&2
+if ! deck_config_valid_uploader_password "$uploader_password"; then
+  echo "ROM uploader password must contain 8 through 128 bytes without line breaks" >&2
   exit 1
 fi
 
