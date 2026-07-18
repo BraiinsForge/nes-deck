@@ -59,7 +59,7 @@ fi
   exit 1
 }
 
-for command in nix ssh scp tar gzip sha256sum; do
+for command in nix ssh tar gzip sha256sum; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1

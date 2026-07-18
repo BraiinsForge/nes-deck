@@ -1,10 +1,11 @@
 # Retro Deck
 
 Retro Deck turns a Braiins Forge Deck into a persistent touch-first game and
-program launcher. It boots directly into a native framebuffer dashboard with
-NES, Game Boy, Game Boy Color, ZX Spectrum, CHIP-8, utilities, language REPLs,
-and a chiptune player. Two Retro Games THEGamepad controllers work as stable
-Player 1 and Player 2 devices.
+program launcher. It runs as a fullscreen BMC scene when `bmc-compositor` is
+installed and retains a direct-framebuffer mode for Decks without BMC. The
+dashboard provides NES, Game Boy, Game Boy Color, ZX Spectrum, CHIP-8,
+utilities, language REPLs, and a chiptune player. Two Retro Games THEGamepad
+controllers work as stable Player 1 and Player 2 devices.
 
 ## Deploy to a Deck
 
@@ -12,7 +13,8 @@ You need:
 
 - a Braiins Forge Deck reachable as `root` over SSH
 - a mounted `/mnt/data` partition on the Deck
-- a Linux development machine with Nix flakes, SSH, SCP, tar, and gzip
+- a Linux development machine with Nix flakes, an OpenSSH client, tar, gzip,
+  standard GNU utilities, and `xxd`
 - this private repository, including the owner-supplied `roms/` library
 - stable power during activation
 
@@ -161,11 +163,11 @@ privately as `/mnt/data/langs/lisp/.ecl_history`.
 Console emulators show an outlined cross in the top-left corner. Hold it for
 two seconds to return to the dashboard. A two-second hold anywhere also leaves
 a running emulator or terminal, and touch does not emulate game controls. In
-the chiptune player, the top-right cross returns immediately. The four bottom icons control playback mode,
-previous file, play/pause, and next file. Controller Left/Right also changes
-files, Up/Down changes the persistent volume in five-point steps, L/R changes
-subsongs when a music file exposes more than one, A pauses, Start changes
-playback mode, and B returns.
+the chiptune player, the top-right cross returns immediately. The four bottom
+icons control playback mode, previous file, play/pause, and next file.
+Controller Left/Right also changes files, Up/Down changes the persistent volume
+in five-point steps, L/R changes subsongs when a music file exposes more than
+one, A pauses, Start changes playback mode, and B returns.
 
 The Wi-Fi editor only writes a root-only profile. Saving does not scan, roam,
 reload networking, or disturb the current connection. The profile becomes
@@ -231,13 +233,19 @@ Check the service and its bounded persistent log:
 Restart the dashboard without rebooting the Deck:
 
 ```sh
-ssh root@10.0.0.10 '/etc/init.d/nes-deck restart'
+ssh root@10.0.0.10 '
+  if [ -x /etc/init.d/bmc-compositor ]; then
+    /etc/init.d/bmc-compositor restart
+  else
+    /etc/init.d/nes-deck restart
+  fi'
 ```
 
 If the display remains black, inspect the log before changing files or network
-configuration. The launcher refuses to start before `/mnt/data` is mounted,
-validates the framebuffer geometry, hides the console cursor, and unblanks the
-panel on every return.
+configuration. BMC owns the dashboard process when its compositor is present;
+the `nes-deck` service owns the direct-framebuffer installation. Both require
+`/mnt/data` to be mounted. The direct-framebuffer path also validates display
+geometry, hides the console cursor, and unblanks the panel on every return.
 
 ## Development
 

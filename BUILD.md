@@ -18,12 +18,14 @@ details for development.
 ## Prerequisites
 
 Install Nix with flakes enabled. Host tests also require a C and C++ compiler,
-`pkg-config`, libpng development headers, and ImageMagick.
+`pkg-config`, libpng and Wayland development headers, `wayland-scanner`, and
+ImageMagick.
 
 On Debian or Ubuntu:
 
 ```sh
-sudo apt-get install build-essential imagemagick pkg-config libpng-dev
+sudo apt-get install \
+  build-essential imagemagick libpng-dev libwayland-dev pkg-config
 ```
 
 Then clone the private repository:
@@ -211,11 +213,14 @@ the first fullscreen SHM frame is faulted in. Existing swapfiles are left
 untouched if they cannot be enabled. The original configuration is retained
 once as `/etc/bmc_config.json.retro-deck.bak` before the first scene edit.
 
-Audio uses `/dev/dsp` through the Deck's ALSA OSS bridge. The hardware stream
-is S16_LE stereo. NES, ZX, CHIP-8, the timer, menu cues, and chiptunes use
-44.1 kHz. Gambatte produces 32768 Hz and is explicitly resampled to the Deck's
-verified 32000 Hz OSS rate. Gain is applied in the native mixer because the
-kernel OSS path bypasses ALSA userspace soft volume.
+Audio uses `/dev/dsp` through the Deck's ALSA OSS bridge. All streams use
+signed 16-bit little-endian samples. Emulator and chiptune streams are stereo;
+the menu and timer cues are mono. FCEUmm reports 48 kHz. The OSS device stays at its
+required nominal 48 kHz while the runtime resamples to the measured 47,328
+frames/s application clock. Fuse, CHIP-8, the timer, menu cues, and chiptunes
+use 44.1 kHz. Gambatte produces 32,768 Hz and is explicitly resampled to the
+Deck's verified 32 kHz OSS rate. Gain is applied in the native mixer because
+the kernel OSS path bypasses ALSA userspace soft volume.
 
 The framebuffer has no page-flip API. Frontends build complete frames in
 cacheable memory and copy finished rows to fb0 to reduce tearing and protect
@@ -230,6 +235,7 @@ retrodeck/
 ├── deploy/
 │   ├── menu/                   catalog, launcher, and procd service
 │   ├── terminal/               fbterm wrapper, fontconfig, and keymaps
+│   ├── uploader/               uploader service and credential plumbing
 │   └── widget/                 BMC manifest, launcher, and scene installer
 ├── nix/                        ECL and runtime-specific Nix expressions
 ├── ops/
@@ -248,6 +254,7 @@ retrodeck/
 │   ├── menu_credits.cpp        FOSS manifest and perspective crawl
 │   ├── menu_io.cpp             checked low-level menu I/O primitives
 │   ├── menu_network.cpp        sanitized Wi-Fi and interface status
+│   ├── menu_sound.cpp          dashboard cue synthesis and OSS playback
 │   ├── menu_state.cpp          atomic volume, brightness, and keymap state
 │   ├── menu_text.cpp           path and display-text validation
 │   ├── menu_ui.cpp             shared dashboard drawing primitives
@@ -260,6 +267,7 @@ retrodeck/
 │   └── joypad_input.cpp        stable two-controller input
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
+├── uploader/                   authenticated ROM intake web service
 ├── flake.nix                   pinned cross-build definitions
 └── README.md                   deployment and operation guide
 ```
