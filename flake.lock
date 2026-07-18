@@ -68,22 +68,6 @@
         "type": "github"
       }
     },
-    "infones-src": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1594116344,
-        "narHash": "sha256-JRFGMxPMDjLMe6PhhhY2/xXvHsnnjOtJnzigKtc/rms=",
-        "owner": "nejidev",
-        "repo": "arm-NES-linux",
-        "rev": "e14ec579b3fb58f4c061ca38c103cc11d58d1673",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nejidev",
-        "repo": "arm-NES-linux",
-        "type": "github"
-      }
-    },
     "lua-src": {
       "flake": false,
       "locked": {
@@ -119,7 +103,6 @@
         "fceumm-src": "fceumm-src",
         "fuse-src": "fuse-src",
         "gambatte-src": "gambatte-src",
-        "infones-src": "infones-src",
         "lua-src": "lua-src",
         "nixpkgs": "nixpkgs"
       }
