@@ -250,4 +250,6 @@ panel on every return.
 
 The project combines components under GPL, LGPL, BSD, MIT, and CC0 terms.
 Exact upstream revisions are pinned, and required license texts are installed
-with the binaries. Owner-supplied ROMs remain private and are not relicensed.
+with the binaries. The tracked summary and archive construction are documented
+in [THIRD_PARTY.md](THIRD_PARTY.md). Owner-supplied ROMs remain private and are
+not relicensed.

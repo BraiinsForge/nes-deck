@@ -54,6 +54,7 @@ nix build --no-link --print-out-paths .#python-deck
 nix build --no-link --print-out-paths .#chibi-deck
 nix build --no-link --print-out-paths .#chiptune-deck
 nix build --no-link --print-out-paths .#rom-uploader
+nix build --no-link --print-out-paths .#runtime-licenses
 nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 ```
 
@@ -72,7 +73,8 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `chibi-deck` | `bin/chibi-scheme` plus Scheme modules |
 | `chiptune-deck` | `bin/chiptune-deck` |
 | `rom-uploader` | `bin/rom-uploader` |
-| ECL expression | `bin/ecl.bin` plus the ECL runtime library |
+| `runtime-licenses` | Shared runtime and asset notices |
+| ECL expression | `bin/ecl.bin`, runtime library, and notices |
 
 Check that a package has no Nix runtime references before deploying it:
 
