@@ -20,8 +20,8 @@ Clone the repository, create its private per-Deck configuration, validate the
 fresh-install plan, and provision:
 
 ```sh
-git clone git@github.com:BraiinsForge/nes-deck.git
-cd nes-deck
+git clone git@github.com:BraiinsForge/retrodeck.git
+cd retrodeck
 ./ops/configure-deck.sh
 ./ops/provision-deck.sh --check
 ./ops/provision-deck.sh

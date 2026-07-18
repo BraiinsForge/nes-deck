@@ -29,8 +29,8 @@ sudo apt-get install build-essential pkg-config libpng-dev
 Then clone the private repository:
 
 ```sh
-git clone git@github.com:BraiinsForge/nes-deck.git
-cd nes-deck
+git clone git@github.com:BraiinsForge/retrodeck.git
+cd retrodeck
 ```
 
 The first Nix build downloads the pinned cross toolchain and may take several
@@ -205,7 +205,7 @@ stall sound and frame pacing.
 ## Source layout
 
 ```text
-nes-deck/
+retrodeck/
 ├── chiptunes/                  CC0 seed tracks and provenance
 ├── deploy/
 │   ├── menu/                   catalog, launcher, and procd service
