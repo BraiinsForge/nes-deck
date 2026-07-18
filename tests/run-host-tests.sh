@@ -45,16 +45,18 @@ fuse_src=$(nix eval --raw --impure --expr \
   '(builtins.getFlake ("path:" + toString ./.)).inputs."fuse-src".outPath')
 compile_cpp_test tests/zx_keyboard_test.cpp zx-keyboard-test \
   -Isrc -I"$fuse_src/src"
+compile_cpp_test tests/menu_ui_test.cpp menu-ui-test src/menu_ui.cpp
 
 png_flags=$(pkg-config --cflags --libs libpng)
 # pkg-config output is intentionally split into compiler arguments.
 # shellcheck disable=SC2086
 "$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-  src/deck_menu.cpp src/menu_sound.cpp $png_flags -o "$work/deck-menu-host"
+  src/deck_menu.cpp src/menu_sound.cpp src/menu_ui.cpp $png_flags \
+  -o "$work/deck-menu-host"
 "$work/deck-menu-host" --geometry-test
 # shellcheck disable=SC2086
 "$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-  tests/deck_menu_test.cpp src/menu_sound.cpp $png_flags \
+  tests/deck_menu_test.cpp src/menu_sound.cpp src/menu_ui.cpp $png_flags \
   -o "$work/deck-menu-test"
 "$work/deck-menu-test"
 

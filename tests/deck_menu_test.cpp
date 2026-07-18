@@ -1075,9 +1075,8 @@ int main() {
   render_wifi(wifi_state, network_status, &canvas, &wifi_layout);
   expect(wifi_layout.keys.size() == 30,
          "alphabet keyboard exposes all letter and common SSID keys");
-  expect(wifi_layout.keys[0].value == 'q' &&
-             std::memcmp(glyph_rows('q'), glyph_rows('Q'), 7) != 0,
-         "lowercase Wi-Fi keys use distinct lowercase bitmap glyphs");
+  expect(wifi_layout.keys[0].value == 'q',
+         "alphabet keyboard starts with lowercase keys");
   const Canvas lowercase_wifi = canvas;
   wifi_state.uppercase = true;
   render_wifi(wifi_state, network_status, &canvas, &wifi_layout);
