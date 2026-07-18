@@ -130,7 +130,7 @@ passphrases, WireGuard private keys, or ROM data.
 
 - `/mnt/data/nes-deck/nes-deck` is the statically linked, Cortex-A7/NEON-tuned
   FCEUmm frontend. The deployed performance build has SHA-256
-  `c75d6d96994faa977953bcba18b4913a6f284d645c3d8bdd3d283dabdd94f27c`.
+  `5245062b12beec2381e6a42196310ea6625d11e8d1c00f25b49b60cca423fa07`.
 - ALSA card 0 is `BMC100-MAX98357A-Audio`: STM32 I2S driving a MAX98357A.
 - Native playback is stereo S16_LE/S32_LE at 8-96 kHz. `/dev/dsp` is ALSA's
   OSS compatibility layer and accepts S16_LE mono at exactly 44.1 kHz,
@@ -192,7 +192,7 @@ passphrases, WireGuard private keys, or ROM data.
   XRUN noise, and the user confirmed Adjustris no longer produced distorted
   audio.
 - The deployed staged-video/S16/two-gamepad build has SHA-256
-  `c75d6d96994faa977953bcba18b4913a6f284d645c3d8bdd3d283dabdd94f27c`.
+  `5245062b12beec2381e6a42196310ea6625d11e8d1c00f25b49b60cca423fa07`.
   Its live ALSA stream was verified as RUNNING at exact 44100 Hz with 512-frame
   hardware periods and a 4096-frame hardware buffer. The OSS ring is filled
   while its trigger is paused and playback begins on the first callback. During
@@ -312,21 +312,20 @@ passphrases, WireGuard private keys, or ROM data.
   core at `dfc165599f3f1068c40a0b7ad6fe5f161283d483` for both GB and GBC. It is
   GPL-2.0-only, built with Cortex-A7/NEON tuning and LTO, and emits native
   RGB565 frames. Its deployed SHA-256 is
-  `1b81dfa37afe3cbb861c9be742ef7a9e6d097f54a3e844b0719a3768665c09a3`.
+  `1d53fc0e379c6eb1523c8a42a34515d5d0c4ad5a5d3ad3f9296bddf87200e3ec`.
   SRAM and RTC data are saved beside the ROM as `.sav` and `.rtc` files.
 - `/mnt/data/nes-deck/zx-deck` statically hosts Fuse 1.6.0 at pinned revision
   `bce196fb774835fe65b3e5b821887a4ccf657167`. Its deployed SHA-256 is
-  `f541d68fb6c671e3205df37458645863ec43d88c8ccbbaee79987069f9e9436e`.
+  `67b06621e40adffc481708132ee41afb66ff9f30c450fc3f6a0fd0817f15e428`.
   It emulates a 48K Spectrum, automatically loads TAP media, maps Player 1 to
   Kempston and Player 2 to Sinclair 2, and renders the medium-border 288x216
   frame at exact 2x scale inside the rounded-screen safe area.
 - `/mnt/data/nes-deck/chip8-deck` statically hosts the pinned c-octo core for
   CHIP-8, SCHIP, and XO-CHIP. Its deployed SHA-256 is
-  `c4cbdc26f09eb565b3aebaf4068a10c8cdb9274be966b2b6ddcea5cb09d34104`.
+  `921f0fc0d47b4939418a64359b8c3a8866cdc20febd34c36558b63eb12f51050`.
   ROM sidecars hold tickrate, palette, quirk, and controller-profile settings.
 - The GB/GBC, ZX, and CHIP-8 frontends share exact framebuffer validation,
-  nearest-neighbor integer scaling inside a 16-pixel rounded-panel safe area,
-  OSS S16 mono audio,
+  integer layout inside a 16-pixel rounded-panel safe area, OSS S16 mono audio,
   volume inheritance, frame pacing, and the stable two-controller discovery
   code. Completed frames are built in cacheable RAM and only the active
   rotated rectangle is published to the live scanout, preventing the moving
@@ -334,6 +333,14 @@ passphrases, WireGuard private keys, or ROM data.
   one complete physical row at a time. GB's 160x144 image renders at 3x, ZX's
   288x216 medium-border image at 2x, 64x32 CHIP-8 at 14x, and 128x64
   high-resolution modes at 7x.
+- On BMC compositor installations, the Wayland path copies 1:1 source frames
+  without per-pixel coordinate division. A live Kirby probe improved from
+  1.43-1.60 seconds per 60 frames to 0.985-1.013 seconds, restoring a healthy
+  NES audio queue with no dropped samples. Indexed CHIP-8 frames are expanded
+  with nearest-neighbor integer scaling before submission; a live Outlaw probe
+  confirmed three 896x448 game buffers. The client now passes `MFD_CLOEXEC` to
+  `memfd_create`. This avoids Fuse's dummy `mkstemp` fallback, which previously
+  made ZX games fail before their first video frame.
 - Live Elite and Knight Lore runs detected the two stable controller paths,
   opened 44.1 kHz audio, rendered distinct framebuffer captures, and exited
   cleanly on TERM. Elite's initial accelerated tape load took 16.656 seconds;

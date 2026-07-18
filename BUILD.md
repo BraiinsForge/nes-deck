@@ -174,7 +174,9 @@ The menu submits event-driven XRGB8888 shared-memory buffers through the Deck
 widget protocol, so the compositor can move it during scene swipes. A launched
 game maps a fullscreen black layer surface plus a centered game layer surface.
 The emulator keeps its native frame clock and submits frames independently of
-the widget callback limit. The compositor performs the final GPU scale. When
+the widget callback limit. Native RGB frames are mapped to the centered layer
+by the compositor. Indexed CHIP-8 frames are expanded to their integer-scaled
+layer size by the client so compositor filtering cannot blur their pixels. When
 the game exits, both layer surfaces disappear and scene swiping resumes.
 
 `ops/deploy.sh` installs the widget under `/mnt/data/bmc-widgets/retro-deck`.
