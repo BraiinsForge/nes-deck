@@ -231,6 +231,8 @@ retrodeck/
 ├── roms/                       private canonical ROM library and checksums
 ├── src/
 │   ├── deck_menu.cpp           dashboard, settings, and child supervision
+│   ├── menu_credits.cpp        FOSS manifest parsing and animated crawl
+│   ├── menu_ui.cpp             shared dashboard drawing primitives
 │   ├── deck_runtime.cpp        video selection, audio, and frame clock
 │   ├── deck_wayland.cpp        shared-memory widget and game surfaces
 │   ├── libretro_deck.cpp       NES, GB/GBC, and ZX host

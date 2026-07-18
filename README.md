@@ -143,6 +143,11 @@ five-point steps and brightness is bounded from 10 through 100. Menu actions
 play short cues while sound is enabled. The service disables console blanking
 at boot and whenever a child program returns.
 
+The small `(c)` control in the bottom-left opens the animated FOSS dependency
+and license crawl. B or the top-right close control returns to the dashboard.
+The crawl is generated from the tracked `deploy/menu/credits.tsv` manifest;
+complete installed license texts are kept under `/mnt/data/nes-deck/licenses`.
+
 The Common Lisp REPL runs through `rlwrap`; editable command history persists
 privately as `/mnt/data/langs/lisp/.ecl_history`.
 
@@ -194,7 +199,7 @@ A keyboard remains a Player 1 fallback for NES, GB/GBC, and CHIP-8:
 ## ROMs and save games
 
 `roms/<system>/` is the canonical tracked library. Supported intake folders
-are `nes`, `gb`, `gbc`, and `chip8`. A ROM or single-ROM ZIP at the
+are `nes`, `gb`, `gbc`, `zx`, and `chip8`. A ROM or single-ROM ZIP at the
 repository root is unprocessed intake and must be validated, renamed, filed,
 checksummed, and added to the catalog before deployment. See
 [roms/README.md](roms/README.md) for the exact intake contract.

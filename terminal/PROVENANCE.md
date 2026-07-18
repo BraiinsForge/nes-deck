@@ -11,8 +11,9 @@ safe area, use reported RGB565 channel ordering, require stable monospaced font
 advances, and harden glyph clipping.
 
 fbterm is licensed under GPL-2. The complete license is in
-`fbterm/COPYING`. The wrapper documentation used for reference is retained in
-`provenance/`.
+`fbterm/COPYING`. The wrapper's old installation guides were intentionally
+removed: they described a separate precompiled release, obsolete fonts, and a
+manual service takeover that does not match Retro Deck's integrated build.
 
 The build bundles unmodified DejaVu Sans Mono 2.37 from nixpkgs. Its complete
 Bitstream Vera/DejaVu license notice is retained in `fonts/DejaVu-LICENSE` and
