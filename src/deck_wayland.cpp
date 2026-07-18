@@ -502,14 +502,17 @@ struct DeckWaylandPresentation::Impl {
 
   template <typename Reader>
   bool present(unsigned int source_width, unsigned int source_height,
-               const Reader &read_pixel, std::string *error) {
+               bool scale_gameplay, const Reader &read_pixel,
+               std::string *error) {
     if (!configured || !surface) {
       if (error)
         *error = "Wayland surface is not configured";
       return false;
     }
-    const unsigned int target_width = widget ? width : source_width;
-    const unsigned int target_height = widget ? height : source_height;
+    const unsigned int target_width =
+        widget || scale_gameplay ? width : source_width;
+    const unsigned int target_height =
+        widget || scale_gameplay ? height : source_height;
     if (!ensure_slots(target_width, target_height, error))
       return false;
     BufferSlot *slot = available_slot();
@@ -521,6 +524,23 @@ struct DeckWaylandPresentation::Impl {
             slot->memory + static_cast<size_t>(y) * target_width;
         for (unsigned int x = 0; x < target_width; ++x)
           destination[x] = read_pixel(x, y);
+      }
+    } else if (target_width % source_width == 0 &&
+               target_height % source_height == 0 &&
+               target_width / source_width == target_height / source_height) {
+      const unsigned int scale = target_width / source_width;
+      for (unsigned int source_y = 0; source_y < source_height; ++source_y) {
+        uint32_t *first_row =
+            slot->memory + static_cast<size_t>(source_y) * scale * target_width;
+        for (unsigned int source_x = 0; source_x < source_width; ++source_x) {
+          std::fill_n(first_row + static_cast<size_t>(source_x) * scale,
+                      scale, read_pixel(source_x, source_y));
+        }
+        for (unsigned int duplicate_y = 1; duplicate_y < scale; ++duplicate_y) {
+          std::memcpy(first_row + static_cast<size_t>(duplicate_y) * target_width,
+                      first_row,
+                      static_cast<size_t>(target_width) * sizeof(uint32_t));
+        }
       }
     } else {
       for (unsigned int y = 0; y < target_height; ++y) {
@@ -784,7 +804,7 @@ bool DeckWaylandPresentation::present_rgb565(const void *pixels,
     return false;
   }
   const uint8_t *bytes = static_cast<const uint8_t *>(pixels);
-  return impl_->present(width, height,
+  return impl_->present(width, height, false,
                         [bytes, pitch](unsigned int x, unsigned int y) {
                           const uint16_t *row = reinterpret_cast<const uint16_t *>(
                               bytes + static_cast<size_t>(y) * pitch);
@@ -804,7 +824,7 @@ bool DeckWaylandPresentation::present_xrgb8888(const void *pixels,
     return false;
   }
   const uint8_t *bytes = static_cast<const uint8_t *>(pixels);
-  return impl_->present(width, height,
+  return impl_->present(width, height, false,
                         [bytes, pitch](unsigned int x, unsigned int y) {
                           const uint32_t *row = reinterpret_cast<const uint32_t *>(
                               bytes + static_cast<size_t>(y) * pitch);
@@ -823,7 +843,7 @@ bool DeckWaylandPresentation::present_indexed(
     return false;
   }
   return impl_->present(
-      width, height,
+      width, height, true,
       [pixels, pitch, palette, palette_size](unsigned int x, unsigned int y) {
         const uint8_t index = pixels[static_cast<size_t>(y) * pitch + x];
         const uint32_t color = index < palette_size ? palette[index] : 0;
