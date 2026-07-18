@@ -232,6 +232,9 @@ panel on every return.
 
 - [BUILD.md](BUILD.md) covers reproducible builds, tests, screenshots, and
   platform details.
+- [docs/swipe-rendering-postmortem.org](docs/swipe-rendering-postmortem.org)
+  explains the buffer-lifecycle and deployment failures behind the clock
+  swipe rendering incident.
 - [deploy/menu/README.md](deploy/menu/README.md) defines the installed layout
   and strict catalog schema.
 - [DECK_NOTES.md](DECK_NOTES.md) records verified hardware, audio, display,

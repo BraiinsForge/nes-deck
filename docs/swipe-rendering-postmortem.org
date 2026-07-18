@@ -1,0 +1,548 @@
+#+title: Clock Swipe Rendering Failure Postmortem
+#+subtitle: Clock and Retro Deck scene transitions on the BMC100 Deck
+#+date: 2026-07-18
+#+startup: overview
+#+options: toc:3 num:nil
+
+* Executive summary
+
+The swipe failure was not one compositor bug. It was a chain of two buffer-lifecycle
+problems, made harder to diagnose by one deployment mistake.
+
+1. The clock's WASM host cached a long-lived DMA-BUF export in file descriptor 0.
+   That descriptor later became invalid. On the next use, duplicating it failed with
+   ~EBADF~. The render loop treated that render error as fatal and tore down the clock
+   slot. The visible result was a badly smeared clock for a short time, followed by a
+   black clock scene.
+2. The first code fix was deployed through the ~core~ package, but the affected
+   ~bmc-wasm-host~ binary was selected by an absolute Nix store path baked into the
+   ~widget-clock~ package. The Deck therefore continued running the old host. This was
+   why the first physical retest reproduced the exact old failure.
+3. Once the correct host was running, recovery stopped the clock from dying but exposed
+   a second signature: one clock frame was correct and the next was smeared, alternating
+   at the clock's one-second render cadence. The host uses two export buffers, so this
+   was direct evidence that one slot was healthy and the other was not. Rapid swipes
+   repeatedly put the clock into ~Prepared~, where an optimization destroyed one half
+   of the double buffer and recreated it later. We removed that churn and retained both
+   buffers while a widget is ~Prepared~.
+
+The first cause, the fatal ~EBADF~ path, is proven by the host log and was verified gone
+after the descriptor-ownership fix. The fact that the remaining corruption belonged to
+one side of the double buffer is also proven by its one-second A/B cadence. The final
+step from that observation to Prepared-state destruction and recreation is a strong
+causal inference, not a captured low-level GPU fault. We did not instrument a checksum
+at every producer, Wayland, compositor, and GPU boundary, and the requested 30 to 50
+swipe acceptance result after generation 6 was never recorded before work moved to the
+emulators.
+
+| Observed symptom                         | Direct mechanism                                           | Confidence       | Change                                        |
+|------------------------------------------+------------------------------------------------------------+------------------+-----------------------------------------------|
+| Smear followed by a black clock          | ~EBADF~ made the render fail; the host removed the slot     | Proven           | ~2b5e710d~, then ~88657444~                    |
+| First fix appeared to do nothing         | The Deck still ran the old host from ~widget-clock~         | Proven           | Deploy ~widget-clock~ and restart compositor  |
+| Correct and smeared frames alternated    | Slots A and B alternated, and one slot contained bad pixels | Proven           | Diagnostic consequence of double buffering   |
+| Rapid swipes created the bad A/B pair    | ~Prepared~ destroyed and later recreated one buffer         | Strong inference | ~445c3f9d~ retains both Prepared buffers      |
+
+* Scope and terminology
+
+This document concerns the full-screen clock on the Deck known during diagnosis as
+~.15~, and swipes between that clock scene and Retro Deck on 2026-07-18. Device log
+timestamps quoted below are UTC. It does not describe the later NES, CHIP-8, or ZX
+emulator rendering problems.
+
+The word /buffer/ was used for several different objects during the live investigation.
+They need to be kept separate:
+
+- A GBM buffer object, or GBM BO, is the actual GPU-shareable allocation.
+- An EGLImage and GL framebuffer object let the host render into that allocation.
+- A DMA-BUF file descriptor is a process handle used to share the allocation. The
+  descriptor is not the pixels and is not the allocation itself.
+- A ~wl_buffer~ is the Wayland protocol object minted from the DMA-BUF metadata.
+- The compositor imports the ~wl_buffer~ into a texture and uses that texture while
+  composing the scene.
+- A ~wl_buffer.release~ event tells the producer when that submitted slot may be reused
+  or destroyed.
+
+The relevant path is therefore:
+
+#+begin_example
+clock WASM
+   -> shared FemtoVG staging framebuffer
+   -> export slot A or B (GBM BO + EGLImage + GL FBO)
+   -> DMA-BUF descriptor and metadata
+   -> matching wl_buffer A or B
+   -> compositor texture
+   -> scanout
+#+end_example
+
+The implementation is split between
+[[file:../../bmc-main/bmc-widget/src/egl.rs][~bmc-widget/src/egl.rs~]],
+[[file:../../bmc-main/bmc-wasm-host/src/render_target.rs][~bmc-wasm-host/src/render_target.rs~]], and
+[[file:../../bmc-main/bmc-wasm-host/src/slot.rs][~bmc-wasm-host/src/slot.rs~]]. The normal
+lifecycle is documented in [[file:../../bmc-main/docs/devel/wasm-host/render-loop.md][~render-loop.md~]].
+
+* Why swiping exercised the failure
+
+The host does not merely hide and show an unchanged clock process. The compositor sends
+lifecycle states which control render-target ownership and rendering:
+
+#+begin_example
+Clock on screen:       Visible
+Swipe away:            Visible -> Leaving -> Prepared
+Swipe back:            Prepared -> Entering -> Visible
+Far enough off-scene:  ... -> Dormant
+#+end_example
+
+~Visible~, ~Leaving~, ~Prepared~, and ~Entering~ all retain a render target. ~Dormant~
+does not. A ~Prepared~ widget is an immediate scene neighbour. It renders ahead of time
+so that the compositor can begin a swipe without waiting for a new client frame.
+
+Before commit ~445c3f9d~, ~Prepared~ also performed a memory optimization. A newly
+allocated target had two export buffers, but ~compact_for_prepared~ destroyed one
+available buffer and its matching ~wl_buffer~. The widget kept one pre-rendered buffer
+while off-screen. When it became active and rendered again, the missing half was
+allocated, exported, and minted again.
+
+One full-screen 1280 by 480 XRGB8888 export buffer is 2,457,600 bytes, or about 2.34 MiB.
+That is what the optimization saved for each full-screen Prepared widget. The cost was
+that ordinary scene navigation repeatedly crossed one of the most delicate ownership
+boundaries in the system:
+
+#+begin_example
+release from compositor
+   -> destroy wl_buffer
+   -> destroy GL/EGL/GBM export object
+   -> allocate a replacement
+   -> export a new DMA-BUF descriptor
+   -> mint a replacement wl_buffer
+   -> import a replacement compositor texture
+#+end_example
+
+Rapid back-and-forth swipes caused that sequence repeatedly. They were therefore an
+excellent stress test for both descriptor ownership and the A/B buffer lifecycle.
+
+* Failure 1: a long-lived DMA-BUF cache occupied descriptor 0
+
+** The fatal log sequence
+
+The first useful reproduction happened after the clock returned from Retro Deck. The
+clock completed the transition back to ~Visible~, then its next render failed:
+
+#+begin_example
+2026-07-18T08:28:42.438771Z  ... clock.wasm ... Entering -> Visible
+2026-07-18T08:28:44.450632Z  WARN ... widget render failed ...
+    error=Failed to dup DMA-BUF fd
+    Bad file descriptor (os error 9)
+2026-07-18T08:28:44.466704Z  INFO ... slot teardown ... clock.wasm
+#+end_example
+
+~EBADF~ is precise: the host tried to duplicate a descriptor number which was no
+longer valid in its descriptor table. This was not an out-of-memory error, a slow
+render, or a generic Wayland disconnect.
+
+Commit ~a6f45811~ had just made render, Wayland, control, LED, panic, and stopped-runtime
+teardown causes visible. Before that observability change, all of these paths collapsed
+into a clock slot disappearing. With the new message, the visual sequence could be
+mapped to the process sequence:
+
+1. The compositor still had an imported clock image during the transition.
+2. The clock's next host render tried to reuse its cached export descriptor.
+3. ~dup~ failed with ~EBADF~.
+4. ~WidgetSlot::render~ returned an error.
+5. The main loop marked the slot for teardown and destroyed its Wayland objects.
+6. The compositor briefly showed stale or damaged transition content, then had no
+   live clock surface to display and cleared to black.
+
+Steps 2 through 5 are directly logged. The exact pixel-level explanation for the brief
+smear in steps 1 and 6 is an inference from the timing. We did not capture the bad
+scanout frame or the compositor texture contents at that moment.
+
+The compositor process stayed alive. The kernel log had no etnaviv MMU fault, GPU hang,
+or DRM recovery message. Only the clock slot died. This distinction ruled out the much
+larger class of failures where the Vivante GPU or the whole compositor becomes wedged.
+
+** The ownership ordering was backwards
+
+~EglContext::export_dmabuf~ cached a descriptor so repeated frames could use a cheap
+~dup~ instead of asking GBM to export the BO on every frame. The original ownership
+order was conceptually:
+
+#+begin_example
+let cached = bo.fd()?;       // may receive descriptor 0
+let per_frame = dup(cached)?; // normally receives a higher descriptor
+buffer.cached_fd = cached;   // long-lived ownership gets the fragile descriptor
+return per_frame;            // short-lived ownership gets the safer descriptor
+#+end_example
+
+Linux normally allocates the lowest free descriptor. At the failing re-export,
+descriptor 0 was free, so ~gbm_bo_get_fd~ returned 0. The code retained that raw result
+for the lifetime of the export buffer. The higher numbered duplicate, which would have
+been the safer cache, was returned as a temporary ~DmaBufInfo~ and closed after the
+per-frame use.
+
+File descriptors 0, 1, and 2 have process-wide semantic roles as standard input,
+standard output, and standard error. Long-lived infrastructure must not assume that a
+free slot in that range is ordinary anonymous storage. Daemon setup, subprocess setup,
+libraries, and diagnostic tools are all entitled to normalize or repurpose those
+slots. Caching a GPU sharing handle there made the buffer cache collide with unrelated
+process plumbing.
+
+** What the trace proved, and what it did not prove
+
+After the first recovery patch, the clock stayed alive long enough to trace. Its log
+reported the same invalid cache every two seconds:
+
+#+begin_example
+... cached DMA-BUF fd became invalid; refreshing it fd=0
+... two seconds later ...
+... cached DMA-BUF fd became invalid; refreshing it fd=0
+#+end_example
+
+The clock rendered approximately once per second and ping-ponged between two slots.
+Seeing the warning every two seconds meant the same one of those two slots failed every
+time the render loop returned to it.
+
+The live descriptor table showed DMA-BUF objects at descriptors 0 and 16. A temporary
+ARM ~strace~ also showed a once-per-second status-refresh thread spawning ~uci -q show
+wireless~. Its child setup did this:
+
+#+begin_example
+clone3({flags=CLONE_VM|CLONE_VFORK|CLONE_CLEAR_SIGHAND, ...})
+dup2(13</dev/null>, 0</dmabuf:>)
+execve("/sbin/uci", ["uci", "-q", "show", "wireless"], ...)
+#+end_example
+
+This is strong evidence that descriptor 0 had two incompatible meanings. The DMA-BUF
+cache considered it a persistent GPU handle, while normal subprocess setup considered
+it standard input and replaced it in every helper child.
+
+There is an important limit to this evidence. The shown ~clone3~ call did *not* include
+~CLONE_FILES~. The helper child therefore had a copied descriptor table. Its ~dup2~
+closed and replaced descriptor 0 in the child, not in the parent host. The trace window
+did not capture a parent-side ~close(0)~. It would be incorrect to claim that the shown
+~dup2~ syscall alone invalidated the host's cache.
+
+What is proven is:
+
+- the host repeatedly stored a long-lived DMA-BUF at descriptor 0;
+- that cached descriptor repeatedly became ~EBADF~;
+- descriptor 0 was actively treated as standard input by another host code path;
+- moving the cache to stable higher descriptors eliminated every ~EBADF~ observation.
+
+The exact parent-side operation which first vacated or invalidated descriptor 0 was not
+isolated. It is the remaining narrow uncertainty inside an otherwise verified ownership
+bug. The correction does not depend on knowing which library or startup path performed
+that operation.
+
+** Recovery first, ownership correction second
+
+Commit ~2b5e710d~ added defensive recovery. If duplicating the cache returns ~EBADF~,
+the code drops the stale ownership claim, asks the still-live GBM BO for a fresh export,
+caches it, and continues. That changed the failure mode from a dead clock and black
+scene into a live clock with alternating correct and damaged frames. This was useful
+diagnostically, but refreshing descriptor 0 forever was not a sufficient fix.
+
+Commit ~88657444~ reversed the ownership:
+
+#+begin_example
+let exported = bo.fd()?;
+let cached = dup(exported)?;
+buffer.cached_fd = cached; // long-lived duplicate
+return exported;           // short-lived raw GBM export
+#+end_example
+
+With the daemon's standard descriptors populated, the cached duplicate lands above the
+stdio range. The possibly low raw export survives only for the current submission. On
+generation 5 the two persistent clock DMA-BUF descriptors were 13 and 16. After
+generation 6 they were 16 and 18, while descriptors 0, 1, and 2 pointed to ~/dev/null~.
+There were no further ~EBADF~ messages and no error-driven clock slot teardown.
+
+The ~EBADF~ refresh path remains in place as a defensive fallback. A stronger future
+hardening would use ~F_DUPFD_CLOEXEC~ with an explicit minimum of 3 and assert during
+host startup that all three stdio descriptors are populated. The current implementation
+gets the right result from the daemon's stdio invariant and the corrected ownership
+order, but encoding the minimum in the duplication operation would make the invariant
+local and self-enforcing.
+
+* The deployment mistake that made the first fix look ineffective
+
+The initial patched deployment updated only ~core~. That rebuilt and installed the
+compositor, but it did not change the host binary used by the clock.
+
+WASM widgets use three pieces:
+
+- the per-widget package wrapper;
+- ~bmc-wasm-thin~;
+- the shared ~bmc-wasm-host~ daemon.
+
+The Nix wrapper generated in [[file:../../bmc-main/nix/wasm-widgets.nix][~nix/wasm-widgets.nix~]]
+contains absolute store paths for both the clock's WASM blob and its selected host
+binary. Installing a new ~core~ cannot rewrite an already installed clock wrapper.
+Restarting the compositor after generation 3 therefore respawned a clock which still
+selected the old host.
+
+The physical retest at 09:09 produced the exact old message:
+
+#+begin_example
+widget render failed ... error=Failed to dup DMA-BUF fd
+slot teardown ... clock.wasm
+#+end_example
+
+The new recovery warning was absent. Inspecting the live process path confirmed that
+the wrong host was running. The correct deployment target was ~widget-clock~, which
+rebuilt the wrapper with the new host store path. Activation also did not replace the
+already running host, so the compositor had to be restarted after generation 4 to
+respawn the thin and start the new daemon.
+
+This was not another rendering theory. It was a deployment identity error. It consumed
+one iteration because source revision, installed profile generation, wrapper store
+path, and running process path were initially treated as if they were the same fact.
+They are four separate facts and must all be checked for a Nix-deployed process.
+
+The full wrapper and daemon relationship is described in
+[[file:../../bmc-main/docs/devel/wasm-host/process-model.md][~process-model.md~]].
+
+* Failure 2: one half of the double buffer became bad
+
+** The one-second alternation was the decisive clue
+
+With generation 4, the recovery path prevented teardown. The user then observed that
+the clock switched between correct and heavily smeared once per second. The host log
+showed that the bad descriptor warning occurred every two seconds and always named
+descriptor 0.
+
+Those two cadences match a two-slot ping-pong exactly:
+
+#+begin_example
+second 0: render and display slot A, correct
+second 1: render and display slot B, damaged
+second 2: render and display slot A, correct
+second 3: render and display slot B, damaged
+#+end_example
+
+The clock's logged ~delta_ms~ was normally about 1000 ms. ~DoubleBufferState~ calls
+~export_and_swap~, which flips the current index after every submitted frame. A visual
+state that changes every clock tick and repeats every second tick is therefore a
+fingerprint for slot-local state, not random whole-scene damage.
+
+Generation 5 then separated the two bugs. After ~88657444~:
+
+- the long-lived cache descriptors stayed at 13 and 16;
+- no cache duplication returned ~EBADF~;
+- the clock host remained alive;
+- there was no error-driven slot teardown;
+- there was no etnaviv MMU fault, GPU hang, or DRM recovery;
+- the user could still trigger the correct/damaged alternation after enough swipes.
+
+At that point the descriptor bug could no longer explain the remaining pixels. The bad
+state belonged to one of the two buffer slots or to its corresponding Wayland/compositor
+import state.
+
+** Why Prepared compaction became the leading cause
+
+The rapid-swipe log repeatedly showed the same lifecycle loop without an error:
+
+#+begin_example
+Visible -> Leaving -> Prepared -> Entering -> Visible
+#+end_example
+
+In the code running in generation 5, every move into ~Prepared~ made
+~LifecycleStateMachine::apply~ call ~compact_for_prepared~. Once the compositor had
+released a spare slot, compaction destroyed that slot's export buffer and matching
+~wl_buffer~. The next render which needed that side of the ping-pong allocated and
+minted it again.
+
+This was the only normal swipe operation which deliberately changed the membership of
+the clock's A/B pair. It also matched the empirical trigger:
+
+- leaving the clock running did not initially break it;
+- rapid scene transitions made the problem increasingly likely;
+- the failure settled into a stable good-slot/bad-slot alternation;
+- eliminating descriptor invalidation reduced failures but did not remove this
+  transition-dependent A/B state.
+
+The device was not under immediate CMA pressure. During the diagnosis it reported:
+
+#+begin_example
+MemTotal:       246008 kB
+MemAvailable:   106104 kB
+CmaTotal:       131072 kB
+CmaFree:         75148 kB
+host VmRSS:      14628 kB
+#+end_example
+
+Keeping one extra 2.34 MiB full-screen export buffer was a reasonable trade for removing
+destruction, export, Wayland minting, and compositor import from the swipe path.
+
+Commit ~445c3f9d~ therefore removed ~compact_for_prepared~ and its slot-selection
+helper. A Prepared widget now retains both export buffers and both ~wl_buffer~ objects.
+Moving to ~Dormant~ still releases the complete target, and release-aware retirement
+still prevents the host from destroying a buffer which the compositor has not released.
+
+** The boundary of the conclusion
+
+The evidence establishes that one member of the A/B presentation chain was bad. It does
+not establish which low-level object first acquired the bad content. We did not record
+all of the following together for each slot generation:
+
+- the GBM handle or DMA-BUF inode;
+- the EGLImage and FBO identity;
+- the ~wl_buffer~ protocol object identity;
+- the compositor texture identity;
+- a pixel checksum before export and after compositor import;
+- the exact release, destroy, allocate, and import order around the triggering swipe.
+
+Consequently, the most precise conclusion is that Prepared-state buffer churn was the
+leading cause and removing it was the selected fix. It would be too strong to say that
+we proved whether the corruption originated in host bookkeeping, Wayland object reuse,
+compositor texture lifetime, damage tracking, or the Vivante driver.
+
+Generation 6 was deployed with both retained buffers on descriptors 16 and 18 and a
+clean startup baseline. We asked for 30 to 50 rapid swipes followed by ten seconds on
+the clock. No explicit result to that acceptance test was recorded; the next report was
+about emulator audio and scaling. The black-screen cause and ~EBADF~ fix were verified.
+The final long-run visual acceptance of the compaction removal should therefore be
+described as pending rather than silently inferred from the topic change.
+
+* Why this was not the historical GPU synchronization failure
+
+The repository contains extensive prior work on Vivante GPU faults and cross-process
+render synchronization under BDK-509. This incident looked superficially similar
+because both could be triggered by scene movement and both could produce damaged
+pixels. The evidence differed:
+
+- this incident produced a userspace ~EBADF~ tied to one clock slot;
+- the compositor process stayed alive;
+- the kernel emitted no new MMU fault or GPU recovery;
+- generation 5 still alternated with stable descriptors and no fatal host error;
+- the host's completion path fell back to blocking ~glFinish~ when an EGL fence wait
+  reported no completion.
+
+The repeating message
+
+#+begin_example
+EGL fence wait failed; falling back to glFinish
+#+end_example
+
+was noisy and cadence-adjacent, but its fallback is synchronous and preserves the
+producer-completion guarantee. It may have a performance cost and deserves separate
+cleanup, but it did not explain the ~EBADF~, the clock slot teardown, or the absence of
+kernel GPU faults. Without per-boundary frame capture, it also cannot be declared
+mathematically unrelated to every smeared pixel. It was not the strongest explanation
+for the swipe-dependent A/B corruption.
+
+The historical investigation is in
+[[file:../../bmc-main/docs/devlogs/BDK-509/ruled-out-hypotheses.md][~docs/devlogs/BDK-509/ruled-out-hypotheses.md~]].
+
+* Fix and verification timeline
+
+| Stage | Revision   | What changed                                      | Live result                                                        |
+|-------+------------+---------------------------------------------------+--------------------------------------------------------------------|
+| 0     | ~a6f45811~ | Preserve and log slot teardown causes             | Exposed ~Failed to dup DMA-BUF fd~ instead of an unexplained black |
+| 1     | ~2b5e710d~ | Recover a cached descriptor after ~EBADF~          | Tests passed, but generation 3 still ran the old host               |
+| 2     | ~2b5e710d~ | Deploy through ~widget-clock~ as generation 4      | Clock survived; recurring fd 0 recovery exposed A/B alternation     |
+| 3     | ~88657444~ | Cache the duplicate, return the raw export         | Generation 5 held fds 13 and 16; no ~EBADF~ or fatal teardown       |
+| 4     | ~445c3f9d~ | Retain both buffers while ~Prepared~               | Generation 6 held fds 16 and 18; clean baseline, acceptance pending |
+
+Focused verification used:
+
+#+begin_src sh
+cargo test -p bmc-widget --features gpu
+cargo test -p bmc-wasm-host
+git diff --check
+#+end_src
+
+The focused suites passed for the descriptor and lifecycle changes. Repository-wide
+~cargo fmt --check~ was blocked by unrelated, pre-existing formatting drift in the
+network driver, so only touched Rust files were formatted. The temporary on-device
+~strace~ directory was removed after diagnosis.
+
+* Design lessons
+
+** Make resource ownership local and explicit
+
+A descriptor number is only a table index. It is not a durable resource identity.
+Long-lived caches should own an explicitly duplicated descriptor outside the stdio
+range. Short-lived handoff objects may own the raw export. The code should encode this
+ordering rather than relying on which descriptor happens to be returned first.
+
+** Preserve both logical and protocol identities in logs
+
+The decisive one-second pattern was visible to a human before it was visible in logs.
+Future buffer diagnostics should log a stable tuple for every allocation, submission,
+release, compaction, and destruction:
+
+#+begin_example
+widget instance
+slot A/B
+slot generation
+GBM identity
+DMA-BUF fd and inode
+wl_buffer object id
+compositor texture id
+lifecycle state
+#+end_example
+
+That would let a correct/bad alternation identify the exact object generation without
+requiring syscall tracing.
+
+** Treat memory optimizations on transition paths as correctness-sensitive
+
+Prepared compaction saved a small and measurable amount of CMA, but it inserted a full
+cross-process resource teardown and recreation into ordinary navigation. Such an
+optimization needs a device-level stress test, including repeated partial and completed
+swipes, before it is accepted. Unit tests of slot selection and release bits cannot
+prove compositor and driver behaviour.
+
+** Verify the running artifact, not only the source or profile
+
+For a Nix-packaged daemon selected through a generated wrapper, verification must cover:
+
+1. source commit;
+2. built derivation;
+3. installed profile generation;
+4. wrapper's baked store path;
+5. running process executable path.
+
+Missing step 4 was why the initial deployment looked like a failed code fix.
+
+** Keep recovery, but do not confuse it with correctness
+
+The ~EBADF~ recovery path was valuable because it kept the clock alive and converted a
+fatal black screen into a diagnosable repeating pattern. Recovery did not make the
+underlying descriptor ownership correct. A recovered system can still present stale or
+corrupt state, so recovery counters and warnings must remain visible.
+
+* Follow-up if any smear remains
+
+If the generation-6 code still reproduces a one-off smear or A/B alternation, the next
+investigation should not make another broad lifecycle change first. It should add
+targeted instrumentation:
+
+1. Give each export slot a monotonically increasing generation number.
+2. Log every ~wl_buffer.release~, destroy, replacement allocation, and compositor import
+   with that generation.
+3. Compute a cheap checksum of a small pixel sample after the host's final blit.
+4. Capture or checksum the same region after compositor import.
+5. Record the compositor damage rectangle and texture id for every transition frame.
+6. Stress completed swipes, cancelled swipes, and direction reversals separately.
+7. Track the EGL-fence fallback count independently from buffer lifecycle events.
+
+Those probes would distinguish producer content corruption from stale compositor
+texture state and from scanout damage. Until such a reproduction exists, the verified
+statement is that the fatal clock disappearance came from the cached descriptor, while
+Prepared buffer churn was the best-supported cause of the remaining slot-local smear.
+
+* Relevant revisions and code
+
+- ~a6f4581110d756d40239e744ee45a82f1eb7041e~: log slot teardown causes.
+- ~2b5e710d622221d6f002ab32b0cb576b9bc45e87~: recover invalid DMA-BUF descriptors.
+- ~88657444a2c7d8569c018fc6250349b371da0609~: keep cache ownership on the duplicate.
+- ~445c3f9d163974217550c61f3df3ce3d4db8ef2b~: retain Prepared double buffers.
+- ~9967738105c5bddcff535a576229fc6a2daeb2b9~: the earlier Prepared compaction change.
+- [[file:../../bmc-main/bmc-widget/src/egl.rs][DMA-BUF export and double-buffer implementation]].
+- [[file:../../bmc-main/bmc-wasm-host/src/lifecycle.rs][widget lifecycle state machine]].
+- [[file:../../bmc-main/bmc-wasm-host/src/render_target.rs][render-target and release ownership]].
+- [[file:../../bmc-main/bmc-wasm-host/src/main_loop.rs][fatal render handling and slot teardown]].
+- [[file:../../bmc-main/nix/wasm-widgets.nix][WASM widget wrapper and baked host path]].
+- [[file:../../bmc-main/docs/devel/wasm-host/render-loop.md][current WASM host render-loop documentation]].
+- [[file:../../bmc-main/docs/devel/wasm-host/process-model.md][current thin and host process model]].
