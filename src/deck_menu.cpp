@@ -75,6 +75,7 @@
 #include <vector>
 
 #include "menu_sound.h"
+#include "menu_credits.h"
 #include "menu_ui.h"
 
 #ifdef RETRO_DECK_WAYLAND
@@ -2021,6 +2022,7 @@ void draw_cover_square(Canvas *canvas, const Rect &bounds,
 
 
 struct MenuLayout {
+  Rect credits_button;
   Rect settings_button;
   Rect game_previous_button;
   Rect game_next_button;
@@ -2038,6 +2040,7 @@ enum MenuTarget {
   MenuTargetSettings = -2,
   MenuTargetGamePrevious = -3,
   MenuTargetGameNext = -4,
+  MenuTargetCredits = -5,
   MenuTargetSystemBase = 1000,
 };
 
@@ -2390,6 +2393,7 @@ void render_menu(const std::vector<GameEntry> &games,
     return;
   canvas->assign(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
                  color_pixel(kColorBackground));
+  layout->credits_button = Rect{12, 412, 56, 56};
   layout->settings_button = Rect{1212, 412, 56, 56};
   layout->game_previous_button = Rect{156, 232, 80, 100};
   layout->game_next_button = Rect{1044, 232, 80, 100};
@@ -2401,6 +2405,8 @@ void render_menu(const std::vector<GameEntry> &games,
   layout->game_position_indicators.clear();
   layout->shown_game_index = games.size();
 
+  draw_centered_text(canvas, layout->credits_button, "(c)", 2,
+                     color_pixel(kColorFooter));
   draw_settings_icon(canvas, layout->settings_button,
                      color_pixel(kColorFooter));
 
@@ -2496,8 +2502,8 @@ void render_menu(const std::vector<GameEntry> &games,
   }
 
   if (!status.empty()) {
-    const int footer_scale = fit_text_scale(status, kLogicalWidth - 100, 2, 1);
-    draw_centered_text(canvas, Rect{12, 452, kLogicalWidth - 100, 24}, status,
+    const int footer_scale = fit_text_scale(status, kLogicalWidth - 220, 2, 1);
+    draw_centered_text(canvas, Rect{100, 452, kLogicalWidth - 200, 24}, status,
                        footer_scale, color_pixel(kColorFooter));
   }
 }
@@ -3812,11 +3818,11 @@ enum MenuGamepadCommand {
   MenuGamepadCommandSettings
 };
 
-MenuGamepadCommand menu_gamepad_command(unsigned int pressed, bool wifi_view,
+MenuGamepadCommand menu_gamepad_command(unsigned int pressed, bool modal_view,
                                         bool settings_view) {
-  if ((wifi_view || settings_view) && (pressed & kMenuPadBack))
+  if ((modal_view || settings_view) && (pressed & kMenuPadBack))
     return MenuGamepadCommandBack;
-  if (wifi_view)
+  if (modal_view)
     return MenuGamepadCommandNone;
   if (pressed & kMenuPadSettings)
     return MenuGamepadCommandSettings;
@@ -4220,6 +4226,8 @@ ChildResult run_reboot(const std::string &executable, TouchDevice *touch,
 }
 
 int target_at(const MenuLayout &layout, int x, int y) {
+  if (layout.credits_button.contains(x, y))
+    return MenuTargetCredits;
   if (layout.settings_button.contains(x, y))
     return MenuTargetSettings;
   if (layout.game_previous_button.contains(x, y))
@@ -4560,6 +4568,7 @@ struct Options {
   std::string chiptune_player;
   std::string chiptune_directory;
   std::string manifest;
+  std::string credits;
   std::string palette;
   std::string settings_icon_directory;
   std::string cover_directory;
@@ -4598,7 +4607,7 @@ void print_usage(const char *program) {
                "--zx-emulator PATH --chip8-emulator PATH "
                "--deck-game PATH --chiptune-player PATH "
                "--chiptune-directory PATH --manifest PATH "
-               "--palette PATH "
+               "--credits PATH --palette PATH "
                "--settings-icon-directory PATH "
                "--cover-directory PATH "
                "--volume-state PATH "
@@ -4653,6 +4662,7 @@ bool parse_options(int argc, char **argv, Options *options,
                argument == "--chiptune-player" ||
                argument == "--chiptune-directory" ||
                argument == "--manifest" ||
+               argument == "--credits" ||
                argument == "--palette" ||
                argument == "--settings-icon-directory" ||
                argument == "--cover-directory" ||
@@ -4684,6 +4694,8 @@ bool parse_options(int argc, char **argv, Options *options,
         destination = &options->chiptune_directory;
       else if (argument == "--manifest")
         destination = &options->manifest;
+      else if (argument == "--credits")
+        destination = &options->credits;
       else if (argument == "--palette")
         destination = &options->palette;
       else if (argument == "--settings-icon-directory")
@@ -4749,7 +4761,8 @@ bool parse_options(int argc, char **argv, Options *options,
       options->zx_emulator.empty() || options->chip8_emulator.empty() ||
       options->deck_game.empty() ||
       options->chiptune_player.empty() || options->chiptune_directory.empty() ||
-      options->manifest.empty() || options->palette.empty() ||
+      options->manifest.empty() || options->credits.empty() ||
+      options->palette.empty() ||
       options->settings_icon_directory.empty() ||
       options->cover_directory.empty() ||
       options->volume_state.empty() || options->brightness.empty() ||
@@ -4761,7 +4774,7 @@ bool parse_options(int argc, char **argv, Options *options,
       *error = "--nes-emulator, --gb-emulator, --zx-emulator, "
                "--chip8-emulator, --deck-game, --chiptune-player, "
                "--chiptune-directory, --manifest, "
-               "--palette, "
+               "--credits, --palette, "
                "--settings-icon-directory, "
                "--cover-directory, --volume-state, --brightness, "
                "--brightness-max, --brightness-state, "
@@ -4779,6 +4792,12 @@ int application_main(const Options &options) {
     std::cerr << "deck-menu: " << error
               << "; using built-in dashboard palette" << std::endl;
     reset_dashboard_palette();
+    error.clear();
+  }
+  std::vector<ProjectCredit> project_credits;
+  if (!load_project_credits(options.credits, &project_credits, &error)) {
+    std::cerr << "deck-menu: " << error
+              << "; the FOSS credits screen will show an error" << std::endl;
     error.clear();
   }
   if (!is_absolute_path(options.settings_icon_directory)) {
@@ -4894,16 +4913,25 @@ int application_main(const Options &options) {
   MenuLayout layout;
   SettingsLayout settings_layout;
   WifiLayout wifi_layout;
+  CreditsLayout credits_layout;
   WifiState wifi_state;
   NetworkStatus network_status = read_network_status(options.wifi_status);
   bool wifi_view = false;
   bool settings_view = false;
+  bool credits_view = false;
+  int64_t credits_started_at = 0;
   int settings_selection = SettingsTargetVolumeDown;
   size_t game_position = 0;
   std::string active_system = initial_system(games);
   std::string status;
   const auto render_current_screen = [&]() {
-    if (wifi_view) {
+    if (credits_view) {
+      render_project_credits(
+          project_credits, monotonic_ms() - credits_started_at,
+          color_pixel(kColorBackground), color_pixel(kColorTitle),
+          color_pixel(kColorText), color_pixel(kColorMuted), &canvas,
+          &credits_layout);
+    } else if (wifi_view) {
       render_wifi(wifi_state, network_status, &canvas, &wifi_layout);
     } else if (settings_view) {
       render_settings(volume, brightness, keymap, settings_selection, status,
@@ -4977,8 +5005,10 @@ int application_main(const Options &options) {
     menu_gamepads.append_poll_descriptors(&descriptors);
     const size_t first_keyboard_descriptor = descriptors.size();
     menu_keyboards.append_poll_descriptors(&descriptors);
-    const int poll_result =
-        poll(&descriptors[0], static_cast<nfds_t>(descriptors.size()), 250);
+    const int poll_timeout = credits_view ? 40 : 250;
+    const int poll_result = poll(&descriptors[0],
+                                 static_cast<nfds_t>(descriptors.size()),
+                                 poll_timeout);
     if (poll_result < 0) {
       if (errno == EINTR)
         continue;
@@ -5005,6 +5035,10 @@ int application_main(const Options &options) {
         render_current_screen();
         framebuffer.present(canvas, NULL);
       }
+    }
+    if (credits_view) {
+      render_current_screen();
+      framebuffer.present(canvas, NULL);
     }
     if (poll_result == 0)
       continue;
@@ -5199,15 +5233,18 @@ int application_main(const Options &options) {
     };
 
     const MenuGamepadCommand controller_command =
-        menu_gamepad_command(controller_pressed | keyboard_pressed, wifi_view,
-                             settings_view);
+        menu_gamepad_command(controller_pressed | keyboard_pressed,
+                             wifi_view || credits_view, settings_view);
     if (controller_command != MenuGamepadCommandNone) {
       pressed_target = MenuTargetNone;
       reports.clear();
     }
     if (controller_command == MenuGamepadCommandBack) {
       cancel_reboot_confirmation();
-      if (wifi_view) {
+      if (credits_view) {
+        credits_view = false;
+        status.clear();
+      } else if (wifi_view) {
         wifi_view = false;
         status = "WIFI EDITOR CLOSED";
       } else if (settings_view) {
@@ -5288,29 +5325,44 @@ int application_main(const Options &options) {
       const TouchReport &report = reports[i];
       if (report.pressed) {
         pressed_target =
-            wifi_view
-                ? wifi_target_at(wifi_layout, report.x, report.y)
-                : (settings_view
-                       ? settings_target_at(settings_layout, report.x, report.y)
-                       : target_at(layout, report.x, report.y));
+            credits_view
+                ? credits_target_at(credits_layout, report.x, report.y)
+                : (wifi_view
+                       ? wifi_target_at(wifi_layout, report.x, report.y)
+                       : (settings_view
+                              ? settings_target_at(settings_layout, report.x,
+                                                   report.y)
+                              : target_at(layout, report.x, report.y)));
       }
       if (!report.released)
         continue;
       const int released_target =
-          wifi_view
-              ? wifi_target_at(wifi_layout, report.x, report.y)
-              : (settings_view
-                     ? settings_target_at(settings_layout, report.x, report.y)
-                     : target_at(layout, report.x, report.y));
+          credits_view
+              ? credits_target_at(credits_layout, report.x, report.y)
+              : (wifi_view
+                     ? wifi_target_at(wifi_layout, report.x, report.y)
+                     : (settings_view
+                            ? settings_target_at(settings_layout, report.x,
+                                                 report.y)
+                            : target_at(layout, report.x, report.y)));
+      const bool dashboard_view =
+          !credits_view && !wifi_view && !settings_view;
       const bool released_reboot =
-          !wifi_view && !settings_view && released_target >= 0 &&
+          dashboard_view && released_target >= 0 &&
           released_target < static_cast<int>(games.size()) &&
           is_built_in_reboot(games[released_target]);
       if (reboot_armed_until > 0 && !released_reboot) {
         cancel_reboot_confirmation();
       }
 
-      if (wifi_view && pressed_target == released_target) {
+      if (credits_view && pressed_target == CreditsTargetClose &&
+          released_target == CreditsTargetClose) {
+        credits_view = false;
+        status.clear();
+        render_current_screen();
+        framebuffer.present(canvas, NULL);
+        play_menu_sound(MenuSoundCueBack);
+      } else if (wifi_view && pressed_target == released_target) {
         if (released_target == WifiTargetBack) {
           wifi_view = false;
           status = "WIFI EDITOR CLOSED";
@@ -5337,7 +5389,16 @@ int application_main(const Options &options) {
       } else if (settings_view && pressed_target == released_target &&
                  pressed_target != SettingsTargetNone) {
         activate_settings_target(released_target);
-      } else if (!wifi_view && !settings_view &&
+      } else if (dashboard_view &&
+                 pressed_target == MenuTargetCredits &&
+                 released_target == MenuTargetCredits) {
+        credits_view = true;
+        credits_started_at = monotonic_ms();
+        status.clear();
+        render_current_screen();
+        framebuffer.present(canvas, NULL);
+        play_menu_sound(MenuSoundCueConfirm);
+      } else if (dashboard_view &&
                  pressed_target == MenuTargetSettings &&
                  released_target == MenuTargetSettings) {
         settings_view = true;
@@ -5346,7 +5407,7 @@ int application_main(const Options &options) {
         render_current_screen();
         framebuffer.present(canvas, NULL);
         play_menu_sound(MenuSoundCueConfirm);
-      } else if (!wifi_view && !settings_view &&
+      } else if (dashboard_view &&
                  pressed_target == released_target &&
                  pressed_target >= MenuTargetSystemBase &&
                  pressed_target - MenuTargetSystemBase <
@@ -5361,7 +5422,7 @@ int application_main(const Options &options) {
         framebuffer.present(canvas, NULL);
         if (moved)
           play_menu_sound(MenuSoundCueNext);
-      } else if (!wifi_view && !settings_view &&
+      } else if (dashboard_view &&
                  pressed_target == released_target &&
                  (pressed_target == MenuTargetGamePrevious ||
                   pressed_target == MenuTargetGameNext) &&
@@ -5379,7 +5440,7 @@ int application_main(const Options &options) {
         play_menu_sound(pressed_target == MenuTargetGamePrevious
                             ? MenuSoundCuePrevious
                             : MenuSoundCueNext);
-      } else if (!wifi_view && !settings_view && pressed_target >= 0 &&
+      } else if (dashboard_view && pressed_target >= 0 &&
                  pressed_target == released_target &&
                  pressed_target < static_cast<int>(games.size())) {
         request_game(pressed_target);

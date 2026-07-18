@@ -817,13 +817,24 @@ int main() {
                            menu_layout.settings_button.width / 2,
                        menu_layout.settings_button.y +
                            menu_layout.settings_button.height / 2) ==
-                 MenuTargetSettings,
-         "console tabs and the bottom-right settings control expose touch targets");
+                 MenuTargetSettings &&
+             target_at(menu_layout,
+                       menu_layout.credits_button.x +
+                           menu_layout.credits_button.width / 2,
+                       menu_layout.credits_button.y +
+                           menu_layout.credits_button.height / 2) ==
+                 MenuTargetCredits,
+         "console tabs and corner controls expose touch targets");
   expect(menu_layout.settings_button.x == 1212 &&
              menu_layout.settings_button.y == 412 &&
              rect_contains_color(canvas, menu_layout.settings_button,
                                  color_pixel(kColorFooter)),
          "dim retro cog sits at the bottom-right inset");
+  expect(menu_layout.credits_button.x == 12 &&
+             menu_layout.credits_button.y == 412 &&
+             rect_contains_color(canvas, menu_layout.credits_button,
+                                 color_pixel(kColorFooter)),
+         "dim credits control sits at the bottom-left inset");
   expect(menu_layout.game_buttons.size() == 3 &&
              menu_layout.game_indices.size() == 4 &&
              menu_layout.visible_game_indices.size() == 3 &&
@@ -1131,6 +1142,7 @@ int main() {
       "--chiptune-player", "/bin/sleep", "--chiptune-directory",
       "/tmp/chiptunes",
       "--manifest",     "/tmp/games",
+      "--credits",      "/tmp/credits",
       "--palette",      "/tmp/palette",
       "--settings-icon-directory", "/tmp/settings-icons",
       "--cover-directory", "/tmp/covers",
@@ -1151,6 +1163,7 @@ int main() {
          "terminal and wifi helper options parse");
   expect(options.terminal == "/bin/false" &&
              options.wifi_helper == "/bin/echo" &&
+             options.credits == "/tmp/credits" &&
              options.palette == "/tmp/palette" &&
              options.settings_icon_directory == "/tmp/settings-icons" &&
              options.wifi_status == "/var/run/deck-wifi/status" &&

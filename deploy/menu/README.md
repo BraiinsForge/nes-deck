@@ -12,6 +12,7 @@ Copy these files to the Deck without changing their basenames:
 | --- | --- |
 | `games.sexp` | `/mnt/data/nes-deck/menu/games.sexp` |
 | `games.tsv` | `/mnt/data/nes-deck/menu/games.tsv` |
+| `credits.tsv` | `/mnt/data/nes-deck/menu/credits.tsv` |
 | `palette.tsv` | `/mnt/data/nes-deck/menu/palette.tsv` |
 | `knekko-settings-icons.tsv` | `/mnt/data/nes-deck/menu/knekko-settings-icons.tsv` |
 | `uploader/settings-icons/` | `/mnt/data/nes-deck/menu/settings-icons/` |

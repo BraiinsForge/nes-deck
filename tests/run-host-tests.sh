@@ -46,17 +46,23 @@ fuse_src=$(nix eval --raw --impure --expr \
 compile_cpp_test tests/zx_keyboard_test.cpp zx-keyboard-test \
   -Isrc -I"$fuse_src/src"
 compile_cpp_test tests/menu_ui_test.cpp menu-ui-test src/menu_ui.cpp
+"$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
+  tests/menu_credits_test.cpp src/menu_credits.cpp src/menu_ui.cpp \
+  -o "$work/menu-credits-test"
+"$work/menu-credits-test" "$repo_root/deploy/menu/credits.tsv"
 
 png_flags=$(pkg-config --cflags --libs libpng)
 # pkg-config output is intentionally split into compiler arguments.
 # shellcheck disable=SC2086
 "$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-  src/deck_menu.cpp src/menu_sound.cpp src/menu_ui.cpp $png_flags \
+  src/deck_menu.cpp src/menu_sound.cpp src/menu_credits.cpp src/menu_ui.cpp \
+  $png_flags \
   -o "$work/deck-menu-host"
 "$work/deck-menu-host" --geometry-test
 # shellcheck disable=SC2086
 "$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-  tests/deck_menu_test.cpp src/menu_sound.cpp src/menu_ui.cpp $png_flags \
+  tests/deck_menu_test.cpp src/menu_sound.cpp src/menu_credits.cpp \
+  src/menu_ui.cpp $png_flags \
   -o "$work/deck-menu-test"
 "$work/deck-menu-test"
 

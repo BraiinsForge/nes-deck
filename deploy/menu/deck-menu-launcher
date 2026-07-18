@@ -26,6 +26,7 @@ CHIPTUNE_DIRECTORY=/mnt/data/chiptunes
 CATALOG=$MENU_DIR/games.sexp
 FALLBACK_MANIFEST=$MENU_DIR/games.tsv
 GENERATED_MANIFEST=$STATE_DIR/games.tsv
+CREDITS=$MENU_DIR/credits.tsv
 FALLBACK_PALETTE=$MENU_DIR/palette.tsv
 GENERATED_PALETTE=$STATE_DIR/palette.tsv
 PALETTE_OVERRIDE=$STATE_DIR/dashboard-palette.sexp
@@ -296,6 +297,7 @@ exec "$MENU" \
 	--wifi-helper "$WIFI_HELPER" \
 	--wifi-status "$WIFI_STATUS" \
 	--manifest "$manifest" \
+	--credits "$CREDITS" \
 	--palette "$palette" \
 	--settings-icon-directory "$SETTINGS_ICON_DIR" \
 	--cover-directory "$COVER_DIR" \

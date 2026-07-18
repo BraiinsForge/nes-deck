@@ -204,7 +204,8 @@ cp -a "$fbterm/share/retro-deck/keymaps/." \
 cp deploy/terminal/fonts.conf deploy/terminal/retro-terminal \
   "$payload/nes-deck/terminal/"
 
-cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/palette.tsv \
+cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/credits.tsv \
+  deploy/menu/palette.tsv \
   deploy/menu/knekko-settings-icons.tsv deploy/menu/ASSETS.md \
   deploy/menu/compile-catalog.lisp deploy/menu/deck-menu-launcher \
   deploy/menu/fetch-covers "$payload/nes-deck/menu/"
