@@ -35,6 +35,49 @@
 
       waylandNativeInputs = [ pkgs.wayland-scanner ];
       waylandStaticInputs = [ staticCross.wayland staticCross.libffi ];
+      # Keep each local build input narrow. Referencing ./src as an include
+      # directory would make every source edit invalidate every native runtime.
+      sourceTree = files: pkgs.lib.fileset.toSource {
+        root = ./src;
+        fileset = pkgs.lib.fileset.unions files;
+      };
+      runtimeSources = [
+        ./src/deck_runtime.cpp
+        ./src/deck_runtime.h
+        ./src/deck_wayland.cpp
+        ./src/deck_wayland.h
+      ];
+      libretroSources = runtimeSources ++ [
+        ./src/joypad_input.cpp
+        ./src/libretro_deck.cpp
+      ];
+      nesSources = sourceTree (libretroSources ++ [ ./src/nes_sram.h ]);
+      gbSources = sourceTree libretroSources;
+      zxSources = sourceTree (libretroSources ++ [ ./src/zx_keyboard.h ]);
+      chip8Sources = sourceTree (runtimeSources ++ [
+        ./src/chip8_core.c
+        ./src/chip8_core.h
+        ./src/chip8_deck.cpp
+        ./src/joypad_input.cpp
+      ]);
+      chiptuneSources = sourceTree (runtimeSources ++ [
+        ./src/chiptune_deck.cpp
+      ]);
+      timerSources = sourceTree (runtimeSources ++ [
+        ./src/ten_seconds_deck.cpp
+      ]);
+      menuSources = sourceTree [
+        ./src/deck_menu.cpp
+        ./src/deck_wayland.cpp
+        ./src/deck_wayland.h
+        ./src/knekko_settings_icons_generated.inc
+        ./src/menu_credits.cpp
+        ./src/menu_credits.h
+        ./src/menu_sound.cpp
+        ./src/menu_sound.h
+        ./src/menu_ui.cpp
+        ./src/menu_ui.h
+      ];
       waylandProtocolBuild = ''
         wayland-scanner client-header \
           ${./protocol/deck-widget-v1.xml} \
@@ -104,11 +147,11 @@
               -mfpu=neon-vfpv4 -mfloat-abi=hard \
               -Wall -Wextra -Wpedantic -Werror \
               -DRETRO_DECK_NES=1 -DRETRO_DECK_WAYLAND=1 \
-              -I. -Isrc/drivers/libretro/libretro-common/include -I${./src} \
-              ${./src/libretro_deck.cpp} \
-              ${./src/deck_runtime.cpp} \
-              ${./src/deck_wayland.cpp} \
-              ${./src/joypad_input.cpp} \
+              -I. -Isrc/drivers/libretro/libretro-common/include -I${nesSources} \
+              ${nesSources}/libretro_deck.cpp \
+              ${nesSources}/deck_runtime.cpp \
+              ${nesSources}/deck_wayland.cpp \
+              ${nesSources}/joypad_input.cpp \
               deck-widget-v1-protocol.o \
               wlr-layer-shell-unstable-v1-protocol.o \
               fceumm_libretro.a \
@@ -154,19 +197,19 @@
           buildPhase = ''
             runHook preBuild
             ${waylandProtocolBuild}
-            cp ${./src/deck_menu.cpp} deck_menu.cpp
-            cp ${./src/menu_sound.cpp} menu_sound.cpp
-            cp ${./src/menu_sound.h} menu_sound.h
-            cp ${./src/menu_credits.cpp} menu_credits.cpp
-            cp ${./src/menu_credits.h} menu_credits.h
-            cp ${./src/menu_ui.cpp} menu_ui.cpp
-            cp ${./src/menu_ui.h} menu_ui.h
-            cp ${./src/knekko_settings_icons_generated.inc} \
+            cp ${menuSources}/deck_menu.cpp deck_menu.cpp
+            cp ${menuSources}/menu_sound.cpp menu_sound.cpp
+            cp ${menuSources}/menu_sound.h menu_sound.h
+            cp ${menuSources}/menu_credits.cpp menu_credits.cpp
+            cp ${menuSources}/menu_credits.h menu_credits.h
+            cp ${menuSources}/menu_ui.cpp menu_ui.cpp
+            cp ${menuSources}/menu_ui.h menu_ui.h
+            cp ${menuSources}/knekko_settings_icons_generated.inc \
               knekko_settings_icons_generated.inc
             $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${./src} \
+              -DRETRO_DECK_WAYLAND=1 -I. -I${menuSources} \
               deck_menu.cpp menu_sound.cpp menu_credits.cpp menu_ui.cpp \
-              ${./src/deck_wayland.cpp} \
+              ${menuSources}/deck_wayland.cpp \
               deck-widget-v1-protocol.o \
               wlr-layer-shell-unstable-v1-protocol.o \
               -static -lpng -lz -lwayland-client -lffi -o deck-menu
@@ -211,10 +254,10 @@
             cmake --build . --parallel $NIX_BUILD_CORES
             ${waylandProtocolBuild}
             $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${./src} -I.. \
-              ${./src/chiptune_deck.cpp} \
-              ${./src/deck_runtime.cpp} \
-              ${./src/deck_wayland.cpp} \
+              -DRETRO_DECK_WAYLAND=1 -I. -I${chiptuneSources} -I.. \
+              ${chiptuneSources}/chiptune_deck.cpp \
+              ${chiptuneSources}/deck_runtime.cpp \
+              ${chiptuneSources}/deck_wayland.cpp \
               deck-widget-v1-protocol.o \
               wlr-layer-shell-unstable-v1-protocol.o \
               gme/libgme.a \
@@ -264,10 +307,10 @@
             runHook preBuild
             ${waylandProtocolBuild}
             $CXX -std=c++11 -O3 -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${./src} \
-              ${./src/ten_seconds_deck.cpp} \
-              ${./src/deck_runtime.cpp} \
-              ${./src/deck_wayland.cpp} \
+              -DRETRO_DECK_WAYLAND=1 -I. -I${timerSources} \
+              ${timerSources}/ten_seconds_deck.cpp \
+              ${timerSources}/deck_runtime.cpp \
+              ${timerSources}/deck_wayland.cpp \
               deck-widget-v1-protocol.o \
               wlr-layer-shell-unstable-v1-protocol.o \
               -static -pthread -lm -lwayland-client -lffi \
@@ -338,12 +381,12 @@
               -fomit-frame-pointer -marm -march=armv7-a -mtune=cortex-a7 \
               -mfpu=neon-vfpv4 -mfloat-abi=hard \
               -Wall -Wextra -Wpedantic -Werror \
-              -I. -Ilibgambatte/libretro-common/include -I${./src} \
+              -I. -Ilibgambatte/libretro-common/include -I${gbSources} \
               -DRETRO_DECK_GB=1 -DRETRO_DECK_WAYLAND=1 \
-              ${./src/libretro_deck.cpp} \
-              ${./src/deck_runtime.cpp} \
-              ${./src/deck_wayland.cpp} \
-              ${./src/joypad_input.cpp} \
+              ${gbSources}/libretro_deck.cpp \
+              ${gbSources}/deck_runtime.cpp \
+              ${gbSources}/deck_wayland.cpp \
+              ${gbSources}/joypad_input.cpp \
               deck-widget-v1-protocol.o \
               wlr-layer-shell-unstable-v1-protocol.o \
               gambatte_libretro.a \
@@ -402,16 +445,16 @@
               CC=$CC \
               CXX=$CXX \
               AR=$CC-ar
-            cp ${./src/libretro_deck.cpp} deck_libretro_deck.cpp
-            cp ${./src/deck_runtime.cpp} deck_runtime.cpp
-            cp ${./src/deck_wayland.cpp} deck_wayland.cpp
-            cp ${./src/joypad_input.cpp} deck_joypad_input.cpp
+            cp ${zxSources}/libretro_deck.cpp deck_libretro_deck.cpp
+            cp ${zxSources}/deck_runtime.cpp deck_runtime.cpp
+            cp ${zxSources}/deck_wayland.cpp deck_wayland.cpp
+            cp ${zxSources}/joypad_input.cpp deck_joypad_input.cpp
             $CXX -std=c++11 -O3 -fomit-frame-pointer \
               -marm -march=armv7-a -mtune=cortex-a7 \
               -mfpu=neon-vfpv4 -mfloat-abi=hard \
               -Wall -Wextra -Wpedantic -Werror \
               -DRETRO_DECK_ZX=1 -DRETRO_DECK_WAYLAND=1 \
-              -I. -Isrc -I${./src} \
+              -I. -Isrc -I${zxSources} \
               deck_libretro_deck.cpp \
               deck_runtime.cpp \
               deck_wayland.cpp \
@@ -459,16 +502,16 @@
           buildPhase = ''
             runHook preBuild
             ${waylandProtocolBuild}
-            cp ${./src/chip8_core.c} deck_chip8_core.c
-            cp ${./src/chip8_deck.cpp} deck_chip8_deck.cpp
-            cp ${./src/deck_runtime.cpp} deck_runtime.cpp
-            cp ${./src/deck_wayland.cpp} deck_wayland.cpp
-            cp ${./src/joypad_input.cpp} deck_joypad_input.cpp
+            cp ${chip8Sources}/chip8_core.c deck_chip8_core.c
+            cp ${chip8Sources}/chip8_deck.cpp deck_chip8_deck.cpp
+            cp ${chip8Sources}/deck_runtime.cpp deck_runtime.cpp
+            cp ${chip8Sources}/deck_wayland.cpp deck_wayland.cpp
+            cp ${chip8Sources}/joypad_input.cpp deck_joypad_input.cpp
             $CC -std=c99 -O3 -Wall -Wextra -Werror \
-              -I${c-octo-src}/src -I${./src} \
+              -I${c-octo-src}/src -I${chip8Sources} \
               -c deck_chip8_core.c -o chip8_core.o
             $CXX -std=c++11 -O3 -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${./src} \
+              -DRETRO_DECK_WAYLAND=1 -I. -I${chip8Sources} \
               deck_chip8_deck.cpp \
               deck_runtime.cpp \
               deck_wayland.cpp \

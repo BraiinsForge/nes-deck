@@ -36,6 +36,11 @@ cd retrodeck
 The first Nix build downloads the pinned cross toolchain and may take several
 minutes. Later builds reuse the Nix store.
 
+Each native runtime receives an explicit local source set. Editing the menu,
+for example, invalidates `deck-menu` without rebuilding unrelated emulators.
+Keep new source and header files in the corresponding source set near the top
+of `flake.nix`; do not add the complete `src/` directory as a build input.
+
 ## Build packages individually
 
 Use `--no-link` to avoid leaving `result-*` symlinks in the repository:
