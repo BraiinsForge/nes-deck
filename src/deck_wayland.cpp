@@ -514,18 +514,27 @@ struct DeckWaylandPresentation::Impl {
     BufferSlot *slot = available_slot();
     if (!slot)
       return true;
-    for (unsigned int y = 0; y < target_height; ++y) {
-      const unsigned int source_y =
-          static_cast<unsigned int>((static_cast<uint64_t>(y) *
-                                     source_height) /
-                                    target_height);
-      for (unsigned int x = 0; x < target_width; ++x) {
-        const unsigned int source_x =
-            static_cast<unsigned int>((static_cast<uint64_t>(x) *
-                                       source_width) /
-                                      target_width);
-        slot->memory[static_cast<size_t>(y) * target_width + x] =
-            read_pixel(source_x, source_y);
+    if (target_width == source_width && target_height == source_height) {
+      for (unsigned int y = 0; y < target_height; ++y) {
+        uint32_t *destination =
+            slot->memory + static_cast<size_t>(y) * target_width;
+        for (unsigned int x = 0; x < target_width; ++x)
+          destination[x] = read_pixel(x, y);
+      }
+    } else {
+      for (unsigned int y = 0; y < target_height; ++y) {
+        const unsigned int source_y =
+            static_cast<unsigned int>((static_cast<uint64_t>(y) *
+                                       source_height) /
+                                      target_height);
+        for (unsigned int x = 0; x < target_width; ++x) {
+          const unsigned int source_x =
+              static_cast<unsigned int>((static_cast<uint64_t>(x) *
+                                         source_width) /
+                                        target_width);
+          slot->memory[static_cast<size_t>(y) * target_width + x] =
+              read_pixel(source_x, source_y);
+        }
       }
     }
     slot->busy = true;
