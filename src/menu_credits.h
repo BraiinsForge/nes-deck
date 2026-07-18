@@ -13,6 +13,22 @@ struct ProjectCredit {
   std::string license;
 };
 
+const int kCreditsCrawlTextScale = 4;
+
+struct CreditsCrawlLine {
+  std::string text;
+  int source_y;
+  int source_width;
+  int source_height;
+  std::vector<uint8_t> pixels;
+};
+
+struct CreditsCrawl {
+  std::vector<CreditsCrawlLine> lines;
+  std::vector<std::string> static_lines;
+  int content_height;
+};
+
 struct CreditsLayout {
   Rect close_button;
 };
@@ -23,10 +39,14 @@ bool load_project_credits(const std::string &path,
                           std::vector<ProjectCredit> *credits,
                           std::string *error);
 
-void render_project_credits(const std::vector<ProjectCredit> &credits,
-                            int64_t elapsed_ms, uint16_t background,
-                            uint16_t accent, uint16_t text, uint16_t muted,
-                            Canvas *canvas, CreditsLayout *layout);
+CreditsCrawl make_project_credits_crawl(
+    const std::vector<ProjectCredit> &credits);
+
+void render_project_credits(const CreditsCrawl &crawl,
+                            bool reduced_motion, int64_t elapsed_ms,
+                            uint16_t background, uint16_t accent,
+                            uint16_t text, uint16_t muted, Canvas *canvas,
+                            CreditsLayout *layout);
 
 int credits_target_at(const CreditsLayout &layout, int x, int y);
 

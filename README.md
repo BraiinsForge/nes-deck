@@ -145,8 +145,12 @@ at boot and whenever a child program returns.
 
 The small `(c)` control in the bottom-left opens the animated FOSS dependency
 and license crawl. B or the top-right close control returns to the dashboard.
-The crawl is generated from the tracked `deploy/menu/credits.tsv` manifest;
-complete installed license texts are kept under `/mnt/data/nes-deck/licenses`.
+Every line uses one source text size projected continuously onto a receding
+plane, with a static starfield and a fade near the horizon. The crawl is
+generated from the tracked `deploy/menu/credits.tsv` manifest; complete
+installed license texts are kept under `/mnt/data/nes-deck/licenses`.
+Set `RETRO_DECK_REDUCED_MOTION=1` in the dashboard environment to replace the
+crawl with a static project/license sheet and disable animation wakeups.
 
 The Common Lisp REPL runs through `rlwrap`; editable command history persists
 privately as `/mnt/data/langs/lisp/.ecl_history`.

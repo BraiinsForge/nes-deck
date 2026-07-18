@@ -7,6 +7,9 @@
 
 const int kLogicalWidth = 1280;
 const int kLogicalHeight = 480;
+const int kBitmapGlyphWidth = 5;
+const int kBitmapGlyphHeight = 7;
+const int kBitmapGlyphAdvance = 6;
 
 struct Rect {
   int x;
@@ -30,6 +33,7 @@ void fill_pixel_cut_rect(Canvas *canvas, const Rect &rect, int cut,
                          uint16_t color);
 
 int text_width(const std::string &text, int scale);
+bool bitmap_glyph_pixel(char character, int column, int row);
 void draw_text(Canvas *canvas, int x, int y, const std::string &text, int scale,
                uint16_t color);
 void draw_centered_text(Canvas *canvas, const Rect &bounds,

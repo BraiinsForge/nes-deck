@@ -184,9 +184,9 @@ const uint8_t *glyph_rows(char input) {
 void draw_character(Canvas *canvas, int x, int y, char ch, int scale,
                     uint16_t color) {
   const uint8_t *rows = glyph_rows(ch);
-  for (int row = 0; row < 7; ++row) {
-    for (int column = 0; column < 5; ++column) {
-      if (rows[row] & (1u << (4 - column)))
+  for (int row = 0; row < kBitmapGlyphHeight; ++row) {
+    for (int column = 0; column < kBitmapGlyphWidth; ++column) {
+      if (rows[row] & (1u << (kBitmapGlyphWidth - 1 - column)))
         fill_rect(canvas,
                   Rect{x + column * scale, y + row * scale, scale, scale},
                   color);
@@ -199,22 +199,31 @@ void draw_character(Canvas *canvas, int x, int y, char ch, int scale,
 int text_width(const std::string &text, int scale) {
   if (text.empty())
     return 0;
-  return static_cast<int>(text.size()) * 6 * scale - scale;
+  return static_cast<int>(text.size()) * kBitmapGlyphAdvance * scale - scale;
+}
+
+bool bitmap_glyph_pixel(char character, int column, int row) {
+  if (column < 0 || column >= kBitmapGlyphWidth || row < 0 ||
+      row >= kBitmapGlyphHeight)
+    return false;
+  return (glyph_rows(character)[row] &
+          (1u << (kBitmapGlyphWidth - 1 - column))) != 0;
 }
 
 void draw_text(Canvas *canvas, int x, int y, const std::string &utf8_text,
                int scale, uint16_t color) {
   const std::string text = display_ascii(utf8_text);
   for (size_t i = 0; i < text.size(); ++i)
-    draw_character(canvas, x + static_cast<int>(i) * 6 * scale, y, text[i],
-                   scale, color);
+    draw_character(canvas,
+                   x + static_cast<int>(i) * kBitmapGlyphAdvance * scale, y,
+                   text[i], scale, color);
 }
 
 void draw_centered_text(Canvas *canvas, const Rect &bounds,
                         const std::string &text, int scale, uint16_t color) {
   const std::string shown = display_ascii(text);
   const int width = text_width(shown, scale);
-  const int height = 7 * scale;
+  const int height = kBitmapGlyphHeight * scale;
   draw_text(canvas, bounds.x + std::max(0, (bounds.width - width) / 2),
             bounds.y + std::max(0, (bounds.height - height) / 2), shown,
             scale, color);
@@ -235,7 +244,7 @@ std::string fit_text_width(const std::string &text, int maximum_width,
   std::string shown = display_ascii(text);
   if (text_width(shown, scale) <= maximum_width)
     return shown;
-  const int character_width = 6 * scale;
+  const int character_width = kBitmapGlyphAdvance * scale;
   const size_t capacity = maximum_width > 0
                               ? static_cast<size_t>((maximum_width + scale) /
                                                     character_width)

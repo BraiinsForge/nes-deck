@@ -4800,6 +4800,10 @@ int application_main(const Options &options) {
               << "; the FOSS credits screen will show an error" << std::endl;
     error.clear();
   }
+  const CreditsCrawl credits_crawl =
+      make_project_credits_crawl(project_credits);
+  const bool reduced_credits_motion =
+      std::getenv("RETRO_DECK_REDUCED_MOTION") != NULL;
   if (!is_absolute_path(options.settings_icon_directory)) {
     std::cerr << "deck-menu: settings icon directory must be an absolute path"
               << std::endl;
@@ -4927,7 +4931,8 @@ int application_main(const Options &options) {
   const auto render_current_screen = [&]() {
     if (credits_view) {
       render_project_credits(
-          project_credits, monotonic_ms() - credits_started_at,
+          credits_crawl, reduced_credits_motion,
+          monotonic_ms() - credits_started_at,
           color_pixel(kColorBackground), color_pixel(kColorTitle),
           color_pixel(kColorText), color_pixel(kColorMuted), &canvas,
           &credits_layout);
@@ -5005,7 +5010,7 @@ int application_main(const Options &options) {
     menu_gamepads.append_poll_descriptors(&descriptors);
     const size_t first_keyboard_descriptor = descriptors.size();
     menu_keyboards.append_poll_descriptors(&descriptors);
-    const int poll_timeout = credits_view ? 40 : 250;
+    const int poll_timeout = credits_view && !reduced_credits_motion ? 40 : 250;
     const int poll_result = poll(&descriptors[0],
                                  static_cast<nfds_t>(descriptors.size()),
                                  poll_timeout);
@@ -5036,7 +5041,7 @@ int application_main(const Options &options) {
         framebuffer.present(canvas, NULL);
       }
     }
-    if (credits_view) {
+    if (credits_view && !reduced_credits_motion) {
       render_current_screen();
       framebuffer.present(canvas, NULL);
     }

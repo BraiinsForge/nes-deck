@@ -69,8 +69,10 @@ details when they are needed for archaeology.
 - Settings icons include twelve native pixel cogs and 36 CC0 Knekko cogs.
   The selected icon is stored in the same appearance override as the colors.
 - The bottom-left `(c)` control opens an animated FOSS credits crawl from
-  `deploy/menu/credits.tsv`. B or its top-right close control returns to the
-  dashboard. Installed license texts live under
+  `deploy/menu/credits.tsv`. Its fixed-size source text is projected onto one
+  continuously receding plane instead of changing between discrete font
+  scales. B or its top-right close control returns to the dashboard. Installed
+  license texts live under
   `/mnt/data/nes-deck/licenses`.
 
 ## Emulators and media
