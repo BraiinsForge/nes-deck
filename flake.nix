@@ -73,10 +73,14 @@
         ./src/knekko_settings_icons_generated.inc
         ./src/menu_credits.cpp
         ./src/menu_credits.h
+        ./src/menu_io.cpp
+        ./src/menu_io.h
         ./src/menu_network.cpp
         ./src/menu_network.h
         ./src/menu_sound.cpp
         ./src/menu_sound.h
+        ./src/menu_state.cpp
+        ./src/menu_state.h
         ./src/menu_text.cpp
         ./src/menu_text.h
         ./src/menu_ui.cpp
@@ -206,8 +210,12 @@
             cp ${menuSources}/menu_sound.h menu_sound.h
             cp ${menuSources}/menu_credits.cpp menu_credits.cpp
             cp ${menuSources}/menu_credits.h menu_credits.h
+            cp ${menuSources}/menu_io.cpp menu_io.cpp
+            cp ${menuSources}/menu_io.h menu_io.h
             cp ${menuSources}/menu_network.cpp menu_network.cpp
             cp ${menuSources}/menu_network.h menu_network.h
+            cp ${menuSources}/menu_state.cpp menu_state.cpp
+            cp ${menuSources}/menu_state.h menu_state.h
             cp ${menuSources}/menu_text.cpp menu_text.cpp
             cp ${menuSources}/menu_text.h menu_text.h
             cp ${menuSources}/menu_ui.cpp menu_ui.cpp
@@ -216,8 +224,8 @@
               knekko_settings_icons_generated.inc
             $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
               -DRETRO_DECK_WAYLAND=1 -I. -I${menuSources} \
-              deck_menu.cpp menu_sound.cpp menu_credits.cpp menu_network.cpp \
-              menu_text.cpp menu_ui.cpp \
+              deck_menu.cpp menu_sound.cpp menu_credits.cpp menu_io.cpp \
+              menu_network.cpp menu_state.cpp menu_text.cpp menu_ui.cpp \
               ${menuSources}/deck_wayland.cpp \
               deck-widget-v1-protocol.o \
               wlr-layer-shell-unstable-v1-protocol.o \

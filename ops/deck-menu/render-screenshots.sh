@@ -31,7 +31,9 @@ trap 'rm -f "$temporary" "$timer_renderer"; rm -rf "$staging"' EXIT INT TERM
 	"$script_dir/render-screenshots.cpp" \
 	"$repo_root/src/menu_sound.cpp" \
 	"$repo_root/src/menu_credits.cpp" \
+	"$repo_root/src/menu_io.cpp" \
 	"$repo_root/src/menu_network.cpp" \
+	"$repo_root/src/menu_state.cpp" \
 	"$repo_root/src/menu_text.cpp" \
 	"$repo_root/src/menu_ui.cpp" \
 	-lpng -lz -pthread -o "$temporary"
