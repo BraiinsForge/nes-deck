@@ -5,6 +5,10 @@
 //! not permit reader macros, package-qualified symbols, dotted lists,
 //! comments, ratios, floats, or character syntax.
 
+mod message;
+
+pub use message::{MessageError, PolicyRequest, PolicyResponse, RequestId, decode_ready};
+
 use std::fmt::{self, Write as _};
 
 /// Default maximum encoded message size.
