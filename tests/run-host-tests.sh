@@ -133,10 +133,4 @@ wayland_flags=$(pkg-config --cflags --libs wayland-client)
   "$work/wlr-layer-shell-unstable-v1-protocol.o" \
   $wayland_flags -pthread -o "$work/deck-runtime-wayland-test"
 "$work/deck-runtime-wayland-test"
-octo_src=$(nix eval --raw --impure --expr \
-  '(builtins.getFlake ("path:" + toString ./.)).inputs."c-octo-src".outPath')
-"$cc" -std=c99 -O2 -Wall -Wextra -Werror -I"$octo_src/src" \
-  tests/chip8_core_test.c src/chip8_core.c -o "$work/chip8-core-test"
-"$work/chip8-core-test"
-
 echo "All host tests passed."

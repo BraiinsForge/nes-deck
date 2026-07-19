@@ -237,6 +237,7 @@ retrodeck/
 ├── crates/                      first-party Rust workspace
 │   ├── retro-deck-apps/         native app models, renderers, and runtimes
 │   ├── retro-deck-audio/        audio ownership state machine
+│   ├── retro-deck-emulator/     safe emulator hosts and c-octo boundary
 │   ├── retro-deck-platform/     Linux input and device adapters
 │   ├── retro-deck-policy/       bounded Lisp protocol and supervisor
 │   └── retro-deck-uploader/     authenticated ROM and appearance service
@@ -272,11 +273,11 @@ retrodeck/
 │   ├── deck_runtime.cpp        video selection, audio, and frame clock
 │   ├── deck_wayland.cpp        shared-memory widget and game surfaces
 │   ├── libretro_deck.cpp       NES, GB/GBC, and ZX host
-│   ├── chip8_deck.cpp          CHIP-8 frontend
 │   ├── chiptune_deck.cpp       GME and Ogg native music player
 │   └── joypad_input.cpp        stable two-controller input
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
+├── vendor/emulators/           pinned emulator source and provenance
 ├── flake.nix                   pinned cross-build definitions
 └── README.md                   deployment and operation guide
 ```

@@ -3,12 +3,12 @@
 ## Current system
 
 The current deployable system consists of static ARMv7 executables running on
-the Deck's OpenWrt userspace. C++ programs implement the dashboard, shared
-display and audio runtime, libretro host, CHIP-8 frontend, chiptune player, and
-timer. Rust implements authenticated ROM intake and appearance configuration,
-including its bounded HTTP transport and process control. ECL currently
-provides the interactive Lisp program and runs the catalog compiler during
-activation.
+the Deck's OpenWrt userspace. Rust implements the CHIP-8 host, 10 Seconds game,
+authenticated ROM intake, Common Lisp policy boundary, and shared Wayland,
+input, timing, and lazy OSS audio layers. C++ remains in the dashboard,
+libretro hosts, legacy shared runtime, and chiptune player while those pieces
+are migrated. ECL provides the interactive Lisp program, runs the catalog
+compiler during activation, and loads bounded device-local behavior policy.
 
 The BMC installation presents the dashboard as a scene widget. Games use a
 black fullscreen layer surface and a centered gameplay layer surface. The
