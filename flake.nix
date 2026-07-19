@@ -110,6 +110,28 @@
         inherit pkgs pkgsCross staticCross;
         nixpkgsSource = nixpkgs.outPath;
       };
+      uploaderSources = pkgs.lib.fileset.toSource {
+        root = ./.;
+        fileset = pkgs.lib.fileset.unions [
+          ./Cargo.lock
+          ./Cargo.toml
+          ./crates
+          ./deploy/menu/games.tsv
+          ./deploy/menu/palette.tsv
+        ];
+      };
+      uploaderPackage = {
+        pname = "rom-uploader";
+        version = "0.1.0";
+        src = uploaderSources;
+        cargoLock.lockFile = ./Cargo.lock;
+        cargoBuildFlags = [ "-p" "retro-deck-uploader" ];
+        doCheck = false;
+
+        postInstall = ''
+          mv $out/bin/retro-deck-uploader $out/bin/rom-uploader
+        '';
+      };
 
     in
     {
@@ -786,31 +808,18 @@
           };
         });
 
-        rom-uploader = pkgsCross.rustPlatform.buildRustPackage {
-          pname = "rom-uploader";
-          version = "0.1.0";
-
-          src = pkgs.lib.fileset.toSource {
-            root = ./.;
-            fileset = pkgs.lib.fileset.unions [
-              ./Cargo.lock
-              ./Cargo.toml
-              ./crates
-              ./deploy/menu/games.tsv
-              ./deploy/menu/palette.tsv
-            ];
+        rom-uploader-host = pkgs.rustPlatform.buildRustPackage (uploaderPackage // {
+          meta = {
+            description = "Host-side Retro Deck uploader configuration helper";
+            platforms = [ system ];
           };
-          cargoLock.lockFile = ./Cargo.lock;
-          cargoBuildFlags = [ "-p" "retro-deck-uploader" ];
-          doCheck = false;
+        });
+
+        rom-uploader = pkgsCross.rustPlatform.buildRustPackage (uploaderPackage // {
           env.RUSTFLAGS = "-C target-feature=+crt-static";
           nativeBuildInputs = [ pkgs.nukeReferences ];
           buildInputs = [ pkgsCross.glibc.static ];
           allowedReferences = [ ];
-
-          postInstall = ''
-            mv $out/bin/retro-deck-uploader $out/bin/rom-uploader
-          '';
 
           postFixup = ''
             ${pkgsCross.stdenv.cc.bintools.bintools}/bin/${pkgsCross.stdenv.cc.targetPrefix}strip \
@@ -822,7 +831,7 @@
             description = "Passworded ROM intake service for Retro Deck";
             platforms = [ "armv7l-linux" ];
           };
-        };
+        });
 
         default = self.packages.${system}.nes-deck;
       };

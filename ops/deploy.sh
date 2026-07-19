@@ -93,6 +93,7 @@ python=$(build_flake .#python-deck)
 chibi=$(build_flake .#chibi-deck)
 chiptune=$(build_flake .#chiptune-deck)
 uploader=$(build_flake .#rom-uploader)
+uploader_host=$(build_flake .#rom-uploader-host)
 runtime_licenses=$(build_flake .#runtime-licenses)
 ecl=$(nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix | tail -n 1)
 
@@ -124,8 +125,8 @@ cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
 cp "$uploader/bin/rom-uploader" \
   "$payload/nes-deck/uploader/rom-uploader"
 printf '%s\n' "$uploader_password" |
-  (cd uploader && nix shell nixpkgs#go -c go run . --set-password \
-    "$payload/nes-deck/uploader/password.conf")
+  "$uploader_host/bin/rom-uploader" --set-password \
+    "$payload/nes-deck/uploader/password.conf"
 printf '%s\n' '0.0.0.0:8080' \
   >"$payload/nes-deck/uploader/address.conf"
 cp "$lua/bin/lua" "$payload/nes-deck/langs/lua"
