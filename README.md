@@ -31,11 +31,12 @@ install -d -m 0700 ~/.config/retro-deck/decks
 ```
 
 The setup command asks for the Deck's current SSH address, its unique
-WireGuard address, routed prefix, health-check address, and ROM uploader
-password. It writes a mode-`0600` file below the operator's config directory,
-outside the Git checkout. For multiple Decks, create a private directory and
-pass one explicit file per Deck as the setup command's positional path, then
-use `--config PATH` with the provision, deployment, and health-check commands.
+WireGuard address, routed prefix, health-check address, optional recovery Wi-Fi
+SSID, and ROM uploader password. It writes a mode-`0600` file below the
+operator's config directory, outside the Git checkout. For multiple Decks,
+create a private directory and pass one explicit file per Deck as the setup
+command's positional path, then use `--config PATH` with the provision,
+deployment, and health-check commands.
 
 WireGuard topology is also private operator state. Put a mode-`0600` client
 `setconf` file at `~/.config/retro-deck/wireguard/wg0.conf`; it must contain
@@ -50,9 +51,10 @@ The fresh-Deck provisioner defaults to the development machine's IWD profiles
 in `/var/lib/iwd`; override that with `--wifi-profiles`. It imports only
 regular `.psk` files; open and enterprise
 profiles are counted and deliberately ignored. Up to seven recently modified
-personal profiles seed the fast-failover order, with `BraiinsRecovery` kept as
-the final insurance entry when present. Verify the fresh Deck's SSH host key
-before running it. The script keeps normal SSH host-key checking enabled.
+personal profiles seed the fast-failover order. When the private configuration
+names a recovery SSID, that profile is kept as the final insurance entry when
+present. Verify the fresh Deck's SSH host key before running it. The script
+keeps normal SSH host-key checking enabled.
 
 Provisioning snapshots `/etc/config/wireless`, the current `wlan0` address,
 and the complete default route before changing anything. It installs the

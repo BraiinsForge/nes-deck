@@ -6,6 +6,7 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 fixture=$(mktemp -d /tmp/nes-deck-provision-test.XXXXXX)
 trap 'rm -rf "$fixture"' EXIT INT TERM HUP
 config=$fixture/deck.conf
+config_no_recovery=$fixture/deck-no-recovery.conf
 profiles=$fixture/iwd
 wireguard_config=$fixture/wg0.conf
 register_peer=$fixture/register-peer
@@ -16,6 +17,7 @@ DECK_SSH_TARGET=root@192.0.2.60
 DECK_WIREGUARD_ADDRESS=198.51.100.13
 DECK_WIREGUARD_ROUTE=198.51.100.0/24
 DECK_WIREGUARD_HEALTH_ADDRESS=198.51.100.1
+DECK_RECOVERY_WIFI_SSID=fixture-recovery
 ROM_UPLOADER_PASSWORD=configured-test-password
 EOF
 chmod 0600 "$config"
@@ -41,9 +43,9 @@ cat >"$profiles/home.psk" <<'EOF'
 [Security]
 PreSharedKey=fixture
 EOF
-cat >"$profiles/BraiinsRecovery.psk" <<'EOF'
+cat >"$profiles/fixture-recovery.psk" <<'EOF'
 [Security]
-Passphrase=12345678
+Passphrase=fixture-passphrase
 EOF
 cat >"$profiles/cafe.open" <<'EOF'
 [Settings]
@@ -63,9 +65,17 @@ grep -qx 'Provision plan: root@192.0.2.60 -> 198.51.100.13 over 198.51.100.0/24'
 grep -qx "WireGuard peer registration: $register_peer" <<<"$output"
 grep -qx 'Wi-Fi intake: 2 personal PSK profiles; 2 open/enterprise profiles ignored' \
   <<<"$output"
-grep -qx 'Wi-Fi preference seed: 2 recent profiles; recovery profile last when present' \
+grep -qx 'Wi-Fi preference seed: 2 profiles; configured recovery profile last when present' \
   <<<"$output"
 grep -qx 'Provision inputs are valid; no remote state was changed.' <<<"$output"
+
+sed '/^DECK_RECOVERY_WIFI_SSID=/d' "$config" >"$config_no_recovery"
+chmod 0600 "$config_no_recovery"
+output=$("$root/ops/provision-deck.sh" --config "$config_no_recovery" \
+  --wireguard-config "$wireguard_config" \
+  --skip-peer-registration \
+  --wifi-profiles "$profiles" --check)
+grep -qx 'Wi-Fi preference seed: 2 profiles in recency order' <<<"$output"
 
 output=$("$root/ops/provision-deck.sh" --config "$config" \
   --wireguard-config "$wireguard_config" \

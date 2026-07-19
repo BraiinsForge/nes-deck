@@ -81,6 +81,7 @@ target=$DECK_SSH_TARGET
 wireguard_address=$DECK_WIREGUARD_ADDRESS
 wireguard_route=$DECK_WIREGUARD_ROUTE
 wireguard_health_address=$DECK_WIREGUARD_HEALTH_ADDRESS
+recovery_wifi_ssid=$DECK_RECOVERY_WIFI_SSID
 
 private_file_valid() {
   local path=$1
@@ -146,7 +147,11 @@ mkdir -p "$profile_stage" \
 profile_count=0
 profile_rank=$work/profile-rank
 : >"$profile_rank"
-recovery_hex=42726169696e735265636f76657279
+recovery_hex=
+if [[ -n $recovery_wifi_ssid ]]; then
+  recovery_hex=$(printf '%s' "$recovery_wifi_ssid" | xxd -p | tr -d '\n' |
+    tr 'A-F' 'a-f')
+fi
 shopt -s nullglob
 for profile in "$wifi_profiles"/*.psk; do
   [[ -f $profile && ! -L $profile ]] || {
@@ -183,7 +188,7 @@ shopt -u nullglob
 preferred_stage=$payload/wifi/preferred
 sort -rn -k1,1 "$profile_rank" |
   awk -F '\t' -v recovery="$recovery_hex" '
-    $2 == recovery { recovery_present=1; next }
+    recovery != "" && $2 == recovery { recovery_present=1; next }
     count < 7 && !seen[$2]++ { print $2; count++ }
     END { if (recovery_present) print recovery }
   ' >"$preferred_stage"
@@ -229,7 +234,11 @@ else
   echo "WireGuard peer registration: $register_peer_command"
 fi
 echo "Wi-Fi intake: $profile_count personal PSK profiles; $ignored_count open/enterprise profiles ignored"
-echo "Wi-Fi preference seed: $preferred_count recent profiles; recovery profile last when present"
+if [[ -n $recovery_wifi_ssid ]]; then
+  echo "Wi-Fi preference seed: $preferred_count profiles; configured recovery profile last when present"
+else
+  echo "Wi-Fi preference seed: $preferred_count profiles in recency order"
+fi
 if [[ $check_only -eq 1 ]]; then
   echo "Provision inputs are valid; no remote state was changed."
   exit 0

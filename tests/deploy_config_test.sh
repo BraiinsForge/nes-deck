@@ -13,9 +13,9 @@ fail() {
   exit 1
 }
 
-printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
   'root@192.0.2.50' '198.51.100.11' '198.51.100.0/24' \
-  '198.51.100.1' "$password" "$password" |
+  '198.51.100.1' 'fixture-recovery' "$password" "$password" |
   "$root/ops/configure-deck.sh" "$config" >/dev/null
 
 [[ $(stat -c %a "$config") == 600 ]] || fail 'configuration is private'
@@ -27,6 +27,8 @@ grep -qx 'DECK_WIREGUARD_ROUTE=198.51.100.0/24' "$config" ||
   fail 'WireGuard route was not stored'
 grep -qx 'DECK_WIREGUARD_HEALTH_ADDRESS=198.51.100.1' "$config" ||
   fail 'WireGuard health address was not stored'
+grep -qx 'DECK_RECOVERY_WIFI_SSID=fixture-recovery' "$config" ||
+  fail 'recovery Wi-Fi SSID was not stored'
 grep -qx "ROM_UPLOADER_PASSWORD=$password" "$config" ||
   fail 'uploader password was not stored'
 "$root/ops/deploy.sh" --config "$config" --check-config |
@@ -103,6 +105,13 @@ assert_rejected mismatched-route 'must contain DECK_WIREGUARD_ADDRESS' \
   'DECK_WIREGUARD_ADDRESS=198.51.100.11' \
   'DECK_WIREGUARD_ROUTE=203.0.113.0/24' \
   'DECK_WIREGUARD_HEALTH_ADDRESS=203.0.113.1' \
+  'ROM_UPLOADER_PASSWORD=configured-test-password'
+assert_rejected long-recovery-ssid 'must contain at most 32 bytes' \
+  'DECK_SSH_TARGET=root@192.0.2.50' \
+  'DECK_WIREGUARD_ADDRESS=198.51.100.11' \
+  'DECK_WIREGUARD_ROUTE=198.51.100.0/24' \
+  'DECK_WIREGUARD_HEALTH_ADDRESS=198.51.100.1' \
+  'DECK_RECOVERY_WIFI_SSID=123456789012345678901234567890123' \
   'ROM_UPLOADER_PASSWORD=configured-test-password'
 
 echo 'deploy-config-test: OK'

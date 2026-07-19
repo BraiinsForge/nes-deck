@@ -73,6 +73,11 @@ deck_config_valid_uploader_password() {
      $password != *$'\r'* && $password != *$'\n'* ]]
 }
 
+deck_config_valid_recovery_wifi_ssid() {
+  local ssid=${1-}
+  [[ ${#ssid} -le 32 && $ssid != *$'\r'* && $ssid != *$'\n'* ]]
+}
+
 deck_config_load() {
   if [[ $# -lt 1 || $# -gt 2 ]]; then
     echo 'deck_config_load requires CONFIG and an optional SSH target override' >&2
@@ -90,6 +95,7 @@ deck_config_load() {
   local wireguard_seen=0
   local wireguard_route_seen=0
   local wireguard_health_seen=0
+  local recovery_wifi_seen=0
   local password_seen=0
 
   [[ -f $path && ! -L $path ]] || {
@@ -114,6 +120,7 @@ deck_config_load() {
   DECK_WIREGUARD_ADDRESS=
   DECK_WIREGUARD_ROUTE=
   DECK_WIREGUARD_HEALTH_ADDRESS=
+  DECK_RECOVERY_WIFI_SSID=
   ROM_UPLOADER_PASSWORD=
   while IFS= read -r line || [[ -n $line ]]; do
     line_number=$((line_number + 1))
@@ -156,6 +163,14 @@ deck_config_load() {
         }
         DECK_WIREGUARD_HEALTH_ADDRESS=$value
         wireguard_health_seen=1
+        ;;
+      DECK_RECOVERY_WIFI_SSID)
+        [[ $recovery_wifi_seen -eq 0 ]] || {
+          echo "Configuration repeats DECK_RECOVERY_WIFI_SSID: $path" >&2
+          return 1
+        }
+        DECK_RECOVERY_WIFI_SSID=$value
+        recovery_wifi_seen=1
         ;;
       ROM_UPLOADER_PASSWORD)
         [[ $password_seen -eq 0 ]] || {
@@ -224,6 +239,10 @@ deck_config_load() {
   }
   [[ $DECK_WIREGUARD_HEALTH_ADDRESS != "$DECK_WIREGUARD_ADDRESS" ]] || {
     echo 'DECK_WIREGUARD_HEALTH_ADDRESS must differ from the Deck address' >&2
+    return 1
+  }
+  deck_config_valid_recovery_wifi_ssid "$DECK_RECOVERY_WIFI_SSID" || {
+    echo 'DECK_RECOVERY_WIFI_SSID must contain at most 32 bytes without line breaks' >&2
     return 1
   }
   deck_config_valid_uploader_password "$ROM_UPLOADER_PASSWORD" || {

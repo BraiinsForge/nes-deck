@@ -71,6 +71,12 @@ if [[ $wireguard_health_address == "$wireguard_address" ]]; then
   exit 1
 fi
 
+read -r -p 'Recovery Wi-Fi SSID (blank for none): ' recovery_wifi_ssid
+if ! deck_config_valid_recovery_wifi_ssid "$recovery_wifi_ssid"; then
+  echo "Recovery Wi-Fi SSID must contain at most 32 bytes without line breaks" >&2
+  exit 1
+fi
+
 read -r -s -p 'ROM uploader password (8-128 bytes): ' uploader_password
 printf '\n'
 read -r -s -p 'Repeat ROM uploader password: ' confirmation
@@ -92,6 +98,7 @@ trap 'rm -f "$temporary"' EXIT INT TERM HUP
   printf 'DECK_WIREGUARD_ADDRESS=%s\n' "$wireguard_address"
   printf 'DECK_WIREGUARD_ROUTE=%s\n' "$wireguard_route"
   printf 'DECK_WIREGUARD_HEALTH_ADDRESS=%s\n' "$wireguard_health_address"
+  printf 'DECK_RECOVERY_WIFI_SSID=%s\n' "$recovery_wifi_ssid"
   printf 'ROM_UPLOADER_PASSWORD=%s\n' "$uploader_password"
 } >"$temporary"
 chmod 0600 "$temporary"
