@@ -18,7 +18,7 @@ import (
 
 const (
 	testListenAddress  = "0.0.0.0:8080"
-	testServiceAddress = "10.0.0.10:8080"
+	testServiceAddress = "198.51.100.10:8080"
 	testServiceOrigin  = "http://" + testServiceAddress
 )
 
@@ -100,7 +100,7 @@ func TestServiceAddressConfiguration(t *testing.T) {
 	if normalized, err := normalizeServiceAddress(testListenAddress); err != nil || normalized != testListenAddress {
 		t.Fatalf("all-interface service address was rejected: %q %v", normalized, err)
 	}
-	for _, address := range []string{"", "10.0.0.10:8080", "0.0.0.0:80", "localhost:8080", "[::]:8080"} {
+	for _, address := range []string{"", "198.51.100.10:8080", "0.0.0.0:80", "localhost:8080", "[::]:8080"} {
 		if _, err := normalizeServiceAddress(address); err == nil {
 			t.Fatalf("invalid service address was accepted: %q", address)
 		}
@@ -283,7 +283,7 @@ func TestROMStoreFilesWithoutReplacement(t *testing.T) {
 func requestFor(method, target string, body io.Reader) *http.Request {
 	request := httptest.NewRequest(method, target, body)
 	request.Host = testServiceAddress
-	request.RemoteAddr = "10.0.0.2:41000"
+	request.RemoteAddr = "198.51.100.2:41000"
 	return request
 }
 
@@ -310,9 +310,9 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	if wrongResponse.Code != http.StatusMisdirectedRequest {
 		t.Fatalf("non-IP host returned %d", wrongResponse.Code)
 	}
-	wifiRequest := requestFor(http.MethodGet, "http://192.168.1.20:8080/", nil)
-	wifiRequest.Host = "192.168.1.20:8080"
-	wifiRequest.RemoteAddr = "192.168.1.50:41000"
+	wifiRequest := requestFor(http.MethodGet, "http://192.0.2.20:8080/", nil)
+	wifiRequest.Host = "192.0.2.20:8080"
+	wifiRequest.RemoteAddr = "192.0.2.50:41000"
 	wifiResponse := httptest.NewRecorder()
 	app.ServeHTTP(wifiResponse, wifiRequest)
 	if wifiResponse.Code != http.StatusOK {
@@ -426,9 +426,9 @@ func TestCrossOriginAndPaperDesignRules(t *testing.T) {
 			t.Fatalf("browser-compatible origin was rejected: %q", origin)
 		}
 	}
-	wifiOrigin := "http://192.168.1.20:8080"
+	wifiOrigin := "http://192.0.2.20:8080"
 	wifiRequest := requestFor(http.MethodPost, wifiOrigin+"/login", nil)
-	wifiRequest.Host = "192.168.1.20:8080"
+	wifiRequest.Host = "192.0.2.20:8080"
 	wifiRequest.Header.Set("Origin", wifiOrigin)
 	if !app.sameOrigin(wifiRequest) {
 		t.Fatal("same-origin policy rejected the Wi-Fi interface origin")

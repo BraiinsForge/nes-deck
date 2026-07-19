@@ -1,0 +1,7 @@
+[Interface]
+
+[Peer]
+PublicKey = SERVER_PUBLIC_KEY
+AllowedIPs = 198.51.100.0/24
+Endpoint = vpn.example.test:51820
+PersistentKeepalive = 25

@@ -979,9 +979,9 @@ int main() {
 
   SettingsLayout settings_layout;
   NetworkStatus network_status;
-  network_status.ssid = "net1";
-  network_status.wlan_ipv4 = "10.249.110.248";
-  network_status.wireguard_ipv4 = "10.0.0.10";
+  network_status.ssid = "STUDIO";
+  network_status.wlan_ipv4 = "192.0.2.20";
+  network_status.wireguard_ipv4 = "198.51.100.10";
   network_status.selector = "CONNECTED";
   render_settings(42, 60, "us", SettingsTargetVolumeDown, std::string(),
                   network_status, &canvas, &settings_layout);

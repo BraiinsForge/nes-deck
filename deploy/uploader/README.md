@@ -22,8 +22,9 @@ preserved and their retired settings-icon choice is ignored. Built-in defaults
 remain available when the optional override is malformed.
 
 `ops/configure-deck.sh` asks for the uploader password during setup and stores
-it in the local, Git-ignored `deck.conf` with mode `0600`. Each deployment
-derives a fresh password record and installs only that record at
+it in a mode-`0600` per-Deck file under the operator's configuration directory,
+outside the Git checkout. Each deployment derives a fresh password record and
+installs only that record at
 `/mnt/data/nes-deck/uploader/password.conf`; the clear password is not retained
 on the Deck. Change the local configuration and deploy again to rotate it.
 
@@ -34,7 +35,7 @@ run this from a trusted machine:
 read -rsp 'New ROM uploader password: ' password
 printf '\n'
 printf '%s\n' "$password" |
-  ssh root@10.0.0.10 \
+  ssh root@DECK-IP \
     '/mnt/data/nes-deck/uploader/rom-uploader --set-password /mnt/data/nes-deck/uploader/password.conf && /etc/init.d/nes-deck-uploader restart'
 unset password
 ```

@@ -24,22 +24,31 @@ fresh-install plan, and provision:
 ```sh
 git clone git@github.com:BraiinsForge/retrodeck.git
 cd retrodeck
-./ops/configure-deck.sh
-./ops/provision-deck.sh --check
-./ops/provision-deck.sh
+install -d -m 0700 ~/.config/retro-deck/decks
+./ops/configure-deck.sh ~/.config/retro-deck/decks/my-deck.conf
+./ops/provision-deck.sh --config ~/.config/retro-deck/decks/my-deck.conf --check
+./ops/provision-deck.sh --config ~/.config/retro-deck/decks/my-deck.conf
 ```
 
 The setup command asks for the Deck's current SSH address, its unique
-WireGuard address, and the ROM uploader password. It writes `deck.conf` with
-mode `0600`; the file is ignored by Git.
-Pass a positional path to `configure-deck.sh`, then use `--config PATH` with
-the provisioner or deployer to keep separate configurations for multiple
-Decks.
+WireGuard address, routed prefix, health-check address, and ROM uploader
+password. It writes a mode-`0600` file below the operator's config directory,
+outside the Git checkout. For multiple Decks, create a private directory and
+pass one explicit file per Deck as the setup command's positional path, then
+use `--config PATH` with the provision, deployment, and health-check commands.
 
-The fresh-Deck provisioner defaults to the WireGuard server at
-`root@10.0.0.1` and the development machine's IWD profiles in
-`/var/lib/iwd`. Override those with `--wireguard-server` or
-`--wifi-profiles`. It imports only regular `.psk` files; open and enterprise
+WireGuard topology is also private operator state. Put a mode-`0600` client
+`setconf` file at `~/.config/retro-deck/wireguard/wg0.conf`; it must contain
+the public server peer and an `AllowedIPs` value equal to the routed prefix,
+but no Deck private key. Put an executable peer-registration command at
+`~/.config/retro-deck/wireguard/register-peer`. The provisioner invokes it as
+`register-peer ADDRESS/32 PUBLIC_KEY`; use `--skip-peer-registration` only
+when that peer is already configured by another system. Paths can be replaced
+with `--wireguard-config` and `--register-peer-command`.
+
+The fresh-Deck provisioner defaults to the development machine's IWD profiles
+in `/var/lib/iwd`; override that with `--wifi-profiles`. It imports only
+regular `.psk` files; open and enterprise
 profiles are counted and deliberately ignored. Up to seven recently modified
 personal profiles seed the fast-failover order, with `BraiinsRecovery` kept as
 the final insurance entry when present. Verify the fresh Deck's SSH host key
@@ -48,10 +57,10 @@ before running it. The script keeps normal SSH host-key checking enabled.
 Provisioning snapshots `/etc/config/wireless`, the current `wlan0` address,
 and the complete default route before changing anything. It installs the
 guarded profile selector without reloading Wi-Fi, preserves a private
-WireGuard key already present on the Deck, refuses server address/key
-collisions, and checks that the Wi-Fi snapshot is byte-for-byte unchanged
-before invoking the application deployer. `--network-only` performs just this
-idempotent network preparation.
+WireGuard key already present on the Deck, delegates peer collision handling
+to the external registrar, and checks that the Wi-Fi snapshot is byte-for-byte
+unchanged before invoking the application deployer. `--network-only` performs
+just this idempotent network preparation.
 
 The first build downloads the pinned ARM toolchain and can take several
 minutes. The script builds every static runtime, verifies the staged payload,
@@ -70,7 +79,7 @@ than spawning a process per filename.
 Verify the result:
 
 ```sh
-./ops/check-deck.sh --config deck.conf
+./ops/check-deck.sh --config ~/.config/retro-deck/decks/my-deck.conf
 ```
 
 The health check is read-only. It understands both BMC compositor and direct
@@ -227,13 +236,13 @@ produce automatic save files.
 Check the service and its bounded persistent log:
 
 ```sh
-./ops/check-deck.sh --config deck.conf
+./ops/check-deck.sh --config ~/.config/retro-deck/decks/my-deck.conf
 ```
 
 Restart the dashboard without rebooting the Deck:
 
 ```sh
-ssh root@10.0.0.10 '
+ssh root@DECK-IP '
   if [ -x /etc/init.d/bmc-compositor ]; then
     /etc/init.d/bmc-compositor restart
   else

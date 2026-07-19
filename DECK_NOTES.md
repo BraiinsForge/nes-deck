@@ -152,7 +152,9 @@ details when they are needed for archaeology.
   from the private per-Deck configuration and is never committed.
 - WireGuard uses the checked-in ABI-matched TUN module plus userspace
   `wireguard-go`. Each Deck owns a unique private key generated on that Deck and
-  a unique `10.0.0.x/32` address.
+  a unique operator-configured IPv4 `/32` address. Server identity, endpoint,
+  routed prefix, health target, and peer registration live outside the
+  repository as private operator configuration.
 
 ## Services and deployment
 

@@ -1,6 +1,7 @@
-# Create deck.conf with ops/configure-deck.sh. Values are literal, unquoted
-# text. The real file contains a secret, must remain mode 0600, and is ignored
-# by Git.
-DECK_SSH_TARGET=root@192.168.1.100
-DECK_WIREGUARD_ADDRESS=10.0.0.11
+# Create a private per-Deck file with ops/configure-deck.sh. Values are literal,
+# unquoted text. Keep the real file mode 0600 and outside the Git checkout.
+DECK_SSH_TARGET=root@192.0.2.10
+DECK_WIREGUARD_ADDRESS=198.51.100.11
+DECK_WIREGUARD_ROUTE=198.51.100.0/24
+DECK_WIREGUARD_HEALTH_ADDRESS=198.51.100.1
 ROM_UPLOADER_PASSWORD=

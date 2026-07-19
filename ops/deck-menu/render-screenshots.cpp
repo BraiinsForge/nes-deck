@@ -162,9 +162,9 @@ int main(int argc, char **argv) {
 
   SettingsLayout settings_layout;
   NetworkStatus network;
-  network.ssid = "net1";
-  network.wlan_ipv4 = "10.249.110.248";
-  network.wireguard_ipv4 = "10.0.0.10";
+  network.ssid = "STUDIO";
+  network.wlan_ipv4 = "192.0.2.20";
+  network.wireguard_ipv4 = "198.51.100.10";
   network.selector = "CONNECTED";
   render_settings(42, 60, "us", SettingsTargetVolumeDown, std::string(),
                   network, &canvas, &settings_layout);

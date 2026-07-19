@@ -1,7 +1,7 @@
 #!/bin/sh
 
-# Rebuild the two static ARMv7 binaries. Tested on root@10.0.0.1 with
-# Go 1.25.4 (X:nodwarf5) and Zig 0.12.0.
+# Rebuild the two static ARMv7 binaries with Go 1.25.4 (X:nodwarf5) and
+# Zig 0.12.0.
 
 set -eu
 

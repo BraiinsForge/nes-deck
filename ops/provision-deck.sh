@@ -10,7 +10,8 @@ export LC_ALL=C
 
 usage() {
   cat >&2 <<EOF
-Usage: $0 [--config PATH] [--wireguard-server root@HOST]
+Usage: $0 [--config PATH] [--wireguard-config PATH]
+          [--register-peer-command PATH | --skip-peer-registration]
           [--wifi-profiles DIRECTORY] [--network-only] [--check]
 EOF
   exit 2
@@ -19,8 +20,11 @@ EOF
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 config_library=$script_dir/lib/deck-config.sh
-config=$repo_root/deck.conf
-wireguard_server=root@10.0.0.1
+config_home=${RETRO_DECK_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/retro-deck}
+config=$config_home/deck.conf
+wireguard_config=$config_home/wireguard/wg0.conf
+register_peer_command=$config_home/wireguard/register-peer
+skip_peer_registration=0
 wifi_profiles=/var/lib/iwd
 network_only=0
 check_only=0
@@ -32,10 +36,20 @@ while [[ $# -gt 0 ]]; do
       config=$2
       shift 2
       ;;
-    --wireguard-server)
+    --wireguard-config)
       [[ $# -ge 2 ]] || usage
-      wireguard_server=$2
+      wireguard_config=$2
       shift 2
+      ;;
+    --register-peer-command)
+      [[ $# -ge 2 ]] || usage
+      register_peer_command=$2
+      skip_peer_registration=0
+      shift 2
+      ;;
+    --skip-peer-registration)
+      skip_peer_registration=1
+      shift
       ;;
     --wifi-profiles)
       [[ $# -ge 2 ]] || usage
@@ -56,11 +70,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ $wireguard_server =~ ^root@[A-Za-z0-9._:-]+$ ]] || {
-  echo "WireGuard server must have the form root@HOST" >&2
-  exit 1
-}
-
 [[ -f $config_library && ! -L $config_library ]] || {
   echo "Deck configuration library is missing or unsafe: $config_library" >&2
   exit 1
@@ -70,8 +79,49 @@ source "$config_library"
 deck_config_load "$config"
 target=$DECK_SSH_TARGET
 wireguard_address=$DECK_WIREGUARD_ADDRESS
+wireguard_route=$DECK_WIREGUARD_ROUTE
+wireguard_health_address=$DECK_WIREGUARD_HEALTH_ADDRESS
 
-for command in awk find install mktemp sha256sum sort ssh stat tar tr wc xxd; do
+private_file_valid() {
+  local path=$1
+  local mode
+  [[ -f $path && ! -L $path ]] || return 1
+  mode=$(stat -c %a -- "$path") || return 1
+  [[ $mode =~ ^[0-7]{3,4}$ ]] || return 1
+  (( (8#$mode & 077) == 0 ))
+}
+
+private_file_valid "$wireguard_config" || {
+  echo "Private WireGuard client configuration is missing or unsafe: $wireguard_config" >&2
+  exit 1
+}
+grep -Eq '^[[:space:]]*\[Peer\][[:space:]]*$' "$wireguard_config" || {
+  echo "WireGuard client configuration has no peer" >&2
+  exit 1
+}
+if grep -Eq '^[[:space:]]*PrivateKey[[:space:]]*=' "$wireguard_config"; then
+  echo "WireGuard client configuration must not contain a Deck private key" >&2
+  exit 1
+fi
+allowed_ips=$(awk -F= '
+  $1 ~ /^[[:space:]]*AllowedIPs[[:space:]]*$/ {
+    value=$2
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+    print value
+  }
+' "$wireguard_config")
+[[ $allowed_ips == "$wireguard_route" ]] || {
+  echo "WireGuard client AllowedIPs must equal DECK_WIREGUARD_ROUTE" >&2
+  exit 1
+}
+if [[ $skip_peer_registration -eq 0 ]] &&
+   { ! private_file_valid "$register_peer_command" ||
+     [[ ! -x $register_peer_command ]]; }; then
+  echo "Private WireGuard peer registrar is missing or unsafe: $register_peer_command" >&2
+  exit 1
+fi
+
+for command in awk find grep install mktemp seq sha256sum sort ssh stat tar tr wc xxd; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -155,10 +205,12 @@ install -m 0700 "$wireguard_dir/deck-wireguard-run" \
   "$payload/wireguard/deck-wireguard-run"
 install -m 0700 "$wireguard_dir/deck-wireguard.init" \
   "$payload/wireguard/deck-wireguard.init"
-install -m 0600 "$wireguard_dir/wg0.conf" "$payload/wireguard/wg0.conf"
+install -m 0600 "$wireguard_config" "$payload/wireguard/wg0.conf"
 install -m 0600 "$wireguard_dir/30-tun" "$payload/wireguard/30-tun"
 printf '%s/32\n' "$wireguard_address" >"$payload/wireguard/wg0.address"
+printf '%s\n' "$wireguard_route" >"$payload/wireguard/wg0.route"
 chmod 0600 "$payload/wireguard/wg0.address"
+chmod 0600 "$payload/wireguard/wg0.route"
 
 install -m 0700 "$repo_root/ops/deck-wifi/deck-wifi-profile-add" \
   "$payload/wifi/deck-wifi-profile-add"
@@ -170,7 +222,12 @@ install -m 0700 "$repo_root/ops/deck-wifi/deck-wifi.init" \
   "$payload/wifi/deck-wifi.init"
 cp -p "$profile_stage/"*.psk "$payload/wifi/profiles/"
 
-echo "Provision plan: $target -> $wireguard_address via $wireguard_server"
+echo "Provision plan: $target -> $wireguard_address over $wireguard_route"
+if [[ $skip_peer_registration -eq 1 ]]; then
+  echo "WireGuard peer registration: preconfigured externally"
+else
+  echo "WireGuard peer registration: $register_peer_command"
+fi
 echo "Wi-Fi intake: $profile_count personal PSK profiles; $ignored_count open/enterprise profiles ignored"
 echo "Wi-Fi preference seed: $preferred_count recent profiles; recovery profile last when present"
 if [[ $check_only -eq 1 ]]; then
@@ -201,11 +258,12 @@ tar -C "$payload" -czf - . |
     "umask 077; cat >'$remote_stage.tar.gz'"
 
 ssh -o BatchMode=yes "$target" sh -s -- \
-  "$remote_stage" "$wireguard_address/32" \
+  "$remote_stage" "$wireguard_address/32" "$wireguard_route" \
   >"$work/deck-public-key" <<'DECK'
 set -eu
 stage=$1
 wireguard_address=$2
+wireguard_route=$3
 archive=$stage.tar.gz
 trap 'rm -rf "$stage" "$archive"' EXIT INT TERM HUP
 rm -rf "$stage"
@@ -237,6 +295,14 @@ if [ -s /etc/wireguard/wg0.address ]; then
 else
   cp -p "$stage/wireguard/wg0.address" /etc/wireguard/wg0.address
 fi
+if [ -s /etc/wireguard/wg0.route ]; then
+  [ "$(cat /etc/wireguard/wg0.route)" = "$wireguard_route" ] || {
+    echo "Refusing to change an existing Deck WireGuard route" >&2
+    exit 1
+  }
+else
+  cp -p "$stage/wireguard/wg0.route" /etc/wireguard/wg0.route
+fi
 if [ ! -s /etc/wireguard/wg0.key ]; then
   key=/etc/wireguard/.wg0.key.new.$$
   /mnt/data/nes-deck/wireguard/bin/wg genkey >"$key"
@@ -249,7 +315,7 @@ chmod 0700 /mnt/data/nes-deck/wireguard/bin/wireguard-go \
   /etc/init.d/deck-wireguard
 chmod 0600 /lib/modules/5.10.176/tun.ko /etc/modules.d/30-tun \
   /etc/wireguard/wg0.conf /etc/wireguard/wg0.key \
-  /etc/wireguard/wg0.address
+  /etc/wireguard/wg0.address /etc/wireguard/wg0.route
 
 cp -p "$stage/wifi/deck-wifi-profile-add" \
   /usr/sbin/deck-wifi-profile-add
@@ -275,93 +341,12 @@ deck_public_key=$(tail -n 1 "$work/deck-public-key")
   exit 1
 }
 
-echo "Reserving the unique peer on the WireGuard server..."
-ssh -o BatchMode=yes "$wireguard_server" sh -s -- \
-  "$wireguard_address/32" "$deck_public_key" <<'SERVER'
-set -eu
-address=$1
-public_key=$2
-config=/etc/wireguard/wg0.conf
-
-[ -f "$config" ] && [ ! -L "$config" ] || {
-  echo "Unsafe or missing server WireGuard configuration" >&2
-  exit 1
-}
-wg show wg0 >/dev/null
-
-persistent_key=$(awk -v wanted="$address" '
-  function emit() {
-    if (allowed == wanted && key != "") print key
-  }
-  $1 == "[Peer]" { emit(); key=""; allowed=""; next }
-  $1 == "PublicKey" && $2 == "=" { key=$3; next }
-  $1 == "AllowedIPs" && $2 == "=" { allowed=$3; next }
-  END { emit() }
-' "$config")
-case $persistent_key in
-  "") ;;
-  "$public_key") ;;
-  *)
-    echo "WireGuard address is already assigned to another key: $address" >&2
-    exit 1
-    ;;
-esac
-
-key_address=$(awk -v wanted="$public_key" '
-  function emit() {
-    if (key == wanted && allowed != "") print allowed
-  }
-  $1 == "[Peer]" { emit(); key=""; allowed=""; next }
-  $1 == "PublicKey" && $2 == "=" { key=$3; next }
-  $1 == "AllowedIPs" && $2 == "=" { allowed=$3; next }
-  END { emit() }
-' "$config")
-case $key_address in
-  "") ;;
-  "$address") ;;
-  *)
-    echo "Deck public key is already assigned to another address: $key_address" >&2
-    exit 1
-    ;;
-esac
-
-live_key=$(wg show wg0 allowed-ips |
-  awk -v wanted="$address" '$2 == wanted { print $1 }')
-case $live_key in
-  "") ;;
-  "$public_key") ;;
-  *)
-    echo "Live WireGuard address is already assigned: $address" >&2
-    exit 1
-    ;;
-esac
-
-if [ -z "$persistent_key" ]; then
-  backup_dir=/etc/wireguard/backups
-  mkdir -p "$backup_dir"
-  chmod 0700 "$backup_dir"
-  timestamp=$(date -u '+%Y%m%dT%H%M%SZ')
-  cp -p "$config" "$backup_dir/wg0.conf.$timestamp"
-  temporary=$(mktemp /etc/wireguard/.wg0.conf.new.XXXXXX)
-  trap 'rm -f "$temporary"' EXIT INT TERM HUP
-  {
-    cat "$config"
-    printf '\n[Peer]\nPublicKey = %s\nAllowedIPs = %s\n' \
-      "$public_key" "$address"
-  } >"$temporary"
-  chmod 0600 "$temporary"
-  chown 0:0 "$temporary"
-  mv "$temporary" "$config"
-  trap - EXIT INT TERM HUP
+if [[ $skip_peer_registration -eq 0 ]]; then
+  echo "Registering the peer through the private external command..."
+  "$register_peer_command" "$wireguard_address/32" "$deck_public_key"
+else
+  echo "Skipping peer registration because the server was preconfigured externally."
 fi
-
-if [ -z "$live_key" ]; then
-  wg set wg0 peer "$public_key" allowed-ips "$address"
-fi
-
-[ "$(wg show wg0 allowed-ips | awk -v wanted="$address" \
-  '$2 == wanted { print $1 }')" = "$public_key" ]
-SERVER
 
 echo "Starting the guarded Wi-Fi watcher and WireGuard tunnel..."
 ssh -o BatchMode=yes "$target" '
@@ -376,8 +361,8 @@ ssh -o BatchMode=yes "$target" '
 
 for attempt in $(seq 1 45); do
   if ssh -o BatchMode=yes -o ConnectTimeout=4 "$target" \
-    "ping -c 1 -W 2 10.0.0.1 >/dev/null 2>&1 &&
-     ip route get 10.0.0.1 |
+    "ping -c 1 -W 2 '$wireguard_health_address' >/dev/null 2>&1 &&
+     ip route get '$wireguard_health_address' |
        grep -q 'dev wg0.*src $wireguard_address'" \
     >/dev/null 2>&1; then
     break
@@ -419,6 +404,7 @@ ssh -o BatchMode=yes "$target" "
   /etc/init.d/nes-deck-uploader status >/dev/null
   pidof deck-menu >/dev/null
   pidof rom-uploader >/dev/null
-  ip route get 10.0.0.1 | grep -q 'dev wg0.*src $wireguard_address'
+  ip route get '$wireguard_health_address' |
+    grep -q 'dev wg0.*src $wireguard_address'
 "
 echo "Fresh Deck provisioning and application deployment complete."

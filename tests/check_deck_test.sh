@@ -34,8 +34,10 @@ MOCK
 chmod 0700 "$fixture/bin/timeout"
 
 cat >"$config" <<'CONFIG'
-DECK_SSH_TARGET=root@192.168.1.50
-DECK_WIREGUARD_ADDRESS=10.0.0.11
+DECK_SSH_TARGET=root@192.0.2.50
+DECK_WIREGUARD_ADDRESS=198.51.100.11
+DECK_WIREGUARD_ROUTE=198.51.100.0/24
+DECK_WIREGUARD_HEALTH_ADDRESS=198.51.100.1
 ROM_UPLOADER_PASSWORD=configured-test-password
 CONFIG
 chmod 0600 "$config"
@@ -45,9 +47,9 @@ export CHECK_DECK_TIMEOUT_ARGUMENTS=$timeout_arguments
 export CHECK_DECK_REMOTE_SCRIPT=$remote_script
 output=$(PATH="$fixture/bin:$PATH" \
   "$repo_root/ops/check-deck.sh" --config "$config")
-grep -Fq 'Checking Retro Deck at root@192.168.1.50...' <<<"$output" ||
+grep -Fq 'Checking Retro Deck at root@192.0.2.50...' <<<"$output" ||
   fail 'health check did not identify its target'
-grep -Fq -- '-o BatchMode=yes -o ConnectTimeout=7 -o LogLevel=ERROR root@192.168.1.50 sh -s' \
+grep -Fq -- '-o BatchMode=yes -o ConnectTimeout=7 -o LogLevel=ERROR root@192.0.2.50 sh -s' \
   "$arguments" || fail 'health check did not use bounded batch SSH'
 grep -Fq '20 ssh -o BatchMode=yes' "$timeout_arguments" ||
   fail 'health check did not enforce its overall SSH timeout'
@@ -65,8 +67,8 @@ grep -Fq "tail -n 20 \"\$log\"" "$remote_script" ||
   fail 'remote health check does not include the bounded dashboard log'
 
 PATH="$fixture/bin:$PATH" "$repo_root/ops/check-deck.sh" \
-  --config "$config" root@10.0.1.7 >/dev/null
-grep -Fq 'root@10.0.1.7 sh -s' "$arguments" ||
+  --config "$config" root@192.0.2.7 >/dev/null
+grep -Fq 'root@192.0.2.7 sh -s' "$arguments" ||
   fail 'health check did not honor the temporary SSH target override'
 
 if CHECK_DECK_SSH_FAIL=1 PATH="$fixture/bin:$PATH" \

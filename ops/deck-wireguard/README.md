@@ -2,9 +2,9 @@
 
 This bundle runs WireGuard through TUN, because the Deck's factory 5.10.176
 kernel has neither WireGuard nor TUN and its dead target feed cannot safely
-supply kernel modules. It contains no private key. The committed `wg0.conf`,
-`server-peer.conf`, and all other repository files contain only public
-routing/peer information.
+supply kernel modules. It contains no VPN endpoint, peer key, address, route,
+or private key. Those belong in the operator's private configuration outside
+the repository.
 
 ## Prerequisite
 
@@ -16,6 +16,13 @@ when devtmpfs has not created it. It refuses to start if TUN is unavailable.
 
 Do not install a stock-feed kmod whose vermagic differs from
 `5.10.176-1-c5bfc45a30e47807303e5abc3fd4a4f1`.
+
+`ops/provision-deck.sh` reads the client `setconf` input and peer-registration
+command from the operator's config directory, outside this checkout. The
+client file must not contain a private key. Its `AllowedIPs` value must match
+the routed prefix in the selected per-Deck configuration. Start from
+`wg0.conf.example`, replace the placeholder server identity and endpoint, and
+store the resulting file outside the checkout with mode `0600`.
 
 ## Deployment layout
 
@@ -30,7 +37,8 @@ Install the files as follows (the data partition is intentionally used for the
 /etc/modules.d/30-tun
 /etc/wireguard/wg0.conf
 /etc/wireguard/wg0.key       # generated on Deck later; never commit it
-/etc/wireguard/wg0.address   # per-Deck 10.0.0.x/32 address
+/etc/wireguard/wg0.address   # operator-configured per-Deck IPv4 /32
+/etc/wireguard/wg0.route     # operator-configured routed IPv4 prefix
 /etc/init.d/deck-wireguard
 ```
 
@@ -38,18 +46,16 @@ Use modes `0755` for binaries/scripts, `0600` for all files under
 `/etc/wireguard`, and `0755` for the init script.
 `ops/provision-deck.sh` performs the per-Deck steps in a guarded order: it
 generates the private key on the Deck, refuses to replace an existing address
-or private key, checks the requested address and public key for collisions in
-both the server's persistent configuration and live interface, adds the peer,
-and only then starts the client tunnel. The private key never leaves the Deck;
-only its derived public key is sent to the server. The network-only path is
-idempotent and is suitable for verifying an existing installation.
+or private key, calls an explicit external peer-registration command, and only
+then starts the client tunnel. The repository does not know how or where the
+operator's VPN server is managed. The private key never leaves the Deck; only
+its derived public key is passed to that external command. The network-only
+path is idempotent and is suitable for verifying an existing installation.
 
 The procd service starts at priority 96, after `/mnt/data` is mounted at 90.
 It supervises `wireguard-go --foreground`, configures the address in
-`wg0.address`, and
-routes only `10.0.0.0/24` through the tunnel. It does not need to wait for the
-slow Realtek Wi-Fi association: the endpoint is an IP address and the 25-second
-keepalive will establish a handshake after connectivity appears.
+`wg0.address`, and installs the prefix from `wg0.route`. It does not assume a
+particular private subnet or server address.
 
 After deployment, enable and verify with:
 
@@ -58,7 +64,7 @@ After deployment, enable and verify with:
 /etc/init.d/deck-wireguard start
 /mnt/data/nes-deck/wireguard/bin/wg show wg0
 ip address show dev wg0
-ip route show 10.0.0.0/24
+ip route show "$(cat /etc/wireguard/wg0.route)"
 logread -e deck-wireguard
 ```
 
@@ -73,7 +79,7 @@ logread -e deck-wireguard
 
 Both upstream repositories are `https://git.zx2c4.com/`. `build-userspace.sh`
 pins the peeled commits rather than mutable branches. `SHA256SUMS` records the
-exact payloads built on `root@10.0.0.1`.
+exact payloads produced by the pinned cross-build.
 
 `tun.ko` comes from Braiins `linux-stm` commit
 `2aca87d7aa4707aa42bbbfd2a6868df15d4df916` with the running kernel config

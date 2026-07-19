@@ -50,8 +50,8 @@ int main() {
 
   NetworkStatus first;
   first.ssid = "NET1";
-  first.wlan_ipv4 = "10.0.1.11";
-  first.wireguard_ipv4 = "10.0.0.15";
+  first.wlan_ipv4 = "192.0.2.11";
+  first.wireguard_ipv4 = "198.51.100.15";
   first.selector = "CONNECTED";
   NetworkStatus same = first;
   NetworkStatus different = first;

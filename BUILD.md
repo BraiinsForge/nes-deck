@@ -159,7 +159,7 @@ The chiptune player can render its UI without opening the framebuffer:
 Copy the persistent cover cache from a Deck, then run the native renderer:
 
 ```sh
-scp -r root@10.0.0.10:/mnt/data/nes-deck/covers /tmp/deck-covers
+scp -r root@DECK-IP:/mnt/data/nes-deck/covers /tmp/deck-covers
 ops/deck-menu/render-screenshots.sh deploy/menu/games.tsv \
   /tmp/deck-covers "$HOME/retro-deck-screens"
 ```

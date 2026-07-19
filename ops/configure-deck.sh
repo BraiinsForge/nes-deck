@@ -8,7 +8,8 @@ export LC_ALL=C
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 config_library=$script_dir/lib/deck-config.sh
-config=${1:-$repo_root/deck.conf}
+config_home=${RETRO_DECK_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/retro-deck}
+config=${1:-$config_home/deck.conf}
 
 [[ -f $config_library && ! -L $config_library ]] || {
   echo "Deck configuration library is missing or unsafe: $config_library" >&2
@@ -25,7 +26,10 @@ if [[ -e $config || -L $config ]]; then
   echo "Refusing to replace existing configuration: $config" >&2
   exit 1
 fi
-if [[ ! -d $(dirname -- "$config") ]]; then
+if [[ $# -eq 0 && ! -e $config_home ]]; then
+  install -d -m 0700 -- "$config_home"
+fi
+if [[ ! -d $(dirname -- "$config") || -L $(dirname -- "$config") ]]; then
   echo "Configuration directory does not exist: $(dirname -- "$config")" >&2
   exit 1
 fi
@@ -36,9 +40,34 @@ deck_config_valid_ssh_target "$target" || {
   exit 1
 }
 
-read -r -p 'Deck WireGuard address (10.0.0.2-253): ' wireguard_address
+read -r -p 'Deck WireGuard IPv4 address: ' wireguard_address
 if ! deck_config_valid_wireguard_address "$wireguard_address"; then
-  echo "Deck WireGuard address must be between 10.0.0.2 and 10.0.0.253" >&2
+  echo "Deck WireGuard address must be canonical unicast IPv4" >&2
+  exit 1
+fi
+
+read -r -p 'WireGuard routed IPv4 prefix: ' wireguard_route
+if ! deck_config_valid_wireguard_route "$wireguard_route"; then
+  echo "WireGuard route must be a canonical IPv4 network prefix" >&2
+  exit 1
+fi
+if ! deck_config_route_contains_address "$wireguard_route" "$wireguard_address"; then
+  echo "WireGuard route must contain the Deck address" >&2
+  exit 1
+fi
+
+read -r -p 'WireGuard health-check IPv4 address: ' wireguard_health_address
+if ! deck_config_valid_wireguard_address "$wireguard_health_address"; then
+  echo "WireGuard health address must be canonical unicast IPv4" >&2
+  exit 1
+fi
+if ! deck_config_route_contains_address \
+  "$wireguard_route" "$wireguard_health_address"; then
+  echo "WireGuard route must contain the health address" >&2
+  exit 1
+fi
+if [[ $wireguard_health_address == "$wireguard_address" ]]; then
+  echo "WireGuard health address must differ from the Deck address" >&2
   exit 1
 fi
 
@@ -61,6 +90,8 @@ trap 'rm -f "$temporary"' EXIT INT TERM HUP
 {
   printf 'DECK_SSH_TARGET=%s\n' "$target"
   printf 'DECK_WIREGUARD_ADDRESS=%s\n' "$wireguard_address"
+  printf 'DECK_WIREGUARD_ROUTE=%s\n' "$wireguard_route"
+  printf 'DECK_WIREGUARD_HEALTH_ADDRESS=%s\n' "$wireguard_health_address"
   printf 'ROM_UPLOADER_PASSWORD=%s\n' "$uploader_password"
 } >"$temporary"
 chmod 0600 "$temporary"

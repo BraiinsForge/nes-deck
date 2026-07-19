@@ -6,12 +6,65 @@ deck_config_valid_ssh_target() {
   [[ ${1-} =~ ^root@[A-Za-z0-9._:-]+$ ]]
 }
 
+deck_config_ipv4_integer() {
+  local address=${1-}
+  local first second third fourth
+  [[ $address =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] ||
+    return 1
+  first=${BASH_REMATCH[1]}
+  second=${BASH_REMATCH[2]}
+  third=${BASH_REMATCH[3]}
+  fourth=${BASH_REMATCH[4]}
+  local octet
+  for octet in "$first" "$second" "$third" "$fourth"; do
+    [[ $octet == 0 || $octet != 0* ]] || return 1
+    (( 10#$octet <= 255 )) || return 1
+  done
+  printf '%u\n' "$((
+    (10#$first << 24) |
+    (10#$second << 16) |
+    (10#$third << 8) |
+    10#$fourth
+  ))"
+}
+
 deck_config_valid_wireguard_address() {
   local address=${1-}
-  local peer
-  [[ $address =~ ^10\.0\.0\.([1-9][0-9]{0,2})$ ]] || return 1
-  peer=${BASH_REMATCH[1]}
-  (( 10#$peer >= 2 && 10#$peer <= 253 ))
+  local first=${address%%.*}
+  deck_config_ipv4_integer "$address" >/dev/null || return 1
+  (( 10#$first >= 1 && 10#$first <= 223 && 10#$first != 127 ))
+}
+
+deck_config_valid_wireguard_route() {
+  local route=${1-}
+  local network prefix network_integer mask
+  [[ $route =~ ^([^/]+)/([0-9]|[12][0-9]|3[0-2])$ ]] || return 1
+  network=${BASH_REMATCH[1]}
+  prefix=${BASH_REMATCH[2]}
+  network_integer=$(deck_config_ipv4_integer "$network") || return 1
+  if (( 10#$prefix == 0 )); then
+    mask=0
+  else
+    mask=$(( (0xffffffff << (32 - 10#$prefix)) & 0xffffffff ))
+  fi
+  (( (network_integer & mask) == network_integer ))
+}
+
+deck_config_route_contains_address() {
+  local route=${1-}
+  local address=${2-}
+  local network=${route%/*}
+  local prefix=${route##*/}
+  local network_integer address_integer mask
+  deck_config_valid_wireguard_route "$route" || return 1
+  address_integer=$(deck_config_ipv4_integer "$address") || return 1
+  network_integer=$(deck_config_ipv4_integer "$network") || return 1
+  if (( 10#$prefix == 0 )); then
+    mask=0
+  else
+    mask=$(( (0xffffffff << (32 - 10#$prefix)) & 0xffffffff ))
+  fi
+  (( (address_integer & mask) == network_integer ))
 }
 
 deck_config_valid_uploader_password() {
@@ -35,6 +88,8 @@ deck_config_load() {
   local line_number=0
   local target_seen=0
   local wireguard_seen=0
+  local wireguard_route_seen=0
+  local wireguard_health_seen=0
   local password_seen=0
 
   [[ -f $path && ! -L $path ]] || {
@@ -57,6 +112,8 @@ deck_config_load() {
 
   DECK_SSH_TARGET=
   DECK_WIREGUARD_ADDRESS=
+  DECK_WIREGUARD_ROUTE=
+  DECK_WIREGUARD_HEALTH_ADDRESS=
   ROM_UPLOADER_PASSWORD=
   while IFS= read -r line || [[ -n $line ]]; do
     line_number=$((line_number + 1))
@@ -84,6 +141,22 @@ deck_config_load() {
         DECK_WIREGUARD_ADDRESS=$value
         wireguard_seen=1
         ;;
+      DECK_WIREGUARD_ROUTE)
+        [[ $wireguard_route_seen -eq 0 ]] || {
+          echo "Configuration repeats DECK_WIREGUARD_ROUTE: $path" >&2
+          return 1
+        }
+        DECK_WIREGUARD_ROUTE=$value
+        wireguard_route_seen=1
+        ;;
+      DECK_WIREGUARD_HEALTH_ADDRESS)
+        [[ $wireguard_health_seen -eq 0 ]] || {
+          echo "Configuration repeats DECK_WIREGUARD_HEALTH_ADDRESS: $path" >&2
+          return 1
+        }
+        DECK_WIREGUARD_HEALTH_ADDRESS=$value
+        wireguard_health_seen=1
+        ;;
       ROM_UPLOADER_PASSWORD)
         [[ $password_seen -eq 0 ]] || {
           echo "Configuration repeats ROM_UPLOADER_PASSWORD: $path" >&2
@@ -107,6 +180,14 @@ deck_config_load() {
     echo "Configuration is missing DECK_WIREGUARD_ADDRESS: $path" >&2
     return 1
   }
+  [[ $wireguard_route_seen -eq 1 ]] || {
+    echo "Configuration is missing DECK_WIREGUARD_ROUTE: $path" >&2
+    return 1
+  }
+  [[ $wireguard_health_seen -eq 1 ]] || {
+    echo "Configuration is missing DECK_WIREGUARD_HEALTH_ADDRESS: $path" >&2
+    return 1
+  }
   [[ $password_seen -eq 1 ]] || {
     echo "Configuration is missing ROM_UPLOADER_PASSWORD: $path" >&2
     return 1
@@ -120,11 +201,33 @@ deck_config_load() {
     return 1
   }
   deck_config_valid_wireguard_address "$DECK_WIREGUARD_ADDRESS" || {
-    echo 'DECK_WIREGUARD_ADDRESS must be a usable 10.0.0.0/24 peer address' >&2
+    echo 'DECK_WIREGUARD_ADDRESS must be a canonical unicast IPv4 address' >&2
+    return 1
+  }
+  deck_config_valid_wireguard_route "$DECK_WIREGUARD_ROUTE" || {
+    echo 'DECK_WIREGUARD_ROUTE must be a canonical IPv4 network prefix' >&2
+    return 1
+  }
+  deck_config_route_contains_address \
+    "$DECK_WIREGUARD_ROUTE" "$DECK_WIREGUARD_ADDRESS" || {
+    echo 'DECK_WIREGUARD_ROUTE must contain DECK_WIREGUARD_ADDRESS' >&2
+    return 1
+  }
+  deck_config_valid_wireguard_address "$DECK_WIREGUARD_HEALTH_ADDRESS" || {
+    echo 'DECK_WIREGUARD_HEALTH_ADDRESS must be canonical unicast IPv4' >&2
+    return 1
+  }
+  deck_config_route_contains_address \
+    "$DECK_WIREGUARD_ROUTE" "$DECK_WIREGUARD_HEALTH_ADDRESS" || {
+    echo 'DECK_WIREGUARD_ROUTE must contain DECK_WIREGUARD_HEALTH_ADDRESS' >&2
+    return 1
+  }
+  [[ $DECK_WIREGUARD_HEALTH_ADDRESS != "$DECK_WIREGUARD_ADDRESS" ]] || {
+    echo 'DECK_WIREGUARD_HEALTH_ADDRESS must differ from the Deck address' >&2
     return 1
   }
   deck_config_valid_uploader_password "$ROM_UPLOADER_PASSWORD" || {
-      echo 'ROM_UPLOADER_PASSWORD must contain 8 through 128 bytes without line breaks' >&2
-      return 1
-    }
+    echo 'ROM_UPLOADER_PASSWORD must contain 8 through 128 bytes without line breaks' >&2
+    return 1
+  }
 }

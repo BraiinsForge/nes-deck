@@ -14,7 +14,8 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 activate_script=$script_dir/deploy/activate.sh
 config_library=$script_dir/lib/deck-config.sh
-config=$repo_root/deck.conf
+config_home=${RETRO_DECK_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/retro-deck}
+config=$config_home/deck.conf
 check_config=0
 target_override=
 

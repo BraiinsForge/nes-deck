@@ -14,7 +14,7 @@ WG_PROCESS_FOREGROUND=1
 export WG_PROCESS_FOREGROUND
 
 IFACE=wg0
-ROUTE=10.0.0.0/24
+ROUTE=
 MTU=1420
 STATE_DIR=/var/run/wireguard
 INSTALL_DIR=/mnt/data/nes-deck/wireguard
@@ -23,6 +23,7 @@ WG="$INSTALL_DIR/bin/wg"
 CONFIG=/etc/wireguard/wg0.conf
 PRIVATE_KEY=/etc/wireguard/wg0.key
 ADDRESS_CONFIG=/etc/wireguard/wg0.address
+ROUTE_CONFIG=/etc/wireguard/wg0.route
 
 daemon_pid=
 
@@ -72,27 +73,68 @@ ensure_tun()
 	chmod 0600 /dev/net/tun
 }
 
+valid_ipv4()
+{
+	value=$1
+	old_ifs=$IFS
+	IFS=.
+	# shellcheck disable=SC2086
+	set -- $value
+	IFS=$old_ifs
+	[ "$#" -eq 4 ] || return 1
+	for octet do
+		case "$octet" in
+			0) ;;
+			''|*[!0-9]*|0*) return 1 ;;
+		esac
+		[ "$octet" -le 255 ] || return 1
+	done
+}
+
+valid_unicast_ipv4()
+{
+	value=$1
+	valid_ipv4 "$value" || return 1
+	first=${value%%.*}
+	[ "$first" -ge 1 ] && [ "$first" -le 223 ] && [ "$first" -ne 127 ]
+}
+
+valid_ipv4_route()
+{
+	value=$1
+	case "$value" in
+		*/*) ;;
+		*) return 1 ;;
+	esac
+	network=${value%/*}
+	prefix=${value##*/}
+	[ "$network/$prefix" = "$value" ] || return 1
+	valid_ipv4 "$network" || return 1
+	case "$prefix" in
+		0|[1-9]|[12][0-9]|3[0-2]) ;;
+		*) return 1 ;;
+	esac
+}
+
 [ -x "$WIREGUARD_GO" ] || die "missing $WIREGUARD_GO"
 [ -x "$WG" ] || die "missing $WG"
 [ -r "$CONFIG" ] || die "missing $CONFIG"
 [ -r "$PRIVATE_KEY" ] || die "missing $PRIVATE_KEY"
 [ -r "$ADDRESS_CONFIG" ] || die "missing $ADDRESS_CONFIG"
+[ -r "$ROUTE_CONFIG" ] || die "missing $ROUTE_CONFIG"
 
 ADDRESS=$(cat "$ADDRESS_CONFIG")
 case "$ADDRESS" in
-	10.0.0.*'/32') ;;
-	*) die 'WireGuard address must be a 10.0.0.0/24 host route' ;;
+	*'/32') ;;
+	*) die 'WireGuard address must be one IPv4 host route' ;;
 esac
 SOURCE=${ADDRESS%/32}
-last_octet=${SOURCE##*.}
-case "$last_octet" in
-	''|*[!0-9]*) die 'WireGuard address has an invalid host octet' ;;
-esac
-[ "$last_octet" -ge 2 ] && [ "$last_octet" -le 253 ] ||
-	die 'WireGuard address host octet is reserved'
+valid_unicast_ipv4 "$SOURCE" || die 'WireGuard address is not canonical unicast IPv4'
+ROUTE=$(cat "$ROUTE_CONFIG")
+valid_ipv4_route "$ROUTE" || die 'WireGuard route is not canonical IPv4 CIDR'
 
 umask 077
-chmod 0600 "$CONFIG" "$PRIVATE_KEY" "$ADDRESS_CONFIG"
+chmod 0600 "$CONFIG" "$PRIVATE_KEY" "$ADDRESS_CONFIG" "$ROUTE_CONFIG"
 ensure_tun
 mkdir -p "$STATE_DIR"
 
