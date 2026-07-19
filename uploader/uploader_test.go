@@ -185,7 +185,7 @@ func testRGB(index int) string {
 func TestDashboardPaletteConfiguration(t *testing.T) {
 	store, overridePath := testPalette(t)
 	fields, icons, err := store.current()
-	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" || len(icons) != 48 || !icons[11].Selected {
+	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" || len(icons) != 48 || !icons[20].Selected {
 		t.Fatalf("fallback palette did not load: %#v %v", fields, err)
 	}
 	knekkoIcons := 0
@@ -386,7 +386,6 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	for index, spec := range dashboardPaletteSpecs {
 		paletteForm.Set(spec.name, strings.ToLower(testRGB(index+32)))
 	}
-	paletteForm.Set("settings-icon", "gear-knekko-36")
 	paletteRequest := requestFor(http.MethodPost, testServiceOrigin+"/palette", strings.NewReader(paletteForm.Encode()))
 	paletteRequest.Header.Set("Origin", testServiceOrigin)
 	paletteRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -398,11 +397,9 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 	}
 	if !strings.Contains(paletteResponse.Body.String(), `type="color"`) ||
 		!strings.Contains(paletteResponse.Body.String(), `value="#616263"`) ||
-		!strings.Contains(paletteResponse.Body.String(), `value="gear-knekko-36" checked`) ||
-		!strings.Contains(paletteResponse.Body.String(), `pixel-cog-23`) ||
-		!strings.Contains(paletteResponse.Body.String(), `/assets/settings-icons/36.png`) ||
+		strings.Contains(paletteResponse.Body.String(), `name="settings-icon"`) ||
 		!strings.Contains(paletteResponse.Body.String(), `/assets/palette.js`) {
-		t.Fatal("appearance response does not expose RGB and settings-icon controls")
+		t.Fatal("appearance response does not expose only the RGB controls")
 	}
 	if paletteRestarts != 1 {
 		t.Fatalf("palette update restarted dashboard %d times", paletteRestarts)
@@ -412,7 +409,7 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 		t.Fatalf("palette update was not persisted: %v", err)
 	}
 	installedPalette, err := parsePaletteOverride(overrideContents)
-	if err != nil || installedPalette.palette[dashboardPaletteSpecs[0].name] != "#616263" || installedPalette.settingsIcon != "gear-knekko-36" {
+	if err != nil || installedPalette.palette[dashboardPaletteSpecs[0].name] != "#616263" || installedPalette.settingsIcon != defaultSettingsIcon {
 		t.Fatalf("HTTP palette was not normalized and persisted: %#v %v", installedPalette, err)
 	}
 

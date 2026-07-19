@@ -40,13 +40,12 @@ type loginAttempt struct {
 }
 
 type pageData struct {
-	Authenticated      bool
-	CSRF               string
-	Error              string
-	Notice             string
-	Entries            []catalogEntry
-	Palette            []paletteField
-	SettingsIconGroups []settingsIconGroup
+	Authenticated bool
+	CSRF          string
+	Error         string
+	Notice        string
+	Entries       []catalogEntry
+	Palette       []paletteField
 }
 
 type application struct {
@@ -258,11 +257,11 @@ func (app *application) dashboardData(session userSession, message, notice strin
 	if err != nil && message == "" {
 		message = "The upload catalog cannot be read."
 	}
-	palette, settingsIcons, err := app.palette.current()
+	palette, _, err := app.palette.current()
 	if err != nil && message == "" {
 		message = "The dashboard appearance cannot be read."
 	}
-	return pageData{Authenticated: true, CSRF: session.csrf, Error: message, Notice: notice, Entries: entries, Palette: palette, SettingsIconGroups: settingsIconGroups(settingsIcons)}
+	return pageData{Authenticated: true, CSRF: session.csrf, Error: message, Notice: notice, Entries: entries, Palette: palette}
 }
 
 func (app *application) handleIndex(response http.ResponseWriter, request *http.Request) {
@@ -418,21 +417,12 @@ func (app *application) handlePalette(response http.ResponseWriter, request *htt
 		return
 	}
 	values := make(map[string]string, len(dashboardPaletteSpecs))
-	settingsIcon := ""
 	for key, fields := range request.PostForm {
 		if key == "csrf" {
 			if len(fields) != 1 {
 				http.Error(response, "Request rejected", http.StatusForbidden)
 				return
 			}
-			continue
-		}
-		if key == "settings-icon" {
-			if len(fields) != 1 || settingsIcon != "" || !validSettingsIcon(fields[0]) {
-				app.render(response, http.StatusBadRequest, app.dashboardData(session, "Choose one of the available settings icons.", ""))
-				return
-			}
-			settingsIcon = fields[0]
 			continue
 		}
 		if !validPaletteName(key) || len(fields) != 1 {
@@ -446,11 +436,7 @@ func (app *application) handlePalette(response http.ResponseWriter, request *htt
 		}
 		values[key] = value
 	}
-	if settingsIcon == "" {
-		app.render(response, http.StatusBadRequest, app.dashboardData(session, "Choose a settings icon.", ""))
-		return
-	}
-	if err := app.palette.save(values, settingsIcon); err != nil {
+	if err := app.palette.save(values, defaultSettingsIcon); err != nil {
 		app.render(response, http.StatusUnprocessableEntity, app.dashboardData(session, err.Error(), ""))
 		return
 	}

@@ -52,29 +52,6 @@ const pageTemplate = `{{define "page"}}<!doctype html>
           <h2>Dashboard appearance</h2>
           <form action="/palette" method="post">
             <input type="hidden" name="csrf" value="{{.CSRF}}">
-            <h3 id="settings-icon-label">Settings button</h3>
-            <div role="radiogroup" aria-labelledby="settings-icon-label">
-              {{range .SettingsIconGroups}}
-                <p class="settings-icon-family">{{.Label}}</p>
-                <div class="settings-icons">
-                  {{range .Icons}}
-                    <label class="settings-icon-choice">
-                      <input type="radio" name="settings-icon" value="{{.Name}}" {{if .Selected}}checked{{end}} required>
-                      <span class="settings-icon-preview">
-                        {{if .ImageURL}}
-                          <img class="source-cog" src="{{.ImageURL}}" alt="">
-                        {{else}}
-                          <span class="pixel-cog pixel-cog-{{.GridSize}}" aria-hidden="true">
-                            {{range .Pixels}}<b class="{{if .}}on{{end}}"></b>{{end}}
-                          </span>
-                        {{end}}
-                      </span>
-                      <span class="settings-icon-name">{{.Label}}</span>
-                    </label>
-                  {{end}}
-                </div>
-              {{end}}
-            </div>
             <h3>Colors</h3>
             <p class="hint">#RRGGBB</p>
             <div class="palette-grid">
@@ -253,102 +230,6 @@ input:focus, select:focus, button:focus, .skip-link:focus {
 
 .palette-section { margin-top: 56px; }
 
-.settings-icons {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px 6px;
-}
-
-.settings-icon-family {
-  margin: 18px 0 8px;
-  font-family: "Courier New", Courier, monospace;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.settings-icon-choice {
-  position: relative;
-  display: grid;
-  grid-template-rows: 54px 16px;
-  place-items: center;
-  gap: 2px;
-  min-width: 0;
-  min-height: 72px;
-  margin: 0;
-  cursor: pointer;
-}
-
-.settings-icon-choice input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-
-.settings-icon-preview {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-}
-
-.source-cog {
-  display: block;
-  width: 50px;
-  height: 50px;
-  object-fit: contain;
-  image-rendering: pixelated;
-}
-
-.pixel-cog {
-  display: grid;
-  place-content: center;
-  width: 50px;
-  height: 50px;
-  color: #777;
-}
-
-.pixel-cog-9 {
-  grid-template-columns: repeat(9, minmax(0, 1fr));
-  grid-template-rows: repeat(9, minmax(0, 1fr));
-}
-
-.pixel-cog-23 {
-  grid-template-columns: repeat(23, minmax(0, 1fr));
-  grid-template-rows: repeat(23, minmax(0, 1fr));
-}
-
-.pixel-cog b {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.pixel-cog b.on { background: currentColor; }
-
-.settings-icon-name {
-  max-width: 100%;
-  margin: 0;
-  overflow: hidden;
-  font-family: "Courier New", Courier, monospace;
-  font-size: 0.7rem;
-  font-weight: 700;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-icon-choice input:checked + .settings-icon-preview {
-  outline: 3px solid #000;
-  outline-offset: 1px;
-}
-
-.settings-icon-choice input:focus-visible + .settings-icon-preview {
-  outline: 2px dotted #000;
-  outline-offset: 3px;
-}
-
 .hint {
   margin: 7px 0 20px;
   font-family: "Courier New", Courier, monospace;
@@ -389,7 +270,6 @@ input:focus, select:focus, button:focus, .skip-link:focus {
 @media (max-width: 480px) {
   main { width: min(100% - 24px, 520px); }
   header { align-items: flex-start; flex-direction: column; gap: 16px; }
-  .settings-icons { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .palette-grid { grid-template-columns: 1fr; }
 }
 `
