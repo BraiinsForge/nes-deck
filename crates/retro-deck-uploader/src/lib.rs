@@ -1,6 +1,7 @@
 //! Security-sensitive storage and HTTP boundaries for the Retro Deck uploader.
 
 pub mod address;
+pub mod auth;
 pub mod bmc;
 pub mod catalog;
 pub mod cli;
