@@ -1,9 +1,12 @@
 //! Canonical all-interface listener configuration.
 
-use std::{fmt, net::SocketAddrV4};
+use std::{fmt, io, net::SocketAddrV4, path::Path};
+
+use crate::file::{FileError, read_bounded_regular};
 
 const CANONICAL_ADDRESS: &str = "0.0.0.0:8080";
 const CANONICAL_CONFIG: &[u8] = b"0.0.0.0:8080\n";
+const MAXIMUM_CONFIG_BYTES: u64 = 64;
 
 /// The uploader's intentionally fixed IPv4 listener address.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -17,9 +20,11 @@ impl ServiceAddress {
     /// Returns [`AddressError`] unless `value` is exactly `0.0.0.0:8080`.
     pub fn parse(value: &str) -> Result<Self, AddressError> {
         if value != CANONICAL_ADDRESS {
-            return Err(AddressError);
+            return Err(AddressError::Invalid);
         }
-        let address = value.parse::<SocketAddrV4>().map_err(|_| AddressError)?;
+        let address = value
+            .parse::<SocketAddrV4>()
+            .map_err(|_| AddressError::Invalid)?;
         Ok(Self(address))
     }
 
@@ -31,9 +36,22 @@ impl ServiceAddress {
     /// address, another port, IPv6, or non-UTF-8 input.
     pub fn parse_config(contents: &[u8]) -> Result<Self, AddressError> {
         if contents != CANONICAL_CONFIG {
-            return Err(AddressError);
+            return Err(AddressError::Invalid);
         }
         Self::parse(CANONICAL_ADDRESS)
+    }
+
+    /// Load the canonical listener from a bounded regular file without
+    /// following a final symlink.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AddressError::Invalid`] for noncanonical contents,
+    /// [`AddressError::UnsafeFile`] for a non-file or excessive file, and
+    /// [`AddressError::Io`] for filesystem failures.
+    pub fn load(path: &Path) -> Result<Self, AddressError> {
+        let file = read_bounded_regular(path, MAXIMUM_CONFIG_BYTES).map_err(map_file_error)?;
+        Self::parse_config(&file.contents)
     }
 
     /// Return the standard-library socket address used for `tcp4` binding.
@@ -57,20 +75,47 @@ impl fmt::Display for ServiceAddress {
 
 /// The service address is not the one deliberately exposed on every IPv4
 /// interface at port 8080.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AddressError;
+#[derive(Debug)]
+pub enum AddressError {
+    /// The value is not exactly the supported listener address.
+    Invalid,
+    /// The installed path is not a bounded regular file.
+    UnsafeFile(&'static str),
+    /// Opening or reading the installed path failed.
+    Io(io::Error),
+}
 
 impl fmt::Display for AddressError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("service address must be 0.0.0.0:8080")
+        match self {
+            Self::Invalid => formatter.write_str("service address must be 0.0.0.0:8080"),
+            Self::UnsafeFile(reason) => write!(formatter, "unsafe address file: {reason}"),
+            Self::Io(error) => write!(formatter, "address file I/O failed: {error}"),
+        }
     }
 }
 
-impl std::error::Error for AddressError {}
+impl std::error::Error for AddressError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Invalid | Self::UnsafeFile(_) => None,
+        }
+    }
+}
+
+fn map_file_error(error: FileError) -> AddressError {
+    match error {
+        FileError::Io(error) => AddressError::Io(error),
+        FileError::Unsafe(reason) => AddressError::UnsafeFile(reason),
+        FileError::Random(error) => AddressError::Io(io::Error::other(error)),
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    use super::{CANONICAL_ADDRESS, ServiceAddress};
+    use super::{AddressError, CANONICAL_ADDRESS, ServiceAddress};
+    use std::{fs, os::unix::fs::symlink};
 
     #[test]
     fn accepts_only_the_canonical_listener() {
@@ -116,5 +161,33 @@ mod tests {
                 "accepted {rejected:?}"
             );
         }
+    }
+
+    #[test]
+    fn loads_only_a_bounded_regular_config() {
+        let directory = tempfile::tempdir();
+        assert!(directory.is_ok());
+        let Some(directory) = directory.ok() else {
+            return;
+        };
+        let config = directory.path().join("address.conf");
+        assert!(fs::write(&config, ServiceAddress::encode()).is_ok());
+        assert!(ServiceAddress::load(&config).is_ok());
+
+        assert!(fs::write(&config, b"127.0.0.1:8080\n").is_ok());
+        assert!(matches!(
+            ServiceAddress::load(&config),
+            Err(AddressError::Invalid)
+        ));
+
+        assert!(fs::write(&config, vec![b'x'; 65]).is_ok());
+        assert!(matches!(
+            ServiceAddress::load(&config),
+            Err(AddressError::UnsafeFile(_))
+        ));
+
+        let link = directory.path().join("address-link.conf");
+        assert!(symlink(&config, &link).is_ok());
+        assert!(ServiceAddress::load(&link).is_err());
     }
 }
