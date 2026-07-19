@@ -13,6 +13,7 @@ usage() {
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 activate_script=$script_dir/deploy/activate.sh
+lisp_installer=$script_dir/deploy/install-lisp-tree.sh
 config_library=$script_dir/lib/deck-config.sh
 config_home=${RETRO_DECK_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/retro-deck}
 config=$config_home/deck.conf
@@ -59,6 +60,10 @@ fi
   echo "Remote activation script is missing or unsafe: $activate_script" >&2
   exit 1
 }
+[[ -x $lisp_installer && ! -L $lisp_installer ]] || {
+  echo "Managed Lisp installer is missing or unsafe: $lisp_installer" >&2
+  exit 1
+}
 
 for command in nix ssh tar gzip sha256sum; do
   command -v "$command" >/dev/null 2>&1 || {
@@ -103,6 +108,8 @@ mkdir -p \
   "$payload/nes-deck/menu" \
   "$payload/nes-deck/games" \
   "$payload/nes-deck/langs/chibi/lib" \
+  "$payload/nes-deck/lisp/apps" \
+  "$payload/nes-deck/lisp/policy" \
   "$payload/nes-deck/licenses" \
   "$payload/nes-deck/terminal/fonts" \
   "$payload/nes-deck/terminal/keymaps" \
@@ -111,6 +118,7 @@ mkdir -p \
   "$payload/nes-deck/ecl" \
   "$payload/chiptunes" \
   "$payload/roms" \
+  "$payload/deploy" \
   "$payload/usr/bin" \
   "$payload/usr/sbin" \
   "$payload/etc/init.d"
@@ -135,6 +143,13 @@ cp "$chibi/bin/chibi-scheme" \
   "$payload/nes-deck/langs/chibi/chibi-scheme"
 cp -a "$chibi/share/chibi/." "$payload/nes-deck/langs/chibi/lib/"
 cp -a "$ecl/bin" "$ecl/lib" "$payload/nes-deck/ecl/"
+cp lisp/package.lisp lisp/retro-deck.asd lisp/run-worker.lisp \
+  "$payload/nes-deck/lisp/"
+cp lisp/apps/ten-seconds.lisp "$payload/nes-deck/lisp/apps/"
+cp lisp/policy/conditions.lisp lisp/policy/hooks.lisp \
+  lisp/policy/protocol.lisp lisp/policy/worker.lisp \
+  "$payload/nes-deck/lisp/policy/"
+cp "$lisp_installer" "$payload/deploy/install-lisp-tree"
 
 cp "$fbterm/bin/fbterm" "$fbterm/bin/loadkeys" \
   "$payload/nes-deck/terminal/"
@@ -211,7 +226,10 @@ find "$payload/nes-deck" -type f \( \
 chmod 0700 "$payload/nes-deck/uploader/rom-uploader"
 chmod 0600 "$payload/nes-deck/uploader/password.conf"
 chmod 0600 "$payload/nes-deck/uploader/address.conf"
+find "$payload/nes-deck/lisp" -type d -exec chmod 0700 {} +
+find "$payload/nes-deck/lisp" -type f -exec chmod 0600 {} +
 chmod 0700 "$payload/usr/bin/ecl" \
+  "$payload/deploy/install-lisp-tree" \
   "$payload/usr/sbin/deck-keyboard-quirks" \
   "$payload/usr/sbin/deck-wifi-profile-add" \
   "$payload/usr/sbin/deck-wifi-select" \

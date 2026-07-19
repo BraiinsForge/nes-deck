@@ -72,6 +72,9 @@ service is stopped, the script attempts to restart it before exiting.
 The deployment script does not edit, reload, or disconnect Wi-Fi. It merges
 the tracked ROMs and CC0 chiptunes into persistent storage without deleting
 additional files, save games, or user programs already on the Deck.
+Tracked Common Lisp policy is replaced as one validated tree, while root-owned
+device overrides in `/mnt/data/nes-deck/lisp/site.d` are copied forward with
+private permissions and are never accepted from the deployment payload.
 On a fresh Deck, its readiness check allows the bounded first Libretro cover
 cache fill to finish. Large cover indexes are decoded in one process rather
 than spawning a process per filename.

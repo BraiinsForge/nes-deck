@@ -90,6 +90,7 @@ tests/fetch_covers_test.sh
 tests/settings_icons_test.sh
 tests/deploy_config_test.sh
 tests/deploy_activation_test.sh
+tests/deploy_lisp_tree_test.sh
 tests/check_deck_test.sh
 tests/provision_config_test.sh
 tests/deck_wifi_profile_add_test.sh

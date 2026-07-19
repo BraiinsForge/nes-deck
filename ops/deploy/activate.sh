@@ -79,6 +79,11 @@ done
   echo "Staged keyboard quirk helper is missing" >&2
   exit 1
 }
+[ -x "$stage/deploy/install-lisp-tree" ] || {
+  echo "Staged managed Lisp installer is missing" >&2
+  exit 1
+}
+"$stage/deploy/install-lisp-tree" --check "$stage/nes-deck/lisp"
 [ -s "$stage/bmc-widgets/retro-deck/manifest.json" ] && \
   [ -x "$stage/bmc-widgets/retro-deck/bin/retro-deck" ] || {
   echo "Staged Retro Deck widget is incomplete" >&2
@@ -227,6 +232,7 @@ mv "$stage/nes-deck/langs/chibi" "$base/langs/chibi.new"
 rm -rf "$base/ecl" "$base/langs/chibi"
 mv "$base/ecl.new" "$base/ecl"
 mv "$base/langs/chibi.new" "$base/langs/chibi"
+"$stage/deploy/install-lisp-tree" "$stage/nes-deck/lisp" "$base/lisp"
 cp -p "$stage/nes-deck/langs/lua" "$base/langs/lua"
 cp -p "$stage/nes-deck/langs/python" "$base/langs/python"
 
