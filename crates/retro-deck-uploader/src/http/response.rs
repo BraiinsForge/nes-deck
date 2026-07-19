@@ -194,6 +194,34 @@ impl Response {
         Ok(())
     }
 
+    /// Install the uploader's fixed browser isolation and cache policy.
+    ///
+    /// The operation replaces conflicting values and is idempotent. These
+    /// constants contain no dynamic text and therefore cannot fail header
+    /// validation.
+    #[must_use]
+    pub fn hardened(mut self) -> Self {
+        for (name, value) in [
+            ("Cache-Control", "no-store"),
+            (
+                "Content-Security-Policy",
+                "default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+            ),
+            ("Cross-Origin-Opener-Policy", "same-origin"),
+            ("Cross-Origin-Resource-Policy", "same-origin"),
+            (
+                "Permissions-Policy",
+                "camera=(), geolocation=(), microphone=()",
+            ),
+            ("Referrer-Policy", "no-referrer"),
+            ("X-Content-Type-Options", "nosniff"),
+            ("X-Frame-Options", "DENY"),
+        ] {
+            self.set_static_header(name, value);
+        }
+        self
+    }
+
     /// Serialize the response with exact length and connection-close framing.
     ///
     /// # Errors
@@ -213,6 +241,22 @@ impl Response {
         writer.write_all(b"\r\n")?;
         writer.write_all(&self.body)?;
         writer.flush()
+    }
+
+    fn set_static_header(&mut self, name: &'static str, value: &'static str) {
+        if let Some(header) = self
+            .headers
+            .iter_mut()
+            .find(|header| header.name.eq_ignore_ascii_case(name))
+        {
+            header.name = name;
+            value.clone_into(&mut header.value);
+        } else {
+            self.headers.push(Header {
+                name,
+                value: value.to_owned(),
+            });
+        }
     }
 }
 
@@ -335,12 +379,14 @@ mod tests {
 
     #[test]
     fn fixed_asset_borrows_no_mutable_external_state() -> Result<(), ResponseError> {
-        let response = Response::asset(OK, "text/css; charset=utf-8", b"body {}\n")?;
+        let response = Response::asset(OK, "text/css; charset=utf-8", b"body {}\n")?.hardened();
         assert_eq!(response.body(), b"body {}\n");
         assert_eq!(
             response.header("Content-Type"),
             Some("text/css; charset=utf-8")
         );
+        assert_eq!(response.header("X-Frame-Options"), Some("DENY"));
+        assert_eq!(response.header("Cache-Control"), Some("no-store"));
         assert!(!format!("{response:?}").contains("body {}"));
         Ok(())
     }

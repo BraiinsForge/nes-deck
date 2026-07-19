@@ -118,6 +118,12 @@ impl Request {
     pub fn body(&self) -> &[u8] {
         &self.body
     }
+
+    /// Consume the request and return its bounded body buffer.
+    #[must_use]
+    pub fn into_body(self) -> Vec<u8> {
+        self.body
+    }
 }
 
 impl fmt::Debug for Request {
