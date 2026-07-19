@@ -14,42 +14,15 @@ use retro_deck_audio::{
     ReleaseReason, SampleRate, SquareTone, ToneError, ToneNote, Volume, cue_channel,
 };
 
-use super::{OssError, OssPcm, OssProfile, PcmWriteOutcome};
+use super::{
+    AudioGate, GATE_ACTIVE, GATE_MUTED, GATE_SHUTDOWN, OssError, OssPcm, OssProfile,
+    PcmWriteOutcome, gate_release_reason, load_gate,
+};
 
 const CUE_QUEUE_CAPACITY: usize = 4;
 const ERROR_QUEUE_CAPACITY: usize = 8;
 const IDLE_GRACE: Duration = Duration::from_millis(250);
 const WORKER_NAME: &str = "retro-deck-audio-cues";
-const GATE_ACTIVE: u8 = 0;
-const GATE_MUTED: u8 = 1;
-const GATE_PAUSED: u8 = 2;
-const GATE_HIDDEN: u8 = 3;
-const GATE_SHUTDOWN: u8 = 4;
-
-/// Reason finite cues are allowed or suppressed.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum AudioGate {
-    /// The application is visible, unpaused, and audible.
-    Active,
-    /// The user muted sound.
-    Muted,
-    /// Application playback is paused.
-    Paused,
-    /// The application or widget is not visible.
-    Hidden,
-}
-
-impl AudioGate {
-    const fn code(self) -> u8 {
-        match self {
-            Self::Active => GATE_ACTIVE,
-            Self::Muted => GATE_MUTED,
-            Self::Paused => GATE_PAUSED,
-            Self::Hidden => GATE_HIDDEN,
-        }
-    }
-}
-
 /// Result of trying to submit a cue without waiting for the audio thread.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ToneCueEnqueue {
@@ -325,7 +298,7 @@ impl WorkerControls<'_> {
         if self.volume.load(Ordering::Acquire) == 0 {
             ReleaseReason::Muted
         } else {
-            release_reason(load_gate(self.gate))
+            gate_release_reason(load_gate(self.gate))
         }
     }
 }
@@ -540,7 +513,7 @@ where
         let gate_state = load_gate(controls.gate);
 
         if gate_state != GATE_ACTIVE {
-            state.force_release(release_reason(gate_state), controls);
+            state.force_release(gate_release_reason(gate_state), controls);
             if gate_state == GATE_SHUTDOWN {
                 return state.report;
             }
@@ -558,19 +531,6 @@ where
                 }
             }
         }
-    }
-}
-
-fn load_gate(gate: &AtomicU8) -> u8 {
-    gate.load(Ordering::Acquire).min(GATE_SHUTDOWN)
-}
-
-const fn release_reason(gate: u8) -> ReleaseReason {
-    match gate {
-        GATE_ACTIVE | GATE_MUTED => ReleaseReason::Muted,
-        GATE_PAUSED => ReleaseReason::Paused,
-        GATE_HIDDEN => ReleaseReason::Hidden,
-        _ => ReleaseReason::Shutdown,
     }
 }
 
@@ -603,6 +563,7 @@ fn cue_queue_capacity() -> NonZeroUsize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::GATE_HIDDEN;
     use std::io;
     use std::path::PathBuf;
     use std::sync::Mutex;

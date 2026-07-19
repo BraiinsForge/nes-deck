@@ -7,15 +7,16 @@
 
 mod cue_worker;
 
-pub use cue_worker::{AudioGate, ToneCueEnqueue, ToneCueWorker, ToneWorkerError, ToneWorkerReport};
+pub use cue_worker::{ToneCueEnqueue, ToneCueWorker, ToneWorkerError, ToneWorkerReport};
 
 use std::error::Error;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering};
 
-use retro_deck_audio::SampleRate;
+use retro_deck_audio::{ReleaseReason, SampleRate};
 use rustix::fs::{Mode, OFlags, fcntl_getfl, fcntl_setfl, open};
 use rustix::ioctl::{NoArg, Opcode, Updater, ioctl, opcode};
 
@@ -33,6 +34,48 @@ const FORMAT_S16_LE: i32 = 0x10;
 const MONO_CHANNELS: i32 = 1;
 const ENCODED_CHUNK_BYTES: usize = 4_096;
 const SAMPLES_PER_CHUNK: usize = ENCODED_CHUNK_BYTES / size_of::<i16>();
+pub(crate) const GATE_ACTIVE: u8 = 0;
+pub(crate) const GATE_MUTED: u8 = 1;
+pub(crate) const GATE_PAUSED: u8 = 2;
+pub(crate) const GATE_HIDDEN: u8 = 3;
+pub(crate) const GATE_SHUTDOWN: u8 = 4;
+
+/// Reason audio is allowed or suppressed for one visible runtime.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AudioGate {
+    /// The application is visible, unpaused, and audible.
+    Active,
+    /// The user muted sound.
+    Muted,
+    /// Application playback is paused.
+    Paused,
+    /// The application or widget is not visible.
+    Hidden,
+}
+
+impl AudioGate {
+    pub(crate) const fn code(self) -> u8 {
+        match self {
+            Self::Active => GATE_ACTIVE,
+            Self::Muted => GATE_MUTED,
+            Self::Paused => GATE_PAUSED,
+            Self::Hidden => GATE_HIDDEN,
+        }
+    }
+}
+
+pub(crate) fn load_gate(gate: &AtomicU8) -> u8 {
+    gate.load(Ordering::Acquire).min(GATE_SHUTDOWN)
+}
+
+pub(crate) const fn gate_release_reason(gate: u8) -> ReleaseReason {
+    match gate {
+        GATE_ACTIVE | GATE_MUTED => ReleaseReason::Muted,
+        GATE_PAUSED => ReleaseReason::Paused,
+        GATE_HIDDEN => ReleaseReason::Hidden,
+        _ => ReleaseReason::Shutdown,
+    }
+}
 
 /// OSS fragment sizing appropriate to finite cues or continuous streams.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
