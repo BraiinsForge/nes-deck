@@ -4,3 +4,4 @@ pub mod address;
 pub mod cli;
 mod file;
 pub mod password;
+pub mod rom;
