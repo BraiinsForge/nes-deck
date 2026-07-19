@@ -1,22 +1,5 @@
 {
   "nodes": {
-    "c-octo-src": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1769647197,
-        "narHash": "sha256-yBeMvyDgrW3d1fuHIBoy7DEA1zAks8s+53wRHvyPrSM=",
-        "owner": "JohnEarnest",
-        "repo": "c-octo",
-        "rev": "5f62f185c9e6ae324dcbe9e7fe35ec7c3bdebfb1",
-        "type": "github"
-      },
-      "original": {
-        "owner": "JohnEarnest",
-        "repo": "c-octo",
-        "rev": "5f62f185c9e6ae324dcbe9e7fe35ec7c3bdebfb1",
-        "type": "github"
-      }
-    },
     "fceumm-src": {
       "flake": false,
       "locked": {
@@ -99,7 +82,6 @@
     },
     "root": {
       "inputs": {
-        "c-octo-src": "c-octo-src",
         "fceumm-src": "fceumm-src",
         "fuse-src": "fuse-src",
         "gambatte-src": "gambatte-src",
