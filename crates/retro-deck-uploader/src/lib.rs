@@ -9,3 +9,4 @@ pub mod palette;
 pub mod password;
 pub mod rom;
 pub mod store;
+pub mod web;
