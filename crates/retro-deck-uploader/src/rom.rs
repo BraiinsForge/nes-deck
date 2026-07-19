@@ -1,6 +1,17 @@
 //! Typed ROM-system, title, filename, and raw format validation.
 
-use std::{fmt, str::FromStr};
+use std::{
+    ffi::OsStr,
+    fmt,
+    io::{Cursor, Read},
+    path::Path,
+    str::FromStr,
+};
+
+use zip::ZipArchive;
+
+/// Maximum compressed or raw upload size accepted before format inspection.
+pub const MAXIMUM_ARCHIVE_BYTES: usize = 10 * 1_024 * 1_024;
 
 const NINTENDO_LOGO: [u8; 48] = [
     0xce, 0xed, 0x66, 0x66, 0xcc, 0x0d, 0x00, 0x0b, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0c, 0x00, 0x0d,
@@ -293,6 +304,174 @@ impl fmt::Display for RomError {
 
 impl std::error::Error for RomError {}
 
+/// Raw-upload or single-ROM ZIP decoding failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UploadError {
+    /// The request body could not be read completely.
+    CouldNotRead,
+    /// The compressed or raw request exceeds ten MiB.
+    ArchiveTooLarge,
+    /// The request filename has neither the selected ROM suffix nor `.zip`.
+    WrongUploadExtension { required: &'static str },
+    /// ZIP central-directory or member metadata is malformed.
+    MalformedZip,
+    /// ZIP has zero or multiple non-directory members.
+    WrongMemberCount,
+    /// ZIP member is encrypted, path-bearing, a link, or another special file.
+    UnsafeOrEncryptedMember,
+    /// The single ZIP member has the wrong suffix or advertised size.
+    InvalidMember { required: &'static str },
+    /// The ZIP member cannot be decompressed or opened.
+    CouldNotOpenMember,
+    /// Decompressed ZIP data fails its bounded read or integrity check.
+    CouldNotReadMember,
+    /// Uncompressed bytes fail their system-specific ROM validation.
+    InvalidRom(RomError),
+}
+
+impl fmt::Display for UploadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CouldNotRead => formatter.write_str("the upload could not be read"),
+            Self::ArchiveTooLarge => formatter.write_str("the upload exceeds 10 MiB"),
+            Self::WrongUploadExtension { required } => {
+                write!(
+                    formatter,
+                    "choose a {required} file or a ZIP containing one"
+                )
+            }
+            Self::MalformedZip => formatter.write_str("the ZIP file is malformed"),
+            Self::WrongMemberCount => formatter.write_str("the ZIP must contain exactly one ROM"),
+            Self::UnsafeOrEncryptedMember => {
+                formatter.write_str("the ZIP contains an unsafe or encrypted member")
+            }
+            Self::InvalidMember { required } => write!(
+                formatter,
+                "the ZIP must contain one {required} file of a valid size"
+            ),
+            Self::CouldNotOpenMember => formatter.write_str("the ZIP member could not be opened"),
+            Self::CouldNotReadMember => {
+                formatter.write_str("the ZIP member could not be read safely")
+            }
+            Self::InvalidRom(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for UploadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidRom(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<RomError> for UploadError {
+    fn from(error: RomError) -> Self {
+        Self::InvalidRom(error)
+    }
+}
+
+/// Read and validate a raw ROM or a ZIP containing exactly one ROM.
+///
+/// # Errors
+///
+/// Returns [`UploadError`] when the input exceeds its compressed or
+/// uncompressed bounds, has an unsafe archive structure, uses a wrong suffix,
+/// cannot be decompressed, or fails system-specific ROM validation.
+pub fn decode_upload(
+    system: System,
+    filename: &str,
+    input: impl Read,
+) -> Result<ValidatedRom, UploadError> {
+    let archive = read_upload(input)?;
+    if has_extension(filename, system.extension()) {
+        return ValidatedRom::new(system, archive).map_err(Into::into);
+    }
+    if !has_extension(filename, ".zip") {
+        return Err(UploadError::WrongUploadExtension {
+            required: system.extension(),
+        });
+    }
+    decode_zip(system, archive)
+}
+
+fn read_upload(input: impl Read) -> Result<Vec<u8>, UploadError> {
+    let mut bytes = Vec::new();
+    let limit = u64::try_from(MAXIMUM_ARCHIVE_BYTES.saturating_add(1))
+        .map_err(|_| UploadError::CouldNotRead)?;
+    input
+        .take(limit)
+        .read_to_end(&mut bytes)
+        .map_err(|_| UploadError::CouldNotRead)?;
+    if bytes.len() > MAXIMUM_ARCHIVE_BYTES {
+        Err(UploadError::ArchiveTooLarge)
+    } else {
+        Ok(bytes)
+    }
+}
+
+fn decode_zip(system: System, archive: Vec<u8>) -> Result<ValidatedRom, UploadError> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(archive)).map_err(|_| UploadError::MalformedZip)?;
+    let mut member_index = None;
+    for index in 0..archive.len() {
+        let member = archive
+            .by_index_raw(index)
+            .map_err(|_| UploadError::MalformedZip)?;
+        if member.is_dir() {
+            continue;
+        }
+        if member_index.replace(index).is_some() {
+            return Err(UploadError::WrongMemberCount);
+        }
+        if member.encrypted() || !member.is_file() || !is_plain_member_name(member.name()) {
+            return Err(UploadError::UnsafeOrEncryptedMember);
+        }
+        if !has_extension(member.name(), system.extension())
+            || member.size()
+                > u64::try_from(system.maximum_bytes())
+                    .map_err(|_| UploadError::CouldNotReadMember)?
+        {
+            return Err(UploadError::InvalidMember {
+                required: system.extension(),
+            });
+        }
+    }
+    let index = member_index.ok_or(UploadError::WrongMemberCount)?;
+    let mut member = archive
+        .by_index(index)
+        .map_err(|_| UploadError::CouldNotOpenMember)?;
+    let maximum = system.maximum_bytes();
+    let limit =
+        u64::try_from(maximum.saturating_add(1)).map_err(|_| UploadError::CouldNotReadMember)?;
+    let mut bytes = Vec::new();
+    member
+        .by_ref()
+        .take(limit)
+        .read_to_end(&mut bytes)
+        .map_err(|_| UploadError::CouldNotReadMember)?;
+    if bytes.len() > maximum {
+        return Err(UploadError::CouldNotReadMember);
+    }
+    ValidatedRom::new(system, bytes).map_err(Into::into)
+}
+
+fn has_extension(filename: &str, extension: &str) -> bool {
+    Path::new(filename)
+        .extension()
+        .and_then(OsStr::to_str)
+        .zip(extension.strip_prefix('.'))
+        .is_some_and(|(actual, required)| actual.eq_ignore_ascii_case(required))
+}
+
+fn is_plain_member_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(['/', '\\', '\0'])
+        && Path::new(name).file_name() == Some(OsStr::new(name))
+}
+
 fn slugify(title: &str) -> String {
     let mut slug = String::with_capacity(32);
     let mut last_was_hyphen = false;
@@ -378,8 +557,56 @@ fn validate_zx(bytes: &[u8]) -> Result<(), RomError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GameTitle, NINTENDO_LOGO, RomError, System, ValidatedRom};
-    use std::str::FromStr as _;
+    use super::{
+        GameTitle, MAXIMUM_ARCHIVE_BYTES, NINTENDO_LOGO, RomError, System, UploadError,
+        ValidatedRom, decode_upload,
+    };
+    use std::{
+        io::{Cursor, Write as _},
+        str::FromStr as _,
+    };
+    use zip::{CompressionMethod, ZipWriter, result::ZipError, write::SimpleFileOptions};
+
+    fn nes_rom() -> Vec<u8> {
+        let mut rom = vec![0_u8; 16 + 16_384];
+        if let Some(header) = rom.get_mut(..4) {
+            header.copy_from_slice(b"NES\x1a");
+        }
+        if let Some(prg_banks) = rom.get_mut(4) {
+            *prg_banks = 1;
+        }
+        rom
+    }
+
+    fn zip_members(members: &[(&str, &[u8])]) -> Result<Vec<u8>, ZipError> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        for &(name, contents) in members {
+            writer.start_file(name, options)?;
+            writer.write_all(contents)?;
+        }
+        Ok(writer.finish()?.into_inner())
+    }
+
+    fn zip_symlink(name: &str) -> Result<Vec<u8>, ZipError> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        writer.add_symlink(name, "target", SimpleFileOptions::default())?;
+        Ok(writer.finish()?.into_inner())
+    }
+
+    fn mark_first_member_encrypted(archive: &mut [u8]) {
+        for (signature, flag_offset) in [(b"PK\x03\x04", 6_usize), (b"PK\x01\x02", 8_usize)] {
+            if let Some(header_offset) = archive
+                .windows(signature.len())
+                .position(|window| window == signature)
+            {
+                let flag_index = header_offset.saturating_add(flag_offset);
+                if let Some(flag) = archive.get_mut(flag_index) {
+                    *flag |= 1;
+                }
+            }
+        }
+    }
 
     fn game_boy_rom(color_flag: u8) -> Vec<u8> {
         let mut rom = vec![0_u8; 0x150];
@@ -492,5 +719,95 @@ mod tests {
                 Err(error) if error == expected
             ));
         }
+    }
+
+    #[test]
+    fn decodes_raw_uploads_with_both_case_variants() {
+        let rom = nes_rom();
+        for filename in ["game.nes", "GAME.NES"] {
+            let decoded = decode_upload(System::Nes, filename, rom.as_slice());
+            assert!(matches!(
+                decoded,
+                Ok(decoded) if decoded.as_bytes() == rom
+            ));
+        }
+        assert!(matches!(
+            decode_upload(System::Nes, "game.gb", rom.as_slice()),
+            Err(UploadError::WrongUploadExtension { required: ".nes" })
+        ));
+        assert!(matches!(
+            decode_upload(
+                System::Nes,
+                "large.nes",
+                vec![0_u8; MAXIMUM_ARCHIVE_BYTES + 1].as_slice()
+            ),
+            Err(UploadError::ArchiveTooLarge)
+        ));
+    }
+
+    #[test]
+    fn decodes_one_compressed_root_rom() -> Result<(), ZipError> {
+        let rom = nes_rom();
+        let archive = zip_members(&[("game.nes", rom.as_slice())])?;
+        let decoded = decode_upload(System::Nes, "collection.ZIP", archive.as_slice());
+        assert!(matches!(
+            decoded,
+            Ok(decoded) if decoded.as_bytes() == rom
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_unsafe_zip_members() -> Result<(), ZipError> {
+        let rom = nes_rom();
+        let multiple = zip_members(&[("one.nes", rom.as_slice()), ("two.nes", rom.as_slice())])?;
+        assert!(matches!(
+            decode_upload(System::Nes, "games.zip", multiple.as_slice()),
+            Err(UploadError::WrongMemberCount)
+        ));
+        for name in ["../game.nes", "folder/game.nes", "folder\\game.nes"] {
+            let unsafe_archive = zip_members(&[(name, rom.as_slice())])?;
+            assert!(matches!(
+                decode_upload(System::Nes, "game.zip", unsafe_archive.as_slice()),
+                Err(UploadError::UnsafeOrEncryptedMember)
+            ));
+        }
+        let symlink = zip_symlink("game.nes")?;
+        assert!(matches!(
+            decode_upload(System::Nes, "game.zip", symlink.as_slice()),
+            Err(UploadError::UnsafeOrEncryptedMember)
+        ));
+        let mut encrypted = zip_members(&[("game.nes", rom.as_slice())])?;
+        mark_first_member_encrypted(&mut encrypted);
+        assert!(matches!(
+            decode_upload(System::Nes, "game.zip", encrypted.as_slice()),
+            Err(UploadError::UnsafeOrEncryptedMember)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_malformed_wrong_type_and_oversized_zip_members() -> Result<(), ZipError> {
+        assert!(matches!(
+            decode_upload(System::Nes, "game.zip", b"not a ZIP".as_slice()),
+            Err(UploadError::MalformedZip)
+        ));
+        let wrong_type = zip_members(&[("game.gb", nes_rom().as_slice())])?;
+        assert!(matches!(
+            decode_upload(System::Nes, "game.zip", wrong_type.as_slice()),
+            Err(UploadError::InvalidMember { required: ".nes" })
+        ));
+        let oversized = vec![0_u8; System::Chip8.maximum_bytes() + 1];
+        let archive = zip_members(&[("large.ch8", oversized.as_slice())])?;
+        assert!(matches!(
+            decode_upload(System::Chip8, "large.zip", archive.as_slice()),
+            Err(UploadError::InvalidMember { required: ".ch8" })
+        ));
+        let empty = zip_members(&[])?;
+        assert!(matches!(
+            decode_upload(System::Nes, "empty.zip", empty.as_slice()),
+            Err(UploadError::WrongMemberCount)
+        ));
+        Ok(())
     }
 }
