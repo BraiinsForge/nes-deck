@@ -134,6 +134,15 @@ pub struct InputDevices {
     controllers: Vec<ControllerDevice>,
 }
 
+/// Up to two ordered `THEGamepads` without touchscreen ownership.
+///
+/// Gameplay processes use this device set so the dashboard supervisor keeps
+/// receiving touchscreen reports for its hold-to-exit gesture.
+#[derive(Debug)]
+pub struct ControllerDevices {
+    controllers: Vec<ControllerDevice>,
+}
+
 impl InputDevices {
     /// Discover the production Deck input devices below `/dev/input`.
     ///
@@ -169,21 +178,7 @@ impl InputDevices {
             }
         }
 
-        controller_candidates.sort_by(|left, right| {
-            left.physical_path
-                .cmp(&right.physical_path)
-                .then_with(|| left.path.cmp(&right.path))
-        });
-        let controllers = controller_candidates
-            .into_iter()
-            .take(MAXIMUM_CONTROLLERS)
-            .enumerate()
-            .map(|(index, candidate)| ControllerDevice {
-                device: candidate.device,
-                player: if index == 0 { Player::One } else { Player::Two },
-                tracker: candidate.tracker,
-            })
-            .collect();
+        let controllers = order_controllers(controller_candidates);
 
         Ok(Self {
             touch: touch.ok_or(InputError::TouchscreenNotFound)?,
@@ -254,6 +249,101 @@ impl InputDevices {
         }
         Ok(collector.stats())
     }
+}
+
+impl ControllerDevices {
+    /// Discover shared production gamepads below `/dev/input`.
+    ///
+    /// No touchscreen is opened or grabbed. Controllers are ordered by
+    /// physical USB path, then event path, exactly like [`InputDevices`]. An
+    /// empty controller set is valid so emulation can continue unattended.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputError::Scan`] when the input directory cannot be
+    /// enumerated safely.
+    pub fn discover() -> Result<Self, InputError> {
+        Self::discover_in(Path::new(INPUT_DIRECTORY))
+    }
+
+    fn discover_in(input_directory: &Path) -> Result<Self, InputError> {
+        let paths = event_paths(input_directory)?;
+        let mut candidates = Vec::new();
+        for path in paths {
+            let Ok(device) = Device::open(&path) else {
+                continue;
+            };
+            if is_the_gamepad(&device) {
+                if let Some(candidate) = configure_controller(device, path) {
+                    candidates.push(candidate);
+                }
+            }
+        }
+        Ok(Self {
+            controllers: order_controllers(candidates),
+        })
+    }
+
+    /// Number of supported controllers ready at discovery time.
+    #[must_use]
+    pub fn controller_count(&self) -> usize {
+        self.controllers.len()
+    }
+
+    /// Wait for controller or Wayland readiness until the runtime deadline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputError::Poll`] for an operating-system polling failure.
+    pub fn wait_readable_with(
+        &self,
+        additional: BorrowedFd<'_>,
+        timeout: Duration,
+    ) -> Result<(), InputError> {
+        match self.controllers.as_slice() {
+            [] => wait_on([additional], timeout),
+            [first] => wait_on([first.device.as_fd(), additional], timeout),
+            [first, second, ..] => wait_on(
+                [first.device.as_fd(), second.device.as_fd(), additional],
+                timeout,
+            ),
+        }
+    }
+
+    /// Drain all currently available controller reports without waiting.
+    ///
+    /// At most 64 normalized events are appended per call. Device state is
+    /// consumed after that bound so stale edges cannot be replayed later.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputError::Controller`] if a discovered controller can no
+    /// longer be read.
+    pub fn drain_into(&mut self, output: &mut Vec<InputEvent>) -> Result<DrainStats, InputError> {
+        let mut collector = EventCollector::new(output);
+        for controller in &mut self.controllers {
+            drain_controller(controller, &mut |event| collector.emit(event))?;
+        }
+        Ok(collector.stats())
+    }
+}
+
+fn order_controllers(mut candidates: Vec<ControllerCandidate>) -> Vec<ControllerDevice> {
+    candidates.sort_by(|left, right| {
+        left.physical_path
+            .cmp(&right.physical_path)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    candidates
+        .into_iter()
+        .take(MAXIMUM_CONTROLLERS)
+        .enumerate()
+        .map(|(index, candidate)| ControllerDevice {
+            device: candidate.device,
+            player: if index == 0 { Player::One } else { Player::Two },
+            tracker: candidate.tracker,
+        })
+        .collect()
 }
 
 fn wait_on<const COUNT: usize>(
