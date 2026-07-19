@@ -99,23 +99,26 @@ impl TimerFrame {
                 AMBER
             };
         let positions = [129, 219, 329, 419];
-        for (x, digit) in positions.into_iter().zip(
-            view.displayed()
-                .display_text()
-                .bytes()
-                .filter(u8::is_ascii_digit),
-        ) {
+        for (x, digit) in positions
+            .into_iter()
+            .zip(centisecond_digits(view.displayed()))
+        {
             self.draw_digit(x, 43, digit, digit_color, DIM_AMBER);
         }
         self.fill_rect(Rect::new(303, 149, 14, 14), digit_color);
 
-        if let Some(result) = result_text(view) {
+        if let Some(result) = result(view) {
             let color = if view.displayed() == Centiseconds::TARGET {
                 SUCCESS
             } else {
                 MUTED
             };
-            self.draw_centered_text(178, &result, 1, color);
+            match result {
+                ResultLine::Exact => self.draw_centered_text(178, "EXACT", 1, color),
+                ResultLine::Difference { difference, label } => {
+                    self.draw_centered_result(178, difference, label, color);
+                }
+            }
         }
 
         let instruction = match view.phase() {
@@ -144,7 +147,11 @@ impl TimerFrame {
     }
 
     fn draw_text(&mut self, x: usize, y: usize, text: &str, scale: usize, color: u16) {
-        for (character_index, character) in text.bytes().enumerate() {
+        self.draw_bytes(x, y, text.as_bytes(), scale, color);
+    }
+
+    fn draw_bytes(&mut self, x: usize, y: usize, text: &[u8], scale: usize, color: u16) {
+        for (character_index, character) in text.iter().copied().enumerate() {
             let rows = glyph_rows(character);
             for (row, bits) in rows.into_iter().enumerate() {
                 for column in 0..5 {
@@ -169,13 +176,22 @@ impl TimerFrame {
     }
 
     fn draw_centered_text(&mut self, y: usize, text: &str, scale: usize, color: u16) {
-        let characters = text.len();
-        let width = characters
-            .saturating_mul(6)
-            .saturating_sub(usize::from(!text.is_empty()))
-            .saturating_mul(scale);
+        let width = text_width(text.len(), scale);
         let x = CANVAS_WIDTH.saturating_sub(width) / 2;
         self.draw_text(x, y, text, scale, color);
+    }
+
+    fn draw_centered_result(
+        &mut self,
+        y: usize,
+        difference: Centiseconds,
+        label: &str,
+        color: u16,
+    ) {
+        let characters = 6_usize.saturating_add(label.len());
+        let x = CANVAS_WIDTH.saturating_sub(text_width(characters, 1)) / 2;
+        self.draw_bytes(x, y, &centisecond_text(difference), 1, color);
+        self.draw_text(x.saturating_add(36), y, label, 1, color);
     }
 
     fn draw_digit(&mut self, x: usize, y: usize, digit: u8, active: u16, inactive: u16) {
@@ -269,22 +285,54 @@ impl Rect {
     }
 }
 
-fn result_text(view: TimerView) -> Option<String> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ResultLine {
+    Exact,
+    Difference {
+        difference: Centiseconds,
+        label: &'static str,
+    },
+}
+
+fn result(view: TimerView) -> Option<ResultLine> {
     if view.phase() != TimerPhase::Stopped {
         return None;
     }
     let displayed = view.displayed().get();
     match displayed.cmp(&Centiseconds::TARGET.get()) {
-        Ordering::Equal => Some("EXACT".to_owned()),
-        Ordering::Less => Some(format!(
-            "{} EARLY",
-            Centiseconds(Centiseconds::TARGET.get() - displayed).display_text()
-        )),
-        Ordering::Greater => Some(format!(
-            "{} LATE",
-            Centiseconds(displayed - Centiseconds::TARGET.get()).display_text()
-        )),
+        Ordering::Equal => Some(ResultLine::Exact),
+        Ordering::Less => Some(ResultLine::Difference {
+            difference: Centiseconds(Centiseconds::TARGET.get() - displayed),
+            label: "EARLY",
+        }),
+        Ordering::Greater => Some(ResultLine::Difference {
+            difference: Centiseconds(displayed - Centiseconds::TARGET.get()),
+            label: "LATE",
+        }),
     }
+}
+
+const fn centisecond_digits(value: Centiseconds) -> [u8; 4] {
+    let value = value.get();
+    [
+        b'0' + (value / 1_000) as u8,
+        b'0' + (value / 100 % 10) as u8,
+        b'0' + (value / 10 % 10) as u8,
+        b'0' + (value % 10) as u8,
+    ]
+}
+
+const fn centisecond_text(value: Centiseconds) -> [u8; 5] {
+    let digits = centisecond_digits(value);
+    [digits[0], digits[1], b'.', digits[2], digits[3]]
+}
+
+const fn text_width(characters: usize, scale: usize) -> usize {
+    let trailing_space = if characters == 0 { 0 } else { 1 };
+    characters
+        .saturating_mul(6)
+        .saturating_sub(trailing_space)
+        .saturating_mul(scale)
 }
 
 const fn digit_segments(digit: u8) -> u8 {
