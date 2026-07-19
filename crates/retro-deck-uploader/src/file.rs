@@ -2,14 +2,17 @@
 
 use std::{
     fmt,
-    fs::{DirBuilder, File, Metadata},
+    fs::{File, Metadata},
     io::{self, Read as _, Write as _},
-    os::unix::fs::DirBuilderExt as _,
-    path::{Path, PathBuf},
+    os::fd::OwnedFd,
+    path::{Component, Path, PathBuf},
 };
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use rustix::fs::{AtFlags, Mode, OFlags, fchmod, fsync, open, openat, renameat, unlinkat};
+use rustix::{
+    fs::{AtFlags, Mode, OFlags, fchmod, fsync, mkdirat, open, openat, renameat, unlinkat},
+    io::Errno,
+};
 
 pub(crate) struct BoundedFile {
     pub(crate) contents: Vec<u8>,
@@ -91,15 +94,7 @@ pub(crate) fn atomic_write(
         .filter(|name| !name.is_empty())
         .ok_or(FileError::Unsafe("destination has no filename"))?;
 
-    let mut builder = DirBuilder::new();
-    builder.recursive(true).mode(directory_mode);
-    builder.create(&parent)?;
-    let directory = open(
-        &parent,
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::DIRECTORY,
-        Mode::empty(),
-    )
-    .map_err(io::Error::from)?;
+    let directory = open_directory(&parent, true, directory_mode)?;
 
     let temporary_name = temporary_name()?;
     let descriptor = openat(
@@ -124,6 +119,45 @@ pub(crate) fn atomic_write(
         let _ = unlinkat(&directory, temporary_name.as_str(), AtFlags::empty());
     }
     result.map_err(FileError::Io)
+}
+
+fn open_directory(path: &Path, create: bool, mode: u32) -> Result<OwnedFd, FileError> {
+    let flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::DIRECTORY;
+    let start = if path.is_absolute() {
+        Path::new("/")
+    } else {
+        Path::new(".")
+    };
+    let mut directory = open(start, flags, Mode::empty()).map_err(io::Error::from)?;
+    for component in path.components() {
+        let name = match component {
+            Component::RootDir | Component::CurDir => continue,
+            Component::Normal(name) => name,
+            Component::ParentDir | Component::Prefix(_) => {
+                return Err(FileError::Unsafe("directory path contains traversal"));
+            }
+        };
+        match openat(&directory, name, flags, Mode::empty()) {
+            Ok(next) => directory = next,
+            Err(error) if create && error == Errno::NOENT => {
+                let created = match mkdirat(&directory, name, Mode::from_raw_mode(mode)) {
+                    Ok(()) => true,
+                    Err(error) if error == Errno::EXIST => false,
+                    Err(error) => return Err(FileError::Io(io::Error::from(error))),
+                };
+                let next =
+                    openat(&directory, name, flags, Mode::empty()).map_err(io::Error::from)?;
+                if created {
+                    fchmod(&next, Mode::from_raw_mode(mode)).map_err(io::Error::from)?;
+                    fsync(&next).map_err(io::Error::from)?;
+                    fsync(&directory).map_err(io::Error::from)?;
+                }
+                directory = next;
+            }
+            Err(error) => return Err(FileError::Io(io::Error::from(error))),
+        }
+    }
+    Ok(directory)
 }
 
 fn usable_parent(path: &Path) -> PathBuf {
@@ -213,5 +247,19 @@ mod tests {
         assert!(symlink(&actual, &alias).is_ok());
         assert!(atomic_write(&alias.join("value"), b"blocked", 0o600, 0o700).is_err());
         assert!(!actual.join("value").exists());
+        assert!(
+            atomic_write(
+                &alias.join("new-directory/value"),
+                b"also blocked",
+                0o600,
+                0o700
+            )
+            .is_err()
+        );
+        assert!(!actual.join("new-directory").exists());
+
+        let traversal = actual.join("../escaped/value");
+        assert!(atomic_write(&traversal, b"blocked", 0o600, 0o700).is_err());
+        assert!(!directory.path().join("escaped").exists());
     }
 }
