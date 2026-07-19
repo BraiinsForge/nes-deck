@@ -119,9 +119,11 @@ done
   echo "Staged third-party license archive is incomplete" >&2
   exit 1
 }
-[ "$(find "$stage/nes-deck/menu/settings-icons" -maxdepth 1 \
-  -type f -name "*.png" | wc -l)" -eq 36 ] || {
-  echo "Staged settings icon set is incomplete" >&2
+settings_icon=$stage/nes-deck/menu/settings-icon.png
+[ -f "$settings_icon" ] && [ ! -L "$settings_icon" ] &&
+  [ "$(sha256sum "$settings_icon" | cut -d ' ' -f 1)" = \
+    92b44756d62e1afaa34c7b1d94cee6f014d5484f94377fe28f4d4392cb696aed ] || {
+  echo "Staged settings icon is missing or corrupt" >&2
   exit 1
 }
 
@@ -194,6 +196,8 @@ chmod 0600 "$base/uploader/password.conf" "$base/uploader/address.conf"
 
 mkdir -p "$base/menu" "$base/terminal" "$base/licenses"
 cp -Rp "$stage/nes-deck/menu/." "$base/menu/"
+rm -rf "$base/menu/settings-icons"
+rm -f "$base/menu/knekko-settings-icons.tsv"
 rm -rf "$base/games.new"
 mkdir -p "$base/games.new"
 cp -Rp "$stage/nes-deck/games/." "$base/games.new/"

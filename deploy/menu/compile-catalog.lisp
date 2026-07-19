@@ -7,13 +7,13 @@
 
 (in-package #:nes-deck-catalog)
 
-(defconstant +schema-version+ 6)
+(defconstant +schema-version+ 7)
 (defconstant +appearance-override-version+ 3)
 (defconstant +maximum-games+ 64)
 (defconstant +maximum-catalog-bytes+ 65536)
 (defconstant +console-rom-root+ "/mnt/data/roms/")
 (defconstant +deck-game-root+ "/mnt/data/nes-deck/games/")
-(defparameter +catalog-keys+ '(:version :settings-icon :palette :games))
+(defparameter +catalog-keys+ '(:version :palette :games))
 (defparameter +game-keys+
   '(:id :title :system :rom :color))
 (defparameter +palette-keys+
@@ -24,13 +24,6 @@
     :muted))
 (defparameter +appearance-override-keys+
   '(:version :settings-icon :palette))
-(defparameter +settings-icons+
-  (append
-   '("gear-classic" "gear-square" "gear-diamond" "gear-eight"
-     "gear-spoke" "gear-ring" "gear-cross" "gear-compact"
-     "gear-heavy" "gear-rivet" "gear-outline" "gear-steel-outline")
-   (loop for index from 1 to 36
-         collect (format nil "gear-knekko-~2,'0D" index))))
 
 (defun catalog-error (control &rest arguments)
   (error "Catalog error: ~?" control arguments))
@@ -222,11 +215,17 @@
           (list (string-downcase (symbol-name key))
                 (validate-rgb-color (required-value key pairs) key)))))
 
-(defun validate-settings-icon (value context)
-  (unless (and (stringp value)
-               (member value +settings-icons+ :test #'string=))
-    (catalog-error "~A must name a built-in pixel cog" context))
-  value)
+(defun validate-legacy-settings-icon (value context)
+  (unless
+      (and (stringp value)
+           (<= 1 (length value) 64)
+           (every
+            (lambda (character)
+              (or (char= character #\-)
+                  (char<= #\a character #\z)
+                  (char<= #\0 character #\9)))
+            value))
+    (catalog-error "~A is not a valid legacy cog name" context)))
 
 (defun validate-game (form position)
   (let* ((context (format nil "game ~D" position))
@@ -251,9 +250,6 @@
 (defun validate-catalog (form)
   (let* ((pairs (decode-plist form +catalog-keys+ "catalog"))
          (version (required-value :version pairs))
-         (settings-icon
-           (validate-settings-icon (required-value :settings-icon pairs)
-                                   "catalog :settings-icon"))
          (palette (validate-palette (required-value :palette pairs)
                                     "catalog :palette"))
          (raw-games
@@ -270,7 +266,7 @@
       (let ((duplicate (duplicate-field games (car field))))
         (when duplicate
           (catalog-error "duplicate game ~A ~S" (cdr field) duplicate))))
-    (values games palette settings-icon)))
+    (values games palette)))
 
 (defun validate-appearance-override (form)
   (let* ((pairs (decode-plist form +appearance-override-keys+
@@ -287,12 +283,11 @@
       (when (and (eql version +appearance-override-version+)
                  (null settings-pair))
         (catalog-error "appearance override version 3 is missing :settings-icon"))
-      (values
-       (validate-palette (required-value :palette pairs)
-                         "appearance override :palette")
-       (when settings-pair
-         (validate-settings-icon (cdr settings-pair)
-                                 "appearance override :settings-icon"))))))
+      (when settings-pair
+        (validate-legacy-settings-icon
+         (cdr settings-pair) "appearance override :settings-icon"))
+      (validate-palette (required-value :palette pairs)
+                        "appearance override :palette"))))
 
 (defun read-catalog (source)
   (with-open-file (stream source :direction :input)
@@ -317,11 +312,7 @@
              (write-string field stream))
     (terpri stream)))
 
-(defun write-palette-tsv (palette settings-icon stream)
-  (write-string "settings-icon" stream)
-  (write-char #\Tab stream)
-  (write-string settings-icon stream)
-  (terpri stream)
+(defun write-palette-tsv (palette stream)
   (dolist (entry palette)
     (write-string (first entry) stream)
     (write-char #\Tab stream)
@@ -339,7 +330,7 @@
   #-(or ecl sbcl) (catalog-error "unsupported Common Lisp implementation"))
 
 (defun emit-outputs-atomically
-    (games palette settings-icon games-output palette-output)
+    (games palette games-output palette-output)
   ;; Temporary files remain beside their outputs so both final renames are
   ;; atomic on the Deck's persistent filesystem.
   (let* ((games-temporary
@@ -360,7 +351,7 @@
                                    :direction :output
                                    :if-exists :supersede
                                    :if-does-not-exist :create)
-             (write-palette-tsv palette settings-icon stream)
+             (write-palette-tsv palette stream)
              (finish-output stream))
            (replace-file palette-temporary palette-output)
            (setf palette-committed t)
@@ -395,21 +386,18 @@
   (multiple-value-bind
         (source games-output palette-output palette-override)
       (last-four-command-arguments)
-    (multiple-value-bind (games base-palette base-settings-icon)
+    (multiple-value-bind (games base-palette)
         (validate-catalog (read-catalog source))
-      (let ((palette base-palette)
-            (settings-icon base-settings-icon))
+      (let ((palette base-palette))
         (when (probe-file palette-override)
-          (multiple-value-bind (override-palette override-settings-icon)
-              (validate-appearance-override (read-catalog palette-override))
-            (setf palette override-palette)
-            (when override-settings-icon
-              (setf settings-icon override-settings-icon))))
-        (emit-outputs-atomically games palette settings-icon
+          (setf palette
+                (validate-appearance-override
+                 (read-catalog palette-override))))
+        (emit-outputs-atomically games palette
                                  games-output palette-output)
         (format t
-                "catalog: wrote ~D games, ~D palette roles, and icon ~A~%"
-                (length games) (length palette) settings-icon)))))
+                "catalog: wrote ~D games and ~D palette roles~%"
+                (length games) (length palette))))))
 
 (defun quit-process (status)
   #+ecl (ext:quit status)

@@ -42,7 +42,7 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
     > "$licenses/glibc-COPYING.LIB"
   tar -xOf ${go.src} go/LICENSE > "$licenses/Go-LICENSE"
   install -m444 ${nixpkgsSource}/COPYING "$licenses/Nixpkgs-COPYING"
-  install -m444 ${../uploader/settings-icons/UPSTREAM.txt} \
+  install -m444 ${../assets/settings-cog/UPSTREAM.txt} \
     "$licenses/knekko-CC0-NOTICE.txt"
   install -m444 ${../deploy/menu/ASSETS.md} \
     "$licenses/menu-assets-provenance.md"

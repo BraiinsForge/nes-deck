@@ -70,7 +70,6 @@
         ./src/deck_menu.cpp
         ./src/deck_wayland.cpp
         ./src/deck_wayland.h
-        ./src/knekko_settings_icons_generated.inc
         ./src/menu_catalog.cpp
         ./src/menu_catalog.h
         ./src/menu_credits.cpp
@@ -224,8 +223,6 @@
             cp ${menuSources}/menu_text.h menu_text.h
             cp ${menuSources}/menu_ui.cpp menu_ui.cpp
             cp ${menuSources}/menu_ui.h menu_ui.h
-            cp ${menuSources}/knekko_settings_icons_generated.inc \
-              knekko_settings_icons_generated.inc
             $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
               -DRETRO_DECK_WAYLAND=1 -I. -I${menuSources} \
               deck_menu.cpp menu_sound.cpp menu_catalog.cpp \
