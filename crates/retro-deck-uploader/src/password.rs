@@ -2,7 +2,7 @@
 
 use std::{
     fmt,
-    fs::{File, Metadata},
+    fs::Metadata,
     io::{self, Read as _},
     os::unix::fs::MetadataExt as _,
     path::Path,
@@ -10,12 +10,11 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use pbkdf2::pbkdf2_hmac;
-use rustix::{
-    fs::{Mode, OFlags, open},
-    process::geteuid,
-};
+use rustix::process::geteuid;
 use sha2::Sha256;
 use subtle::ConstantTimeEq as _;
+
+use crate::file::{FileError, atomic_write, read_bounded_regular};
 
 const PASSWORD_ITERATIONS: u32 = 210_000;
 const MINIMUM_PASSWORD_BYTES: usize = 8;
@@ -118,23 +117,19 @@ impl PasswordConfig {
     /// service's effective user, no more than 1024 bytes, and inaccessible to
     /// group and other users.
     pub fn load(path: &Path) -> Result<Self, PasswordError> {
-        let descriptor = open(
-            path,
-            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-            Mode::empty(),
-        )
-        .map_err(io::Error::from)?;
-        let mut file = File::from(descriptor);
-        let metadata = file.metadata()?;
-        validate_metadata(&metadata)?;
-        let mut contents = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or(1_024));
-        file.by_ref()
-            .take(MAXIMUM_CONFIG_BYTES + 1)
-            .read_to_end(&mut contents)?;
-        if u64::try_from(contents.len()).unwrap_or(u64::MAX) > MAXIMUM_CONFIG_BYTES {
-            return Err(PasswordError::UnsafeFile("file exceeds 1024 bytes"));
-        }
-        Self::parse(&contents)
+        let file = read_bounded_regular(path, MAXIMUM_CONFIG_BYTES).map_err(map_file_error)?;
+        validate_metadata(&file.metadata)?;
+        Self::parse(&file.contents)
+    }
+
+    /// Durably replace a password record with private permissions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PasswordError::Io`] for filesystem failures or
+    /// [`PasswordError::Random`] if a temporary name cannot be generated.
+    pub fn store(&self, path: &Path) -> Result<(), PasswordError> {
+        atomic_write(path, self.encode().as_bytes(), 0o600, 0o700).map_err(map_file_error)
     }
 
     /// Serialize this record exactly as the deployed version 1 format.
@@ -298,6 +293,14 @@ fn validate_metadata(metadata: &Metadata) -> Result<(), PasswordError> {
     Ok(())
 }
 
+fn map_file_error(error: FileError) -> PasswordError {
+    match error {
+        FileError::Io(error) => PasswordError::Io(error),
+        FileError::Unsafe(reason) => PasswordError::UnsafeFile(reason),
+        FileError::Random(error) => PasswordError::Random(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{PasswordConfig, PasswordError, derive_digest, read_password};
@@ -380,8 +383,7 @@ mod tests {
         };
         let record = directory.path().join("password.conf");
         let config = PasswordConfig::derive(b"configured-password", *b"0123456789abcdef", 100_000);
-        assert!(fs::write(&record, config.encode()).is_ok());
-        assert!(fs::set_permissions(&record, fs::Permissions::from_mode(0o600)).is_ok());
+        assert!(config.store(&record).is_ok());
         assert!(PasswordConfig::load(&record).is_ok());
 
         assert!(fs::set_permissions(&record, fs::Permissions::from_mode(0o644)).is_ok());
