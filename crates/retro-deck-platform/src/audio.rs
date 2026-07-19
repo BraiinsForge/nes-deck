@@ -39,6 +39,15 @@ pub enum OssProfile {
     Stream,
 }
 
+/// Result of a cancellable PCM write.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum PcmWriteOutcome {
+    /// Every supplied sample reached the device.
+    Complete,
+    /// The caller requested cancellation before the next fixed-size chunk.
+    Cancelled,
+}
+
 impl OssProfile {
     const fn fragment_word(self) -> i32 {
         match self {
@@ -173,8 +182,29 @@ impl OssPcm {
     /// Returns [`OssError::Write`] if the driver cannot accept the complete
     /// sequence.
     pub fn write_mono(&mut self, samples: &[i16]) -> Result<(), OssError> {
+        let _ = self.write_mono_while(samples, || true)?;
+        Ok(())
+    }
+
+    /// Write mono samples while a cheap cancellation predicate remains true.
+    ///
+    /// The predicate runs before every chunk of at most 2048 samples. It must
+    /// not block. This lets an audio worker observe atomic mute, hide, and
+    /// shutdown state without putting device operations on an input path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OssError::Write`] if the driver cannot accept a chunk.
+    pub fn write_mono_while(
+        &mut self,
+        samples: &[i16],
+        mut continue_playback: impl FnMut() -> bool,
+    ) -> Result<PcmWriteOutcome, OssError> {
         let mut encoded = [0_u8; ENCODED_CHUNK_BYTES];
         for chunk in samples.chunks(SAMPLES_PER_CHUNK) {
+            if !continue_playback() {
+                return Ok(PcmWriteOutcome::Cancelled);
+            }
             for (output, sample) in encoded.chunks_exact_mut(size_of::<i16>()).zip(chunk) {
                 output.copy_from_slice(&sample.to_le_bytes());
             }
@@ -187,7 +217,7 @@ impl OssPcm {
                 .ok_or_else(encoding_bounds_error)?;
             self.file.write_all(bytes).map_err(OssError::Write)?;
         }
-        Ok(())
+        Ok(PcmWriteOutcome::Complete)
     }
 
     /// Wait until every queued sample has played.
@@ -331,6 +361,7 @@ impl Error for OssError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::OpenOptions;
 
     #[test]
     fn profiles_preserve_the_live_validated_fragment_rings() {
@@ -357,5 +388,31 @@ mod tests {
         assert_eq!(ENCODED_CHUNK_BYTES, 4_096);
         assert_eq!(SAMPLES_PER_CHUNK, 2_048);
         assert_eq!(SAMPLES_PER_CHUNK * size_of::<i16>(), ENCODED_CHUNK_BYTES);
+    }
+
+    #[test]
+    fn cancellable_writes_stop_before_the_next_fixed_chunk() {
+        let file = OpenOptions::new().write(true).open("/dev/null");
+        assert!(file.is_ok());
+        let Some(rate) = SampleRate::new(44_100) else {
+            return;
+        };
+        let Ok(file) = file else {
+            return;
+        };
+        let mut device = OssPcm {
+            file,
+            path: PathBuf::from("/dev/null"),
+            rate,
+        };
+        let samples = vec![1_i16; SAMPLES_PER_CHUNK * 3];
+        let mut checks = 0;
+        let outcome = device.write_mono_while(&samples, || {
+            checks += 1;
+            checks < 2
+        });
+
+        assert!(matches!(outcome, Ok(PcmWriteOutcome::Cancelled)));
+        assert_eq!(checks, 2);
     }
 }
