@@ -32,6 +32,12 @@ use crate::wayland_protocol::deck_widget_v1::{deck_widget_manager_v1, deck_widge
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(2);
 const CONFIGURE_POLL_SLICE: Duration = Duration::from_millis(100);
 const MAXIMUM_TOUCH_REPORTS: usize = 64;
+const BACKGROUND_COLOR: u32 = 0xff00_0000;
+const EXIT_HINT_COLOR: u32 = 0xffff_ffff;
+const EXIT_HINT_LEFT: usize = 20;
+const EXIT_HINT_TOP: usize = 20;
+const EXIT_HINT_CELL: usize = 4;
+const EXIT_HINT_STEPS: usize = 9;
 
 /// One bounded touch update delivered by the BMC widget seat.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -786,6 +792,15 @@ impl SurfaceObjects {
     }
 }
 
+/// Visual treatment for the full-screen area around a gameplay surface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameplayBackground {
+    /// Solid black margins.
+    Plain,
+    /// Solid black margins with the standard top-left hold-to-exit cross.
+    ExitHint,
+}
+
 /// Result of a nonblocking presentation attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PresentOutcome {
@@ -833,7 +848,10 @@ impl WaylandPresentation {
     ///
     /// Returns [`WaylandPresentationError`] for setup, mapping, protocol, or
     /// dimension failures.
-    pub fn connect_gameplay(source: Dimensions) -> Result<Self, WaylandPresentationError> {
+    pub fn connect_gameplay(
+        source: Dimensions,
+        background_style: GameplayBackground,
+    ) -> Result<Self, WaylandPresentationError> {
         let surface =
             WaylandSurface::connect_gameplay(source).map_err(WaylandPresentationError::Surface)?;
         let target = surface.dimensions();
@@ -846,7 +864,7 @@ impl WaylandPresentation {
             DECK_DIMENSIONS,
             &[BufferRole::Background],
         )?;
-        background.pixels_mut(0)?.fill(0xff00_0000);
+        draw_gameplay_background(background.pixels_mut(0)?, DECK_DIMENSIONS, background_style);
         let buffer = background.buffer(0)?;
         let background_surface = surface
             .objects
@@ -985,6 +1003,54 @@ fn frame_roles() -> Result<[BufferRole; 3], WaylandPresentationError> {
         BufferRole::Frame(second),
         BufferRole::Frame(third),
     ])
+}
+
+fn draw_gameplay_background(pixels: &mut [u32], dimensions: Dimensions, style: GameplayBackground) {
+    pixels.fill(BACKGROUND_COLOR);
+    if style == GameplayBackground::Plain {
+        return;
+    }
+
+    for step in 0..EXIT_HINT_STEPS {
+        let y = EXIT_HINT_TOP + step * EXIT_HINT_CELL;
+        for x in [
+            EXIT_HINT_LEFT + step * EXIT_HINT_CELL,
+            EXIT_HINT_LEFT + (EXIT_HINT_STEPS - 1 - step) * EXIT_HINT_CELL,
+        ] {
+            fill_pixels(
+                pixels,
+                dimensions,
+                x,
+                y,
+                EXIT_HINT_CELL,
+                EXIT_HINT_CELL,
+                EXIT_HINT_COLOR,
+            );
+        }
+    }
+}
+
+fn fill_pixels(
+    pixels: &mut [u32],
+    dimensions: Dimensions,
+    left: usize,
+    top: usize,
+    width: usize,
+    height: usize,
+    color: u32,
+) {
+    let bottom = top.saturating_add(height).min(dimensions.height());
+    let right = left.saturating_add(width).min(dimensions.width());
+    for y in top.min(bottom)..bottom {
+        let Some(row) = y.checked_mul(dimensions.width()) else {
+            continue;
+        };
+        for x in left.min(right)..right {
+            if let Some(pixel) = row.checked_add(x).and_then(|index| pixels.get_mut(index)) {
+                *pixel = color;
+            }
+        }
+    }
 }
 
 fn damage_full(surface: &wl_surface::WlSurface) {
@@ -1511,5 +1577,29 @@ mod tests {
         assert_eq!(clamp_coordinate(17.9, 1_280), 17);
         assert_eq!(clamp_coordinate(1_280.0, 1_280), 1_279);
         assert_eq!(clamp_coordinate(f64::INFINITY, 1_280), 0);
+    }
+
+    #[test]
+    fn gameplay_exit_hint_is_a_crisp_cross_on_black() {
+        let mut pixels = vec![0x1234_5678; DECK_DIMENSIONS.pixel_count()];
+        draw_gameplay_background(&mut pixels, DECK_DIMENSIONS, GameplayBackground::ExitHint);
+
+        let pixel = |x: usize, y: usize| pixels.get(y * DECK_DIMENSIONS.width() + x).copied();
+        assert_eq!(pixel(20, 20), Some(EXIT_HINT_COLOR));
+        assert_eq!(pixel(52, 20), Some(EXIT_HINT_COLOR));
+        assert_eq!(pixel(36, 36), Some(EXIT_HINT_COLOR));
+        assert_eq!(pixel(20, 52), Some(EXIT_HINT_COLOR));
+        assert_eq!(pixel(52, 52), Some(EXIT_HINT_COLOR));
+        assert_eq!(pixel(19, 20), Some(BACKGROUND_COLOR));
+        assert_eq!(pixel(36, 20), Some(BACKGROUND_COLOR));
+        assert_eq!(pixel(100, 100), Some(BACKGROUND_COLOR));
+    }
+
+    #[test]
+    fn plain_gameplay_background_has_no_exit_hint() {
+        let dimensions = Dimensions::new(32, 32).unwrap_or(DECK_DIMENSIONS);
+        let mut pixels = vec![0x1234_5678; dimensions.pixel_count()];
+        draw_gameplay_background(&mut pixels, dimensions, GameplayBackground::Plain);
+        assert!(pixels.iter().all(|pixel| *pixel == BACKGROUND_COLOR));
     }
 }
