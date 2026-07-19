@@ -15,12 +15,11 @@ atomically to `/mnt/data/nes-deck/uploads/games.tsv` before the dashboard is
 restarted.
 
 The authenticated page also edits all semantic dashboard colors as full
-`#RRGGBB` values and offers matching previews for the native pixel-cog
-settings button. It writes one complete, strictly validated S-expression to
-`/mnt/data/nes-deck/state/dashboard-palette.sexp` and restarts the dashboard.
-The launcher accepts existing version-2 color overrides, validates version-3
-colors and icon together, and keeps built-in defaults available when the
-optional override is malformed.
+`#RRGGBB` values. It writes one complete, strictly validated version-2
+S-expression to `/mnt/data/nes-deck/state/dashboard-palette.sexp` and restarts
+the dashboard. Existing version-3 overrides remain readable: their colors are
+preserved and their retired settings-icon choice is ignored. Built-in defaults
+remain available when the optional override is malformed.
 
 `ops/configure-deck.sh` asks for the uploader password during setup and stores
 it in the local, Git-ignored `deck.conf` with mode `0600`. Each deployment
