@@ -3,4 +3,5 @@
 /foss-games/
 /deck.conf
 /.deck-configs/
+/lisp/site.d/
 *.srm
