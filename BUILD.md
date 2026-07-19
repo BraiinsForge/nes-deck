@@ -237,6 +237,7 @@ retrodeck/
 ├── crates/                      first-party Rust workspace
 │   ├── retro-deck-apps/         native application models and renderers
 │   ├── retro-deck-audio/        audio ownership state machine
+│   ├── retro-deck-platform/     Linux input and device adapters
 │   ├── retro-deck-policy/       bounded Lisp protocol and supervisor
 │   └── retro-deck-uploader/     authenticated ROM and appearance service
 ├── chiptunes/                  CC0 seed tracks and provenance

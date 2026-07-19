@@ -1,0 +1,16 @@
+[package]
+name = "retro-deck-platform"
+description = "Linux device adapters and deterministic input contracts for Retro Deck"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+evdev = "0.13.2"
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

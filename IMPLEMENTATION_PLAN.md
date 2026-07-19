@@ -105,8 +105,11 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 
 ### Phase 3: native applications
 
-- Port 10 Seconds first. Rust keeps true monotonic time while Lisp decides
-  application policy from validated event data.
+- The 10 Seconds state machine, renderer, and normalized nonblocking evdev
+  input path are in Rust. Complete its display, audio, clock, and process
+  integration before replacing the deployed C++ executable. Rust keeps true
+  monotonic time while Lisp decides application policy from validated event
+  data.
 - Port CHIP-8 using the pinned c-octo implementation through a narrow foreign
   interface.
 - Port chiptunes and implement explicit pause, mute, and idle audio release.
