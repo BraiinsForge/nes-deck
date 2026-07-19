@@ -7,6 +7,7 @@ pub mod catalog;
 pub mod cli;
 mod file;
 pub mod form;
+pub mod http;
 pub mod palette;
 pub mod password;
 pub mod rom;
