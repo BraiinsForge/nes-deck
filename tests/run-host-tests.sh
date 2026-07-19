@@ -8,6 +8,8 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 cd "$repo_root"
 
+"$script_dir/vendor_emulators_test.sh"
+
 cxx=${CXX:-g++}
 cc=${CC:-cc}
 for command in "$cxx" "$cc" cargo montage nix pkg-config; do
