@@ -17,40 +17,6 @@ type paletteSpec struct {
 	label string
 }
 
-type settingsIconSpec struct {
-	name     string
-	label    string
-	family   string
-	imageURL string
-	rows     []string
-}
-
-const defaultSettingsIcon = "gear-knekko-09"
-
-var baseSettingsIconSpecs = []settingsIconSpec{
-	{name: "gear-classic", label: "Classic", rows: []string{"..##.##..", ".#######.", "###...###", "##.....##", "##.....##", "##.....##", "###...###", ".#######.", "..##.##.."}},
-	{name: "gear-square", label: "Square", rows: []string{".##...##.", ".##...##.", "#########", "##.....##", "##.....##", "##.....##", "#########", ".##...##.", ".##...##."}},
-	{name: "gear-diamond", label: "Diamond", rows: []string{"....#....", "..#####..", ".##...##.", "##.....##", "#.......#", "##.....##", ".##...##.", "..#####..", "....#...."}},
-	{name: "gear-eight", label: "Eight tooth", rows: []string{".##...##.", "###...###", ".#######.", "..#...#..", "..#...#..", "..#...#..", ".#######.", "###...###", ".##...##."}},
-	{name: "gear-spoke", label: "Spoked", rows: []string{"...###...", ".#.###.#.", "..#####..", "###.#.###", "####.####", "###.#.###", "..#####..", ".#.###.#.", "...###..."}},
-	{name: "gear-ring", label: "Ring", rows: []string{"...###...", ".#######.", "###...###", "##.....##", "##.....##", "##.....##", "###...###", ".#######.", "...###..."}},
-	{name: "gear-cross", label: "Cross", rows: []string{"...###...", "...###...", "..#####..", "###...###", "###...###", "###...###", "..#####..", "...###...", "...###..."}},
-	{name: "gear-compact", label: "Compact", rows: []string{".........", "...###...", "..#####..", ".##...##.", ".##...##.", ".##...##.", "..#####..", "...###...", "........."}},
-	{name: "gear-heavy", label: "Heavy", rows: []string{".###.###.", "#########", "###...###", "##.....##", "##.....##", "##.....##", "###...###", "#########", ".###.###."}},
-	{name: "gear-rivet", label: "Riveted", rows: []string{"..#...#..", ".#######.", "##.#.#.##", ".#.....#.", ".#.....#.", ".#.....#.", "##.#.#.##", ".#######.", "..#...#.."}},
-	{name: "gear-outline", label: "Classic outline", rows: []string{"..##.##..", "..#...#..", "##.###.##", "#.#...#.#", "#.#...#.#", "#.#...#.#", "##.###.##", "..#...#..", "..##.##.."}},
-	{name: "gear-steel-outline", label: "Outline", family: "current", rows: []string{
-		".......................", ".......#.......#.......", ".......##.....##.......", ".......####.####.......",
-		".......#########.......", "......###########......", "......###.....###......", "..######.......######..",
-		"..#####.........#####..", "...###...........###...", "....##...........##....", ".....#...........#.....",
-		"....##...........##....", "...###...........###...", "..#####.........#####..", "..######.......######..",
-		"......###.....###......", "......###########......", ".......#########.......", ".......####.####.......",
-		".......##.....##.......", ".......#.......#.......", ".......................",
-	}},
-}
-
-var settingsIconSpecs = append(baseSettingsIconSpecs, knekkoSettingsIconSpecs...)
-
 var dashboardPaletteSpecs = []paletteSpec{
 	{name: "background", label: "Background"},
 	{name: "text-dark", label: "Dark text"},
@@ -82,24 +48,8 @@ type paletteField struct {
 	Value string
 }
 
-type settingsIconField struct {
-	Name     string
-	Label    string
-	Pixels   []bool
-	GridSize int
-	Family   string
-	ImageURL string
-	Selected bool
-}
-
-type settingsIconGroup struct {
-	Label string
-	Icons []settingsIconField
-}
-
 type dashboardAppearance struct {
-	palette      map[string]string
-	settingsIcon string
+	palette map[string]string
 }
 
 type paletteStore struct {
@@ -146,13 +96,17 @@ func validPaletteName(name string) bool {
 	return false
 }
 
-func validSettingsIcon(name string) bool {
-	for _, spec := range settingsIconSpecs {
-		if spec.name == name {
-			return true
+func validLegacySettingsIcon(name string) bool {
+	if len(name) == 0 || len(name) > 64 {
+		return false
+	}
+	for _, character := range name {
+		if (character < 'a' || character > 'z') &&
+			(character < '0' || character > '9') && character != '-' {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func normalizeRGB(value string) (string, bool) {
@@ -188,7 +142,7 @@ func validatePalette(values map[string]string) error {
 
 func parsePaletteTSV(contents []byte) (dashboardAppearance, error) {
 	values := make(map[string]string, len(dashboardPaletteSpecs))
-	settingsIcon := ""
+	sawLegacySettingsIcon := false
 	scanner := bufio.NewScanner(strings.NewReader(string(contents)))
 	scanner.Buffer(make([]byte, maximumPaletteBytes), maximumPaletteBytes+1)
 	for scanner.Scan() {
@@ -198,10 +152,10 @@ func parsePaletteTSV(contents []byte) (dashboardAppearance, error) {
 			return dashboardAppearance{}, errors.New("appearance contains a malformed entry")
 		}
 		if fields[0] == "settings-icon" {
-			if settingsIcon != "" || !validSettingsIcon(fields[1]) {
+			if sawLegacySettingsIcon || !validLegacySettingsIcon(fields[1]) {
 				return dashboardAppearance{}, errors.New("appearance contains an invalid settings icon")
 			}
-			settingsIcon = fields[1]
+			sawLegacySettingsIcon = true
 			continue
 		}
 		if !validPaletteName(fields[0]) {
@@ -222,10 +176,7 @@ func parsePaletteTSV(contents []byte) (dashboardAppearance, error) {
 	if err := validatePalette(values); err != nil {
 		return dashboardAppearance{}, err
 	}
-	if settingsIcon == "" {
-		settingsIcon = defaultSettingsIcon
-	}
-	return dashboardAppearance{palette: values, settingsIcon: settingsIcon}, nil
+	return dashboardAppearance{palette: values}, nil
 }
 
 func paletteTokens(contents []byte) ([]string, error) {
@@ -277,16 +228,14 @@ func parsePaletteOverride(contents []byte) (dashboardAppearance, error) {
 	}
 	version := tokens[2]
 	index := 3
-	settingsIcon := ""
 	if version == "3" {
 		if len(tokens) != 2*len(dashboardPaletteSpecs)+9 || tokens[index] != ":settings-icon" {
 			return dashboardAppearance{}, errors.New("appearance override must use schema version 3")
 		}
 		encodedIcon := tokens[index+1]
-		if len(encodedIcon) < 3 || encodedIcon[0] != '"' || encodedIcon[len(encodedIcon)-1] != '"' || !validSettingsIcon(encodedIcon[1:len(encodedIcon)-1]) {
-			return dashboardAppearance{}, errors.New("appearance override contains an unknown settings icon")
+		if len(encodedIcon) < 3 || encodedIcon[0] != '"' || encodedIcon[len(encodedIcon)-1] != '"' || !validLegacySettingsIcon(encodedIcon[1:len(encodedIcon)-1]) {
+			return dashboardAppearance{}, errors.New("appearance override contains an invalid legacy settings icon")
 		}
-		settingsIcon = encodedIcon[1 : len(encodedIcon)-1]
 		index += 2
 	} else if version == "2" {
 		if len(tokens) != 2*len(dashboardPaletteSpecs)+7 {
@@ -322,12 +271,12 @@ func parsePaletteOverride(contents []byte) (dashboardAppearance, error) {
 	if err := validatePalette(values); err != nil {
 		return dashboardAppearance{}, err
 	}
-	return dashboardAppearance{palette: values, settingsIcon: settingsIcon}, nil
+	return dashboardAppearance{palette: values}, nil
 }
 
-func encodePaletteOverride(values map[string]string, settingsIcon string) []byte {
+func encodePaletteOverride(values map[string]string) []byte {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "(:version 3\n :settings-icon %q\n :palette\n  (", settingsIcon)
+	builder.WriteString("(:version 2\n :palette\n  (")
 	for index, spec := range dashboardPaletteSpecs {
 		if index > 0 {
 			builder.WriteString("\n   ")
@@ -346,52 +295,7 @@ func paletteFields(values map[string]string) []paletteField {
 	return fields
 }
 
-func settingsIconFields(selected string) []settingsIconField {
-	fields := make([]settingsIconField, 0, len(settingsIconSpecs))
-	for _, spec := range settingsIconSpecs {
-		pixels := make([]bool, 0, len(spec.rows)*len(spec.rows))
-		for _, row := range spec.rows {
-			for _, pixel := range row {
-				pixels = append(pixels, pixel == '#')
-			}
-		}
-		fields = append(fields, settingsIconField{Name: spec.name, Label: spec.label, Pixels: pixels, GridSize: len(spec.rows), Family: spec.family, ImageURL: spec.imageURL, Selected: spec.name == selected})
-	}
-	return fields
-}
-
-func settingsIconGroups(fields []settingsIconField) []settingsIconGroup {
-	order := []struct {
-		family string
-		label  string
-	}{
-		{family: "legacy", label: "Legacy selection"},
-		{family: "current", label: "Current"},
-		{family: "small", label: "Knekko small"},
-		{family: "medium", label: "Knekko medium"},
-		{family: "large", label: "Knekko large"},
-	}
-	groups := make([]settingsIconGroup, 0, len(order))
-	for _, definition := range order {
-		group := settingsIconGroup{Label: definition.label}
-		for _, field := range fields {
-			family := field.Family
-			if family == "" {
-				family = "legacy"
-			}
-			if family != definition.family || (family == "legacy" && !field.Selected) {
-				continue
-			}
-			group.Icons = append(group.Icons, field)
-		}
-		if len(group.Icons) > 0 {
-			groups = append(groups, group)
-		}
-	}
-	return groups
-}
-
-func (store *paletteStore) currentLocked() ([]paletteField, []settingsIconField, error) {
+func (store *paletteStore) currentLocked() ([]paletteField, error) {
 	var appearance dashboardAppearance
 	var loaded bool
 	var baseError error
@@ -412,38 +316,32 @@ func (store *paletteStore) currentLocked() ([]paletteField, []settingsIconField,
 		baseError = err
 	}
 	if !loaded {
-		return nil, nil, fmt.Errorf("read installed dashboard appearance: %w", baseError)
+		return nil, fmt.Errorf("read installed dashboard appearance: %w", baseError)
 	}
 	contents, err := readBoundedRegular(store.overridePath, maximumPaletteBytes)
 	if err == nil {
 		if override, parseErr := parsePaletteOverride(contents); parseErr == nil {
 			appearance.palette = override.palette
-			if override.settingsIcon != "" {
-				appearance.settingsIcon = override.settingsIcon
-			}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		// A bad optional override must never hide the usable installed palette.
 	}
-	return paletteFields(appearance.palette), settingsIconFields(appearance.settingsIcon), nil
+	return paletteFields(appearance.palette), nil
 }
 
-func (store *paletteStore) current() ([]paletteField, []settingsIconField, error) {
+func (store *paletteStore) current() ([]paletteField, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	return store.currentLocked()
 }
 
-func (store *paletteStore) save(values map[string]string, settingsIcon string) error {
+func (store *paletteStore) save(values map[string]string) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if err := validatePalette(values); err != nil {
 		return err
 	}
-	if !validSettingsIcon(settingsIcon) {
-		return errors.New("choose one of the available settings icons")
-	}
-	if err := atomicWrite(store.overridePath, encodePaletteOverride(values, settingsIcon), 0600); err != nil {
+	if err := atomicWrite(store.overridePath, encodePaletteOverride(values), 0600); err != nil {
 		return fmt.Errorf("save dashboard appearance: %w", err)
 	}
 	if store.restartDashboard != nil {

@@ -257,7 +257,7 @@ func (app *application) dashboardData(session userSession, message, notice strin
 	if err != nil && message == "" {
 		message = "The upload catalog cannot be read."
 	}
-	palette, _, err := app.palette.current()
+	palette, err := app.palette.current()
 	if err != nil && message == "" {
 		message = "The dashboard appearance cannot be read."
 	}
@@ -436,7 +436,7 @@ func (app *application) handlePalette(response http.ResponseWriter, request *htt
 		}
 		values[key] = value
 	}
-	if err := app.palette.save(values, defaultSettingsIcon); err != nil {
+	if err := app.palette.save(values); err != nil {
 		app.render(response, http.StatusUnprocessableEntity, app.dashboardData(session, err.Error(), ""))
 		return
 	}
@@ -475,16 +475,6 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		_, _ = response.Write([]byte(paletteJS))
 	default:
-		if asset, ok := settingsIconAsset(request.URL.Path); ok {
-			if request.Method != http.MethodGet {
-				http.Error(response, "Method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			response.Header().Set("Content-Type", "image/png")
-			response.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			_, _ = response.Write(asset)
-			return
-		}
 		http.NotFound(response, request)
 	}
 }

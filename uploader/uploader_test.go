@@ -184,31 +184,9 @@ func testRGB(index int) string {
 
 func TestDashboardPaletteConfiguration(t *testing.T) {
 	store, overridePath := testPalette(t)
-	fields, icons, err := store.current()
-	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" || len(icons) != 48 || !icons[20].Selected {
+	fields, err := store.current()
+	if err != nil || len(fields) != len(dashboardPaletteSpecs) || fields[0].Value != "#010203" {
 		t.Fatalf("fallback palette did not load: %#v %v", fields, err)
-	}
-	knekkoIcons := 0
-	for _, spec := range settingsIconSpecs {
-		if spec.imageURL != "" {
-			if len(spec.rows) != 0 || !strings.HasPrefix(spec.imageURL, "/assets/settings-icons/") {
-				t.Fatalf("source settings icon %s has invalid asset metadata", spec.name)
-			}
-			knekkoIcons++
-			continue
-		}
-		if len(spec.rows) != 9 && len(spec.rows) != 23 {
-			t.Fatalf("settings icon %s uses unsupported grid size %d", spec.name, len(spec.rows))
-		}
-		for _, row := range spec.rows {
-			if len(row) != len(spec.rows) {
-				t.Fatalf("settings icon %s is not square", spec.name)
-			}
-		}
-	}
-	groups := settingsIconGroups(icons)
-	if knekkoIcons != 36 || len(groups) != 4 || len(groups[1].Icons) != 6 || len(groups[2].Icons) != 10 || len(groups[3].Icons) != 20 {
-		t.Fatalf("complete source cog set was not grouped: %#v", groups)
 	}
 	var stale strings.Builder
 	for index, spec := range dashboardPaletteSpecs {
@@ -220,7 +198,7 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 	if err := os.WriteFile(store.activePath, []byte(stale.String()), 0600); err != nil {
 		t.Fatal(err)
 	}
-	fields, icons, err = store.current()
+	fields, err = store.current()
 	if err != nil || fields[0].Value != "#010203" {
 		t.Fatalf("stale generated palette overrode the checked-in fallback: %#v %v", fields, err)
 	}
@@ -234,7 +212,17 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 		restarts++
 		return nil
 	}
-	if err := store.save(values, "gear-rivet"); err != nil {
+	legacyOverride := bytes.Replace(
+		encodePaletteOverride(values),
+		[]byte("(:version 2\n"),
+		[]byte("(:version 3\n :settings-icon \"gear-rivet\"\n"),
+		1,
+	)
+	legacy, err := parsePaletteOverride(legacyOverride)
+	if err != nil || legacy.palette["accent"] != "#123456" {
+		t.Fatalf("legacy appearance override did not preserve its palette: %#v %v", legacy, err)
+	}
+	if err := store.save(values); err != nil {
 		t.Fatal(err)
 	}
 	if restarts != 1 {
@@ -245,10 +233,10 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed, err := parsePaletteOverride(contents)
-	if err != nil || parsed.palette["accent"] != "#123456" || parsed.settingsIcon != "gear-rivet" {
+	if err != nil || parsed.palette["accent"] != "#123456" {
 		t.Fatalf("palette override did not round-trip: %#v %v", parsed, err)
 	}
-	fields, icons, err = store.current()
+	fields, err = store.current()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,23 +245,16 @@ func TestDashboardPaletteConfiguration(t *testing.T) {
 			t.Fatalf("valid override was not displayed: %#v", fields)
 		}
 	}
-	if !icons[9].Selected {
-		t.Fatalf("valid settings icon was not displayed: %#v", icons)
-	}
 	if err := os.WriteFile(overridePath, []byte("(:version 2 :palette (:background \"#12345G\"))\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	fields, icons, err = store.current()
+	fields, err = store.current()
 	if err != nil || fields[0].Value != "#010203" {
 		t.Fatalf("bad optional override hid the fallback palette: %#v %v", fields, err)
 	}
 	values["accent"] = "#12345G"
-	if err := store.save(values, "gear-rivet"); err == nil {
+	if err := store.save(values); err == nil {
 		t.Fatal("malformed palette value was accepted")
-	}
-	values["accent"] = "#123456"
-	if err := store.save(values, "not-a-cog"); err == nil {
-		t.Fatal("unknown settings icon was accepted")
 	}
 }
 
@@ -409,7 +390,7 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 		t.Fatalf("palette update was not persisted: %v", err)
 	}
 	installedPalette, err := parsePaletteOverride(overrideContents)
-	if err != nil || installedPalette.palette[dashboardPaletteSpecs[0].name] != "#616263" || installedPalette.settingsIcon != defaultSettingsIcon {
+	if err != nil || installedPalette.palette[dashboardPaletteSpecs[0].name] != "#616263" {
 		t.Fatalf("HTTP palette was not normalized and persisted: %#v %v", installedPalette, err)
 	}
 
@@ -422,21 +403,11 @@ func TestHTTPBoundaryAuthenticationAndUpload(t *testing.T) {
 		t.Fatalf("palette synchronization asset returned %d", scriptResponse.Code)
 	}
 
-	iconRequest := requestFor(http.MethodGet, testServiceOrigin+"/assets/settings-icons/01.png", nil)
+	iconRequest := requestFor(http.MethodGet, testServiceOrigin+"/assets/settings-icons/09.png", nil)
 	iconResponse := httptest.NewRecorder()
 	app.ServeHTTP(iconResponse, iconRequest)
-	if iconResponse.Code != http.StatusOK ||
-		!strings.HasPrefix(iconResponse.Header().Get("Content-Type"), "image/png") ||
-		iconResponse.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" ||
-		!strings.Contains(iconResponse.Header().Get("Content-Security-Policy"), "img-src 'self'") ||
-		!bytes.HasPrefix(iconResponse.Body.Bytes(), []byte("\x89PNG\r\n\x1a\n")) {
-		t.Fatalf("embedded settings icon returned %d", iconResponse.Code)
-	}
-	unknownIconRequest := requestFor(http.MethodGet, testServiceOrigin+"/assets/settings-icons/../UPSTREAM.txt", nil)
-	unknownIconResponse := httptest.NewRecorder()
-	app.ServeHTTP(unknownIconResponse, unknownIconRequest)
-	if unknownIconResponse.Code != http.StatusNotFound {
-		t.Fatalf("unknown settings asset returned %d", unknownIconResponse.Code)
+	if iconResponse.Code != http.StatusNotFound {
+		t.Fatalf("retired settings icon endpoint returned %d", iconResponse.Code)
 	}
 }
 

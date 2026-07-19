@@ -19,8 +19,8 @@
   and an invalid or duplicate upload cannot replace an existing game.
 - I can inspect active Wi-Fi, local IPv4, and WireGuard IPv4 information before
   changing connectivity.
-- I can customize dashboard colors and the settings icon without a malformed
-  optional override preventing the dashboard from starting.
+- I can customize dashboard colors without a malformed optional override
+  preventing the dashboard from starting.
 - I can place trusted Common Lisp overrides in a persistent local directory,
   restart the application, and obtain either the new behavior or a clear
   failure with safe built-in behavior.
