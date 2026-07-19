@@ -2,6 +2,7 @@
 members = [
   "crates/retro-deck-audio",
   "crates/retro-deck-policy",
+  "crates/retro-deck-uploader",
 ]
 resolver = "2"
 
