@@ -80,7 +80,7 @@ pub fn execute(command: &Command, input: &mut impl io::Read) -> Result<CommandOu
 }
 
 /// Human-readable command syntax for the management-only replacement binary.
-pub const USAGE: &str = "Usage:\n  rom-uploader --set-password PATH\n  rom-uploader --check-password-config PATH\n  rom-uploader --check-address PATH\n  rom-uploader --install-bmc-scene PATH";
+pub const USAGE: &str = "Usage:\n  rom-uploader\n  rom-uploader --set-password PATH\n  rom-uploader --check-password-config PATH\n  rom-uploader --check-address PATH\n  rom-uploader --install-bmc-scene PATH";
 
 fn set_password(path: &Path, input: &mut impl io::Read) -> Result<CommandOutcome, CliError> {
     let password = read_password(input)?;

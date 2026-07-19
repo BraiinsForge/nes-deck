@@ -11,6 +11,8 @@ pub mod form;
 pub mod http;
 pub mod palette;
 pub mod password;
+pub mod process;
 pub mod rom;
+pub mod runtime;
 pub mod store;
 pub mod web;
