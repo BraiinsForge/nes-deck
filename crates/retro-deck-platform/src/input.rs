@@ -5,9 +5,9 @@ mod linux;
 pub use linux::{DrainStats, InputDevices, InputError};
 
 /// Logical width reported by the Deck touchscreen.
-pub const LOGICAL_WIDTH: u16 = 1_280;
+pub const LOGICAL_WIDTH: u16 = crate::DECK_LOGICAL_WIDTH;
 /// Logical height reported by the Deck touchscreen.
-pub const LOGICAL_HEIGHT: u16 = 480;
+pub const LOGICAL_HEIGHT: u16 = crate::DECK_LOGICAL_HEIGHT;
 
 /// Stable controller slot exposed to applications and emulators.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
