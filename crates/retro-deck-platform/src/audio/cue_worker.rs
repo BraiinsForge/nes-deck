@@ -190,7 +190,12 @@ impl<C: Copy + Send + 'static> ToneCueWorker<C> {
     pub fn set_volume(&self, volume: Volume) {
         self.volume.store(volume.percent(), Ordering::Release);
         if volume.muted() {
-            self.gate.store(GATE_MUTED, Ordering::Release);
+            let _ = self.gate.compare_exchange(
+                GATE_ACTIVE,
+                GATE_MUTED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
         } else {
             let _ = self.gate.compare_exchange(
                 GATE_MUTED,
@@ -792,5 +797,27 @@ mod tests {
             ToneCueEnqueue::DroppedInactive
         );
         assert_eq!(worker.shutdown(), ToneWorkerReport::default());
+    }
+
+    #[test]
+    fn volume_changes_do_not_discard_hidden_or_paused_state() {
+        let Some(rate) = SampleRate::new(44_100) else {
+            return;
+        };
+        let Some(audible) = Volume::new(80) else {
+            return;
+        };
+        let worker = ToneCueWorker::spawn(rate, audible, test_notes);
+        assert!(worker.is_ok());
+        let Ok(worker) = worker else {
+            return;
+        };
+        for gate in [AudioGate::Hidden, AudioGate::Paused] {
+            worker.set_gate(gate);
+            worker.set_volume(Volume::MUTED);
+            worker.set_volume(audible);
+            assert_eq!(load_gate(&worker.gate), gate.code());
+        }
+        let _ = worker.shutdown();
     }
 }
