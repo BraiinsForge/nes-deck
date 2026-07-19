@@ -105,13 +105,14 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 
 ### Phase 3: native applications
 
-- The 10 Seconds state machine, renderer, and normalized nonblocking evdev
-  input path are in Rust. Complete its display, audio, clock, and process
-  integration before replacing the deployed C++ executable. Rust keeps true
-  monotonic time while Lisp decides application policy from validated event
-  data.
-- Port CHIP-8 using the pinned c-octo implementation through a narrow foreign
-  interface.
+- The 10 Seconds state machine, renderer, display, nonblocking input, audio,
+  clock, process integration, and bounded Common Lisp policy boundary are in
+  Rust. Its superseded C++ executable has been removed.
+- CHIP-8 uses the checked-in c-octo source through a narrow C adapter owned by
+  Rust. Rust owns bounded program loading, configuration, two-controller
+  state, crisp fixed-geometry presentation, 60 Hz pacing, and lazy audio. The
+  superseded first-party C/C++ host and external source input have been
+  removed.
 - Port chiptunes and implement explicit pause, mute, and idle audio release.
 
 ### Phase 4: emulator host and dashboard
