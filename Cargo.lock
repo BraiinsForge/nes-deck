@@ -272,6 +272,7 @@ dependencies = [
  "base64",
  "getrandom 0.2.17",
  "pbkdf2",
+ "retro-deck-policy",
  "rustix",
  "serde_json",
  "sha2",

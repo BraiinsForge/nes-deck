@@ -5,6 +5,7 @@ pub mod bmc;
 pub mod catalog;
 pub mod cli;
 mod file;
+pub mod palette;
 pub mod password;
 pub mod rom;
 pub mod store;
