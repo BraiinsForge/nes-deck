@@ -13,7 +13,15 @@ fi
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/../.." && pwd)
 cxx=${CXX:-g++}
-for command in "$cxx" montage realpath; do
+cargo=${CARGO:-cargo}
+if [ -n "${CONVERT:-}" ]; then
+	image_convert=$CONVERT
+elif command -v magick >/dev/null 2>&1; then
+	image_convert=magick
+else
+	image_convert=convert
+fi
+for command in "$cxx" "$cargo" "$image_convert" montage realpath; do
 	command -v "$command" >/dev/null 2>&1 || {
 		echo "Missing required command: $command" >&2
 		exit 1
@@ -23,9 +31,8 @@ catalog=$(realpath "$1")
 covers=$(realpath "$2")
 output=$3
 temporary=$(mktemp "${TMPDIR:-/tmp}/retro-deck-screens.XXXXXX")
-timer_renderer=$(mktemp "${TMPDIR:-/tmp}/retro-deck-timer-screen.XXXXXX")
 staging=$(mktemp -d "${TMPDIR:-/tmp}/retro-deck-screen-output.XXXXXX")
-trap 'rm -f "$temporary" "$timer_renderer"; rm -rf "$staging"' EXIT INT TERM
+trap 'rm -f "$temporary"; rm -rf "$staging"' EXIT INT TERM
 
 "$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
 	"$script_dir/render-screenshots.cpp" \
@@ -38,14 +45,14 @@ trap 'rm -f "$temporary" "$timer_renderer"; rm -rf "$staging"' EXIT INT TERM
 	"$repo_root/src/menu_text.cpp" \
 	"$repo_root/src/menu_ui.cpp" \
 	-lpng -lz -pthread -o "$temporary"
-"$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-	"$script_dir/render-timer-screenshot.cpp" \
-	"$repo_root/src/deck_runtime.cpp" \
-	-lpng -pthread -o "$timer_renderer"
 next_number=$("$temporary" "$catalog" "$covers" \
 	"$repo_root/deploy/menu/credits.tsv" "$staging")
 timer_name=$(printf '%02d-timer.png' "$next_number")
-"$timer_renderer" "$staging/$timer_name"
+timer_ppm=$staging/timer.ppm
+"$cargo" run --quiet --manifest-path "$repo_root/Cargo.toml" \
+	-p retro-deck-apps --bin render-ten-seconds -- "$timer_ppm"
+"$image_convert" "$timer_ppm" "$staging/$timer_name"
+rm -f "$timer_ppm"
 
 montage "$staging"/??-*.png -thumbnail 480x180 -tile 2x \
 	-geometry 500x200+10+10 -background '#000000' \

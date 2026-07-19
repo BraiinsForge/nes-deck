@@ -19,9 +19,11 @@ crawl=$(find "$fixture/output" -maxdepth 1 -type f \
   -name '*-foss-credits-crawl.png' -print -quit)
 static=$(find "$fixture/output" -maxdepth 1 -type f \
   -name '*-foss-credits-static.png' -print -quit)
+timer=$(find "$fixture/output" -maxdepth 1 -type f \
+  -name '*-timer.png' -print -quit)
 [[ -s $fixture/output/00-overview.png && -s $intro && -s $crawl &&
-   -s $static ]] || {
-  echo "Screenshot renderer omitted the FOSS crawl or contact sheet" >&2
+   -s $static && -s $timer ]] || {
+  echo "Screenshot renderer omitted the timer, FOSS crawl, or contact sheet" >&2
   exit 1
 }
 cmp -s "$intro" "$crawl" && {
