@@ -381,6 +381,8 @@ name = "retro-deck-emulator"
 version = "0.1.0"
 dependencies = [
  "cc",
+ "retro-deck-audio",
+ "retro-deck-platform",
  "rustix",
  "tempfile",
 ]
