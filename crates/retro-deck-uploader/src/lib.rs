@@ -6,3 +6,4 @@ pub mod cli;
 mod file;
 pub mod password;
 pub mod rom;
+pub mod store;

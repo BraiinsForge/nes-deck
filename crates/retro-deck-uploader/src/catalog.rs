@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     file::{FileError, read_bounded_regular},
-    rom::{System, SystemError},
+    rom::{GameTitle, System, SystemError},
 };
 
 /// Maximum catalog size shared with the dashboard.
@@ -207,6 +207,34 @@ impl CatalogEntry {
         })
     }
 
+    /// Construct the canonical catalog row for a validated web upload.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CatalogError::InvalidField`] if the absolute destination
+    /// cannot be represented by the dashboard catalog contract.
+    pub fn uploaded(
+        title: &GameTitle,
+        system: System,
+        destination: &Path,
+    ) -> Result<Self, CatalogError> {
+        let mut identifier = format!("upload-{}-{}", system.as_str(), title.slug());
+        identifier.truncate(MAXIMUM_ID_BYTES);
+        while identifier.ends_with('-') {
+            identifier.pop();
+        }
+        let destination = destination
+            .to_str()
+            .ok_or(CatalogError::InvalidField("ROM path is not UTF-8"))?;
+        Self::new(
+            &identifier,
+            title.as_str(),
+            system.into(),
+            destination,
+            system.color(),
+        )
+    }
+
     /// Stable dashboard identifier.
     #[must_use]
     #[allow(
@@ -378,6 +406,45 @@ impl Catalog {
     )]
     pub fn entries(&self) -> &[CatalogEntry] {
         &self.entries
+    }
+
+    /// Whether an entry already uses `identifier`.
+    #[must_use]
+    pub fn contains_identifier(&self, identifier: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.identifier == identifier)
+    }
+
+    /// Whether an entry already uses the same ROM or application path.
+    #[must_use]
+    pub fn contains_rom(&self, rom: &Path) -> bool {
+        self.entries.iter().any(|entry| entry.rom == rom)
+    }
+
+    /// Insert an entry and keep uploader catalogs ordered by system then title.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CatalogError`] for capacity, identifier, or path conflicts.
+    pub fn insert_sorted(&mut self, entry: CatalogEntry) -> Result<(), CatalogError> {
+        if self.entries.len() >= MAXIMUM_GAMES {
+            return Err(CatalogError::TooManyEntries);
+        }
+        if self.contains_identifier(entry.identifier()) {
+            return Err(CatalogError::InvalidField("duplicate game identifier"));
+        }
+        if self.contains_rom(entry.rom()) {
+            return Err(CatalogError::InvalidField("duplicate ROM path"));
+        }
+        self.entries.push(entry);
+        self.entries.sort_by(|left, right| {
+            left.system
+                .as_str()
+                .cmp(right.system.as_str())
+                .then_with(|| left.title.cmp(&right.title))
+        });
+        Ok(())
     }
 
     /// Number of entries.

@@ -10,7 +10,7 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rustix::{
-    fs::{AtFlags, Mode, OFlags, fchmod, fsync, mkdirat, open, openat, renameat, unlinkat},
+    fs::{AtFlags, Mode, OFlags, fchmod, fsync, linkat, mkdirat, open, openat, renameat, unlinkat},
     io::Errno,
 };
 
@@ -55,9 +55,16 @@ pub(crate) fn read_bounded_regular(
     path: &Path,
     maximum_bytes: u64,
 ) -> Result<BoundedFile, FileError> {
-    let descriptor = open(
-        path,
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+    let parent = usable_parent(path);
+    let filename = path
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or(FileError::Unsafe("source has no filename"))?;
+    let directory = open_directory(&parent, false, 0)?;
+    let descriptor = openat(
+        &directory,
+        filename,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
         Mode::empty(),
     )
     .map_err(io::Error::from)?;
@@ -121,6 +128,75 @@ pub(crate) fn atomic_write(
     result.map_err(FileError::Io)
 }
 
+pub(crate) fn install_exclusive(
+    path: &Path,
+    contents: &[u8],
+    file_mode: u32,
+    directory_mode: u32,
+) -> Result<(), FileError> {
+    let parent = usable_parent(path);
+    let filename = path
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or(FileError::Unsafe("destination has no filename"))?;
+    let directory = open_directory(&parent, true, directory_mode)?;
+    let temporary_name = temporary_name()?;
+    let descriptor = openat(
+        &directory,
+        temporary_name.as_str(),
+        OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::CREATE | OFlags::EXCL,
+        Mode::from_raw_mode(file_mode),
+    )
+    .map_err(io::Error::from)?;
+    let mut temporary = File::from(descriptor);
+
+    let prepare = (|| {
+        fchmod(&temporary, Mode::from_raw_mode(file_mode)).map_err(io::Error::from)?;
+        temporary.write_all(contents)?;
+        temporary.sync_all()?;
+        Ok(())
+    })();
+    if let Err(error) = prepare {
+        let _ = unlinkat(&directory, temporary_name.as_str(), AtFlags::empty());
+        return Err(FileError::Io(error));
+    }
+    if let Err(error) = linkat(
+        &directory,
+        temporary_name.as_str(),
+        &directory,
+        filename,
+        AtFlags::empty(),
+    ) {
+        let _ = unlinkat(&directory, temporary_name.as_str(), AtFlags::empty());
+        return Err(FileError::Io(io::Error::from(error)));
+    }
+
+    let finish = (|| {
+        unlinkat(&directory, temporary_name.as_str(), AtFlags::empty()).map_err(io::Error::from)?;
+        fsync(&directory).map_err(io::Error::from)?;
+        Ok(())
+    })();
+    if let Err(error) = finish {
+        let _ = unlinkat(&directory, filename, AtFlags::empty());
+        let _ = unlinkat(&directory, temporary_name.as_str(), AtFlags::empty());
+        let _ = fsync(&directory);
+        return Err(FileError::Io(error));
+    }
+    Ok(())
+}
+
+pub(crate) fn remove_file(path: &Path) -> Result<(), FileError> {
+    let parent = usable_parent(path);
+    let filename = path
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or(FileError::Unsafe("destination has no filename"))?;
+    let directory = open_directory(&parent, false, 0)?;
+    unlinkat(&directory, filename, AtFlags::empty()).map_err(io::Error::from)?;
+    fsync(&directory).map_err(io::Error::from)?;
+    Ok(())
+}
+
 fn open_directory(path: &Path, create: bool, mode: u32) -> Result<OwnedFd, FileError> {
     let flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::DIRECTORY;
     let start = if path.is_absolute() {
@@ -175,7 +251,8 @@ fn temporary_name() -> Result<String, FileError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileError, atomic_write, read_bounded_regular};
+    use super::{FileError, atomic_write, install_exclusive, read_bounded_regular};
+    use rustix::fs::{CWD, Mode, mkfifoat};
     use std::{
         fs,
         os::unix::fs::{MetadataExt as _, symlink},
@@ -205,6 +282,20 @@ mod tests {
         let link = directory.path().join("link");
         assert!(symlink(&file, &link).is_ok());
         assert!(read_bounded_regular(&link, 64).is_err());
+
+        let actual = directory.path().join("actual");
+        assert!(fs::create_dir(&actual).is_ok());
+        assert!(fs::write(actual.join("inside"), b"hidden").is_ok());
+        let alias = directory.path().join("alias");
+        assert!(symlink(&actual, &alias).is_ok());
+        assert!(read_bounded_regular(&alias.join("inside"), 64).is_err());
+
+        let fifo = directory.path().join("fifo");
+        assert!(mkfifoat(CWD, &fifo, Mode::from_raw_mode(0o600)).is_ok());
+        assert!(matches!(
+            read_bounded_regular(&fifo, 64),
+            Err(FileError::Unsafe(_))
+        ));
     }
 
     #[test]
@@ -261,5 +352,45 @@ mod tests {
         let traversal = actual.join("../escaped/value");
         assert!(atomic_write(&traversal, b"blocked", 0o600, 0o700).is_err());
         assert!(!directory.path().join("escaped").exists());
+    }
+
+    #[test]
+    fn exclusive_install_never_replaces_a_file_or_symlink() {
+        let directory = tempfile::tempdir();
+        assert!(directory.is_ok());
+        let Some(directory) = directory.ok() else {
+            return;
+        };
+        let destination = directory.path().join("roms/nes/game.nes");
+        assert!(install_exclusive(&destination, b"first", 0o600, 0o755).is_ok());
+        assert!(matches!(fs::read(&destination), Ok(contents) if contents == b"first"));
+        assert!(
+            matches!(fs::metadata(&destination), Ok(metadata) if metadata.mode() & 0o777 == 0o600)
+        );
+
+        assert!(install_exclusive(&destination, b"second", 0o600, 0o755).is_err());
+        assert!(matches!(fs::read(&destination), Ok(contents) if contents == b"first"));
+
+        let victim = directory.path().join("victim");
+        assert!(fs::write(&victim, b"untouched").is_ok());
+        let linked_destination = directory.path().join("roms/nes/link.nes");
+        assert!(symlink(&victim, &linked_destination).is_ok());
+        assert!(install_exclusive(&linked_destination, b"replacement", 0o600, 0o755).is_err());
+        assert!(matches!(fs::read(&victim), Ok(contents) if contents == b"untouched"));
+    }
+
+    #[test]
+    fn exclusive_install_rejects_intermediate_symlinks() {
+        let directory = tempfile::tempdir();
+        assert!(directory.is_ok());
+        let Some(directory) = directory.ok() else {
+            return;
+        };
+        let actual = directory.path().join("actual");
+        assert!(fs::create_dir(&actual).is_ok());
+        let alias = directory.path().join("alias");
+        assert!(symlink(&actual, &alias).is_ok());
+        assert!(install_exclusive(&alias.join("nes/game.nes"), b"blocked", 0o600, 0o755).is_err());
+        assert!(!actual.join("nes").exists());
     }
 }
