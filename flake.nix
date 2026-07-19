@@ -63,9 +63,6 @@
       chiptuneSources = sourceTree (runtimeSources ++ [
         ./src/chiptune_deck.cpp
       ]);
-      timerSources = sourceTree (runtimeSources ++ [
-        ./src/ten_seconds_deck.cpp
-      ]);
       menuSources = sourceTree [
         ./src/deck_menu.cpp
         ./src/deck_wayland.cpp
@@ -110,16 +107,19 @@
         inherit pkgs pkgsCross staticCross;
         nixpkgsSource = nixpkgs.outPath;
       };
-      uploaderSources = pkgs.lib.fileset.toSource {
+      rustWorkspaceSources = extraFiles: pkgs.lib.fileset.toSource {
         root = ./.;
-        fileset = pkgs.lib.fileset.unions [
-          ./Cargo.lock
-          ./Cargo.toml
-          ./crates
-          ./deploy/menu/games.tsv
-          ./deploy/menu/palette.tsv
-        ];
+        fileset = pkgs.lib.fileset.unions (
+          [ ./Cargo.lock ./Cargo.toml ./crates ] ++ extraFiles
+        );
       };
+      uploaderSources = rustWorkspaceSources [
+        ./deploy/menu/games.tsv
+        ./deploy/menu/palette.tsv
+      ];
+      timerRustSources = rustWorkspaceSources [
+        ./protocol/deck-widget-v1.xml
+      ];
       uploaderPackage = {
         pname = "rom-uploader";
         version = "0.1.0";
@@ -332,39 +332,28 @@
           };
         };
 
-        ten-seconds-deck = pkgsCross.stdenv.mkDerivation {
+        ten-seconds-deck = pkgsCross.rustPlatform.buildRustPackage {
           pname = "ten-seconds-deck";
-          version = "1.0.0";
+          version = "0.1.0";
+          src = timerRustSources;
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [
+            "-p"
+            "retro-deck-apps"
+            "--bin"
+            "ten-seconds-deck"
+          ];
+          doCheck = false;
 
-          dontUnpack = true;
-          nativeBuildInputs = [ pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
+          env.RUSTFLAGS = "-C target-feature=+crt-static";
+          nativeBuildInputs = [ pkgs.nukeReferences ];
+          buildInputs = [ pkgsCross.glibc.static ];
           allowedReferences = [ ];
 
-          NIX_CFLAGS_COMPILE = "-static -O3";
-          NIX_LDFLAGS = "-static";
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
-            $CXX -std=c++11 -O3 -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${timerSources} \
-              ${timerSources}/ten_seconds_deck.cpp \
-              ${timerSources}/deck_runtime.cpp \
-              ${timerSources}/deck_wayland.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              -static -pthread -lm -lwayland-client -lffi \
-              -o ten-seconds-deck
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin
-            install -m755 ten-seconds-deck $out/bin/ten-seconds-deck
+          postFixup = ''
+            ${pkgsCross.stdenv.cc.bintools.bintools}/bin/${pkgsCross.stdenv.cc.targetPrefix}strip \
+              --strip-all $out/bin/ten-seconds-deck
             nuke-refs $out/bin/ten-seconds-deck
-            runHook postInstall
           '';
 
           meta = {
