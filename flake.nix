@@ -786,22 +786,35 @@
           };
         });
 
-        rom-uploader = pkgsCross.buildGoModule {
+        rom-uploader = pkgsCross.rustPlatform.buildRustPackage {
           pname = "rom-uploader";
-          version = "1.0.0";
+          version = "0.1.0";
 
-          src = ./uploader;
-          vendorHash = null;
-          env.CGO_ENABLED = 0;
+          src = pkgs.lib.fileset.toSource {
+            root = ./.;
+            fileset = pkgs.lib.fileset.unions [
+              ./Cargo.lock
+              ./Cargo.toml
+              ./crates
+              ./deploy/menu/games.tsv
+              ./deploy/menu/palette.tsv
+            ];
+          };
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [ "-p" "retro-deck-uploader" ];
+          doCheck = false;
+          env.RUSTFLAGS = "-C target-feature=+crt-static";
           nativeBuildInputs = [ pkgs.nukeReferences ];
+          buildInputs = [ pkgsCross.glibc.static ];
           allowedReferences = [ ];
-          ldflags = [ "-s" "-w" ];
 
           postInstall = ''
-            mv $out/bin/uploader $out/bin/rom-uploader
+            mv $out/bin/retro-deck-uploader $out/bin/rom-uploader
           '';
 
           postFixup = ''
+            ${pkgsCross.stdenv.cc.bintools.bintools}/bin/${pkgsCross.stdenv.cc.targetPrefix}strip \
+              --strip-all $out/bin/rom-uploader
             nuke-refs $out/bin/rom-uploader
           '';
 
