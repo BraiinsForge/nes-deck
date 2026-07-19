@@ -7,8 +7,10 @@
 //! hardware.
 
 mod cue;
+mod tone;
 
 pub use cue::{CueEnqueue, CueReceive, CueReceiver, CueSender, cue_channel};
+pub use tone::{SampleRate, SquareTone, ToneError, ToneNote, Volume};
 
 use std::time::Duration;
 
