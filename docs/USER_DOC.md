@@ -13,11 +13,12 @@ kept in the following documents:
 - [`deploy/uploader/README.md`](../deploy/uploader/README.md) describes the
   authenticated ROM and appearance interface and password rotation.
 
-The Rust and Common Lisp migration is in progress. Until an individual
-replacement passes the gates in [`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md),
-the documented C++ or Go executable remains authoritative for deployed
-behavior. Device-local Lisp overrides are not yet an available release
-feature.
+The Rust and Common Lisp migration is in progress. The Rust ROM uploader is
+now authoritative for deployed management behavior. The dashboard,
+emulators, and native applications remain on their documented C++
+implementations until each replacement passes the gates in
+[`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md). Device-local Lisp
+overrides are not yet an available release feature.
 
 Owner-supplied ROMs, save data, credentials, and future local Lisp overrides
 are private persistent data. They must not be placed in screenshots, logs,

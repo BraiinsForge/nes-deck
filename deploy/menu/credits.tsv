@@ -26,7 +26,7 @@ libpng	Cover image decoding	libpng-2.0
 zlib	Compression support	Zlib
 libffi	Wayland client support	MIT
 GNU C Library	C and POSIX runtime	LGPL-2.0-or-later
-Go	ROM uploader runtime	BSD-3-Clause
+Go	wireguard-go runtime	BSD-3-Clause
 Nixpkgs	Reproducible cross-build definitions	MIT
 knekko Cogwheels and Gears	Settings icon artwork	CC0-1.0
 CHIP-8 Archive	Included CHIP-8 games	CC0-1.0

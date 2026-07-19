@@ -17,9 +17,9 @@ details for development.
 
 ## Prerequisites
 
-Install Nix with flakes enabled. Host tests also require a C and C++ compiler,
-`pkg-config`, libpng and Wayland development headers, `wayland-scanner`, and
-ImageMagick.
+Install Nix with flakes enabled. Host tests also require Rust 1.86 or newer
+with Cargo, rustfmt, and Clippy; a C and C++ compiler; `pkg-config`; libpng and
+Wayland development headers; `wayland-scanner`; and ImageMagick.
 
 On Debian or Ubuntu:
 
@@ -61,6 +61,7 @@ nix build --no-link --print-out-paths .#python-deck
 nix build --no-link --print-out-paths .#chibi-deck
 nix build --no-link --print-out-paths .#chiptune-deck
 nix build --no-link --print-out-paths .#rom-uploader
+nix build --no-link --print-out-paths .#rom-uploader-host
 nix build --no-link --print-out-paths .#runtime-licenses
 nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 ```
@@ -80,6 +81,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `chibi-deck` | `bin/chibi-scheme` plus Scheme modules |
 | `chiptune-deck` | `bin/chiptune-deck` |
 | `rom-uploader` | `bin/rom-uploader` |
+| `rom-uploader-host` | Native `bin/rom-uploader` configuration helper |
 | `runtime-licenses` | Shared runtime and asset notices |
 | ECL expression | `bin/ecl.bin`, runtime library, and notices |
 
@@ -117,8 +119,9 @@ dashboard geometry and behavior, ROM catalog, cover cache, Wi-Fi profile
 helper, rlwrap-backed terminal lifecycle, shared framebuffer/audio runtime,
 timer configuration, and CHIP-8 core.
 
-The suite also runs the uploader's Go tests for authentication, request
-boundaries, ROM validation, atomic storage, and the Paper UI contract.
+The suite runs the strict Rust formatter, lints, and tests. Uploader coverage
+includes authentication, bounded HTTP and form parsing, ROM validation,
+atomic storage, process control, and the Paper UI contract.
 
 Run shell checks on deployment code with:
 
@@ -231,6 +234,10 @@ from the shared libretro frontend.
 
 ```text
 retrodeck/
+├── crates/                      first-party Rust workspace
+│   ├── retro-deck-audio/        audio ownership state machine
+│   ├── retro-deck-policy/       bounded Lisp protocol and supervisor
+│   └── retro-deck-uploader/     authenticated ROM and appearance service
 ├── chiptunes/                  CC0 seed tracks and provenance
 ├── deploy/
 │   ├── menu/                   catalog, launcher, and procd service
@@ -249,6 +256,7 @@ retrodeck/
 ├── patches/                    pinned upstream fixes
 ├── protocol/                   Deck widget and layer-shell client protocols
 ├── roms/                       private canonical ROM library and checksums
+├── lisp/                       tracked Common Lisp policy runtime
 ├── src/
 │   ├── deck_menu.cpp           dashboard, settings, and child supervision
 │   ├── menu_catalog.cpp        game model, manifest, and ROM validation
@@ -268,7 +276,6 @@ retrodeck/
 │   └── joypad_input.cpp        stable two-controller input
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
-├── uploader/                   authenticated ROM intake web service
 ├── flake.nix                   pinned cross-build definitions
 └── README.md                   deployment and operation guide
 ```

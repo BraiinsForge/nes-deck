@@ -1,4 +1,4 @@
-//! Versioned PBKDF2 password records compatible with the deployed Go service.
+//! Versioned PBKDF2 password records compatible with existing installations.
 
 use std::{
     fmt,

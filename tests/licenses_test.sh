@@ -38,6 +38,8 @@ grep -Fqx $'ECL\tCommon Lisp REPL\tLGPL-2.1-or-later' \
 grep -Fqx \
   $'GNU MP\tECL arithmetic\tLGPL-3.0-or-later OR GPL-2.0-or-later' \
   deploy/menu/credits.tsv
+grep -Fqx $'Go\twireguard-go runtime\tBSD-3-Clause' \
+  deploy/menu/credits.tsv
 grep -Fq 'either version 3 of the License' \
   "$ecl/share/licenses/ecl-deck/GMP-README"
 grep -Fq 'version 2.1 of the License' \

@@ -3,14 +3,17 @@
 ## Objective
 
 Retro Deck will use Rust for its native appliance runtime and Common Lisp for
-trusted, startup-loaded behavior. First-party Go and C++ will be removed after
-their replacements prove behavioral, security, build, and on-device parity.
-Third-party emulator implementations remain pinned upstream dependencies with
-their provenance and local patches organized in one predictable hierarchy.
+trusted, startup-loaded behavior. The first-party Go uploader has been
+removed after its Rust replacement passed behavioral, security, and build
+parity. First-party C++ will be removed after each replacement passes the same
+gates. Third-party emulator implementations remain pinned upstream
+dependencies with their provenance and local patches organized in one
+predictable hierarchy.
 
-The current C++ and Go programs remain the deployable baseline during the
-migration. A replacement becomes the default only after its own tests, the
-complete host suite, the ARMv7 closure audit, and a live Deck check pass.
+The Rust uploader and current C++ programs form the deployable baseline during
+the remaining migration. A replacement becomes the default only after its own
+tests, the complete host suite, the ARMv7 closure audit, and a live Deck check
+pass.
 
 ## Required properties
 
@@ -90,12 +93,15 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 - Add a tested audio lifecycle state machine before an OSS backend uses it.
 - Extend ARMv7 verification to reject dynamic binaries and Nix references.
 
-### Phase 2: management service
+### Phase 2: management service (code complete)
 
-- Port password configuration, authentication, sessions, CSRF protection,
+- Ported password configuration, authentication, sessions, CSRF protection,
   origin checks, bounded uploads, ROM validation, atomic catalogs, palette
-  updates, BMC scene installation, and embedded assets from Go to Rust.
-- Run parity tests against both implementations, then remove the Go module.
+  updates, BMC scene installation, and embedded assets to Rust.
+- Verified password-record compatibility, host tests, and a static,
+  closure-free ARMv7 Nix build, then removed the Go module.
+- Keep the live Deck login, upload, palette, restart, and password-rotation
+  exercise in the final release gate.
 
 ### Phase 3: native applications
 
@@ -115,7 +121,7 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 ### Phase 5: dependency organization and removal
 
 - Move emulator provenance and patch series into `vendor/emulators/`.
-- Remove superseded first-party C++, Go, headers, and obsolete test harnesses.
+- Remove superseded first-party C++, headers, and obsolete test harnesses.
 - Keep vendored fbterm isolated until a tested Rust terminal replacement is
   available; never describe its code as first-party.
 

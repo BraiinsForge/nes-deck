@@ -10,7 +10,7 @@ cd "$repo_root"
 
 cxx=${CXX:-g++}
 cc=${CC:-cc}
-for command in "$cxx" "$cc" montage nix pkg-config; do
+for command in "$cxx" "$cc" cargo montage nix pkg-config; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -24,6 +24,10 @@ pkg-config --exists wayland-client || {
   echo "Missing development package: wayland-client" >&2
   exit 1
 }
+
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/nes-deck-tests.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM HUP
@@ -131,7 +135,5 @@ octo_src=$(nix eval --raw --impure --expr \
 "$cc" -std=c99 -O2 -Wall -Wextra -Werror -I"$octo_src/src" \
   tests/chip8_core_test.c src/chip8_core.c -o "$work/chip8-core-test"
 "$work/chip8-core-test"
-
-(cd uploader && nix shell nixpkgs#go -c go test ./...)
 
 echo "All host tests passed."

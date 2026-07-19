@@ -5,9 +5,10 @@
 The current deployable system consists of static ARMv7 executables running on
 the Deck's OpenWrt userspace. C++ programs implement the dashboard, shared
 display and audio runtime, libretro host, CHIP-8 frontend, chiptune player, and
-timer. A Go service implements authenticated ROM intake and appearance
-configuration. ECL currently provides the interactive Lisp program and runs
-the catalog compiler during activation.
+timer. Rust implements authenticated ROM intake and appearance configuration,
+including its bounded HTTP transport and process control. ECL currently
+provides the interactive Lisp program and runs the catalog compiler during
+activation.
 
 The BMC installation presents the dashboard as a scene widget. Games use a
 black fullscreen layer surface and a centered gameplay layer surface. The

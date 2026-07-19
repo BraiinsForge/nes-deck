@@ -6,10 +6,11 @@ authoritative project, role, and SPDX-style license summary from
 
 The deployer installs the corresponding upstream notices and license texts at
 `/mnt/data/nes-deck/licenses`. Runtime packages carry their own notices, while
-the shared static libraries, Go toolchain, Nixpkgs source, and CC0 asset
-provenance are collected by `nix/runtime-licenses.nix`. The separately pinned
-ECL runtime carries ECL, ASDF/UIOP, Boehm GC, libatomic_ops, GMP, and glibc
-notices from the exact source archives used in its build.
+the shared static libraries, the Go runtime used by the checked-in
+`wireguard-go` userspace binary, Nixpkgs, and CC0 asset provenance are collected
+by `nix/runtime-licenses.nix`. The separately pinned ECL runtime carries ECL,
+ASDF/UIOP, Boehm GC, libatomic_ops, GMP, and glibc notices from the exact source
+archives used in its build.
 
 Source identity is reproducible from these files:
 
