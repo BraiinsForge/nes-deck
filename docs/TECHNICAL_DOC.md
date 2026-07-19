@@ -38,5 +38,12 @@ retains it to avoid latency, clicks, and repeated OSS negotiation. Future BMC
 widget audio must share one lazy manager rather than opening one permanent
 stream per widget.
 
+Input and audio are independent execution paths. Touch and controller events
+update Rust state immediately and only try to enqueue a small cue identifier
+on a bounded channel. They never open `/dev/dsp`, write samples, wait for a
+sound child, or observe an audio cooldown. The audio worker may coalesce or
+drop stale cues when it falls behind. The same rule applies to Common Lisp:
+policy work is supervised and deadline-bound, never an input-loop dependency.
+
 The complete target layout, migration order, and proof gates are defined in
 [`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md).

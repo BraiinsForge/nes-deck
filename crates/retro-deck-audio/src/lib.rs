@@ -6,6 +6,10 @@
 //! makes the rule "release audio when it is not needed" testable without
 //! hardware.
 
+mod cue;
+
+pub use cue::{CueEnqueue, CueReceive, CueReceiver, CueSender, cue_channel};
+
 use std::time::Duration;
 
 /// Monotonic milliseconds supplied by the platform runtime.

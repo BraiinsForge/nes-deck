@@ -25,12 +25,15 @@ complete host suite, the ARMv7 closure audit, and a live Deck check pass.
 5. Audio is owned by one Rust manager per active runtime. It opens lazily,
    drains before closing, and releases the device when muted, paused, hidden,
    or idle. Active continuous emulator playback keeps its lease.
-6. Deployments preserve the root-owned local Lisp override directory and never
+6. Input dispatch never waits for audio playback, an audio-device operation,
+   or a Lisp reply. Short cues use a bounded nonblocking queue; overload drops
+   stale sound feedback instead of delaying touch or controller events.
+7. Deployments preserve the root-owned local Lisp override directory and never
    add its contents to Git or the upload web interface.
-7. Every upstream emulator has a pinned revision, license record, build
+8. Every upstream emulator has a pinned revision, license record, build
    adapter, and ordered patch series. Generated sources and build outputs are
    not mixed with first-party source.
-8. No migration commit knowingly weakens the existing uploader security,
+9. No migration commit knowingly weakens the existing uploader security,
    save-game persistence, controller ordering, rendering, or recovery path.
 
 ## Target source layout
@@ -71,10 +74,11 @@ Messages are bounded, one-line S-expressions with an explicit protocol
 version and request identifier. Rust validates every reply before applying it.
 
 Low-frequency events such as navigation, timer transitions, layout changes,
-and cue selection may cross this boundary. Frame publication, audio sample
-production, input draining, emulator callbacks, and filesystem security do
-not. If startup, parsing, timeout, or validation fails, Rust logs the failure,
-terminates the worker, and uses built-in behavior.
+and cue selection may cross this boundary asynchronously. Raw input is drained
+and applied in Rust before any policy request is made. Frame publication,
+audio sample production, input draining, emulator callbacks, and filesystem
+security do not cross the boundary. If startup, parsing, timeout, or validation
+fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 
 ## Migration sequence
 
