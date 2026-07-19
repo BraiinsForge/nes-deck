@@ -2,7 +2,10 @@
 
 use std::{
     num::NonZeroUsize,
-    sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+    sync::mpsc::{
+        self, Receiver, RecvError, RecvTimeoutError, SyncSender, TryRecvError, TrySendError,
+    },
+    time::Duration,
 };
 
 /// Result of trying to enqueue one sound cue from an input path.
@@ -58,6 +61,31 @@ pub struct CueReceiver<T> {
 }
 
 impl<T> CueReceiver<T> {
+    /// Wait for one cue, then coalesce any others already queued.
+    ///
+    /// Only the dedicated audio worker should call this method. Input-side
+    /// handles expose no blocking operation.
+    #[must_use]
+    pub fn wait_latest(&self) -> CueReceive<T> {
+        match self.receiver.recv() {
+            Ok(cue) => self.coalesce(cue),
+            Err(RecvError) => CueReceive::Disconnected,
+        }
+    }
+
+    /// Wait up to `timeout` for one cue, then coalesce queued successors.
+    ///
+    /// [`CueReceive::Empty`] means the timeout expired. This is intended for
+    /// audio-worker idle deadlines and never runs on an input path.
+    #[must_use]
+    pub fn wait_latest_timeout(&self, timeout: Duration) -> CueReceive<T> {
+        match self.receiver.recv_timeout(timeout) {
+            Ok(cue) => self.coalesce(cue),
+            Err(RecvTimeoutError::Timeout) => CueReceive::Empty,
+            Err(RecvTimeoutError::Disconnected) => CueReceive::Disconnected,
+        }
+    }
+
     /// Drain all cues already waiting and return only the newest one.
     ///
     /// Coalescing prevents delayed navigation sounds from playing after the
@@ -65,12 +93,16 @@ impl<T> CueReceiver<T> {
     /// waits for a producer.
     #[must_use]
     pub fn try_latest(&self) -> CueReceive<T> {
-        let mut latest = match self.receiver.try_recv() {
+        let latest = match self.receiver.try_recv() {
             Ok(cue) => cue,
             Err(TryRecvError::Empty) => return CueReceive::Empty,
             Err(TryRecvError::Disconnected) => return CueReceive::Disconnected,
         };
 
+        self.coalesce(latest)
+    }
+
+    fn coalesce(&self, mut latest: T) -> CueReceive<T> {
         loop {
             match self.receiver.try_recv() {
                 Ok(cue) => latest = cue,
@@ -96,6 +128,7 @@ pub fn cue_channel<T>(capacity: NonZeroUsize) -> (CueSender<T>, CueReceiver<T>) 
 mod tests {
     use super::{CueEnqueue, CueReceive, cue_channel};
     use std::num::NonZeroUsize;
+    use std::time::Duration;
 
     fn capacity(value: usize) -> NonZeroUsize {
         NonZeroUsize::new(value).unwrap_or(NonZeroUsize::MIN)
@@ -137,5 +170,28 @@ mod tests {
 
         assert_eq!(receiver.try_latest(), CueReceive::Latest(7));
         assert_eq!(receiver.try_latest(), CueReceive::Disconnected);
+    }
+
+    #[test]
+    fn worker_wait_coalesces_without_polling() {
+        let (sender, receiver) = cue_channel(capacity(3));
+        assert_eq!(sender.try_enqueue("old"), CueEnqueue::Queued);
+        assert_eq!(sender.try_enqueue("new"), CueEnqueue::Queued);
+
+        assert_eq!(receiver.wait_latest(), CueReceive::Latest("new"));
+    }
+
+    #[test]
+    fn zero_timeout_and_disconnect_are_distinct() {
+        let (sender, receiver) = cue_channel::<u8>(capacity(1));
+        assert_eq!(
+            receiver.wait_latest_timeout(Duration::ZERO),
+            CueReceive::Empty
+        );
+        drop(sender);
+        assert_eq!(
+            receiver.wait_latest_timeout(Duration::ZERO),
+            CueReceive::Disconnected
+        );
     }
 }
