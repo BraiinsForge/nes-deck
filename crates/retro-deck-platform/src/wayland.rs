@@ -11,7 +11,7 @@ use std::os::fd::{AsFd, BorrowedFd};
 use std::time::{Duration, Instant};
 
 use memmap2::{MmapMut, MmapOptions};
-use rustix::event::{PollFd, PollFlags, Timespec, poll};
+use rustix::event::{PollFd, PollFlags, poll};
 use rustix::fs::{MemfdFlags, ftruncate, memfd_create};
 use wayland_client::backend::WaylandError as TransportError;
 use wayland_client::globals::{BindError, GlobalError, GlobalListContents, registry_queue_init};
@@ -26,6 +26,7 @@ use crate::display::{
     DECK_DIMENSIONS, Dimensions, DisplayError, Frame, PresentationSlots, ScalePlan, SlotError,
     SlotId, gameplay_dimensions,
 };
+use crate::time::duration_timespec;
 use crate::wayland_protocol::deck_widget_v1::{deck_widget_manager_v1, deck_widget_surface_v1};
 
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -1055,13 +1056,6 @@ impl Error for WaylandPresentationError {
     }
 }
 
-fn duration_timespec(duration: Duration) -> Timespec {
-    Timespec {
-        tv_sec: i64::try_from(duration.as_secs()).unwrap_or(i64::MAX),
-        tv_nsec: i64::from(duration.subsec_nanos()),
-    }
-}
-
 fn flush_allowing_backpressure(
     event_queue: &EventQueue<EventState>,
 ) -> Result<(), WaylandSurfaceError> {
@@ -1517,20 +1511,5 @@ mod tests {
         assert_eq!(clamp_coordinate(17.9, 1_280), 17);
         assert_eq!(clamp_coordinate(1_280.0, 1_280), 1_279);
         assert_eq!(clamp_coordinate(f64::INFINITY, 1_280), 0);
-    }
-
-    #[test]
-    fn poll_timeout_conversion_is_exact_and_saturating() {
-        assert_eq!(
-            duration_timespec(Duration::from_millis(125)),
-            Timespec {
-                tv_sec: 0,
-                tv_nsec: 125_000_000,
-            }
-        );
-        assert_eq!(
-            duration_timespec(Duration::MAX).tv_sec,
-            i64::try_from(Duration::MAX.as_secs()).unwrap_or(i64::MAX)
-        );
     }
 }

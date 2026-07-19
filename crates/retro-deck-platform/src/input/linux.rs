@@ -6,13 +6,16 @@ use std::fs;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use evdev::{AbsInfo, AbsoluteAxisCode, Device, EventSummary, KeyCode, SynchronizationCode};
+use rustix::event::{PollFd, PollFlags, poll};
 
 use super::{
     AxisRange, ControllerTracker, InputEvent, LOGICAL_HEIGHT, LOGICAL_WIDTH, PhysicalButton,
     Player, TouchTracker,
 };
+use crate::time::duration_timespec;
 
 const INPUT_DIRECTORY: &str = "/dev/input";
 const TOUCHSCREEN_NAME: &str = "Goodix Capacitive TouchScreen";
@@ -68,6 +71,8 @@ pub enum InputError {
         /// Underlying evdev failure.
         source: io::Error,
     },
+    /// Waiting across input and display descriptors failed.
+    Poll(rustix::io::Errno),
 }
 
 impl fmt::Display for InputError {
@@ -84,6 +89,7 @@ impl fmt::Display for InputError {
             Self::Controller { player, source } => {
                 write!(formatter, "controller {player:?} read failed: {source}")
             }
+            Self::Poll(source) => write!(formatter, "input poll failed: {source}"),
         }
     }
 }
@@ -94,6 +100,7 @@ impl Error for InputError {
             Self::Scan { source, .. }
             | Self::Touchscreen { source, .. }
             | Self::Controller { source, .. } => Some(source),
+            Self::Poll(source) => Some(source),
             Self::TouchscreenNotFound => None,
         }
     }
@@ -199,6 +206,36 @@ impl InputDevices {
         )
     }
 
+    /// Wait for input, Wayland, or a fixed runtime deadline without allocating.
+    ///
+    /// The supplied descriptor normally belongs to the application's Wayland
+    /// presentation. A timeout is successful and lets the caller advance its
+    /// monotonic model even when no descriptor became readable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputError::Poll`] for an operating-system polling failure.
+    pub fn wait_readable_with(
+        &self,
+        additional: BorrowedFd<'_>,
+        timeout: Duration,
+    ) -> Result<(), InputError> {
+        let touch = self.touch.device.as_fd();
+        match self.controllers.as_slice() {
+            [] => wait_on([touch, additional], timeout),
+            [first] => wait_on([touch, first.device.as_fd(), additional], timeout),
+            [first, second, ..] => wait_on(
+                [
+                    touch,
+                    first.device.as_fd(),
+                    second.device.as_fd(),
+                    additional,
+                ],
+                timeout,
+            ),
+        }
+    }
+
     /// Drain all currently available reports without waiting.
     ///
     /// At most 64 normalized events are appended per call. Device state is
@@ -216,6 +253,18 @@ impl InputDevices {
             drain_controller(controller, &mut |event| collector.emit(event))?;
         }
         Ok(collector.stats())
+    }
+}
+
+fn wait_on<const COUNT: usize>(
+    descriptors: [BorrowedFd<'_>; COUNT],
+    timeout: Duration,
+) -> Result<(), InputError> {
+    let flags = PollFlags::IN | PollFlags::ERR | PollFlags::HUP;
+    let mut descriptors = descriptors.map(|descriptor| PollFd::from_borrowed_fd(descriptor, flags));
+    match poll(&mut descriptors, Some(&duration_timespec(timeout))) {
+        Ok(_) | Err(rustix::io::Errno::INTR) => Ok(()),
+        Err(source) => Err(InputError::Poll(source)),
     }
 }
 

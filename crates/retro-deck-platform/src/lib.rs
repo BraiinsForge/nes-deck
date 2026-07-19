@@ -3,6 +3,7 @@
 pub mod audio;
 pub mod display;
 pub mod input;
+pub mod time;
 pub mod wayland;
 pub mod wayland_protocol;
 
