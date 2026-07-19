@@ -235,7 +235,7 @@ from the shared libretro frontend.
 ```text
 retrodeck/
 ├── crates/                      first-party Rust workspace
-│   ├── retro-deck-apps/         native application models and renderers
+│   ├── retro-deck-apps/         native app models, renderers, and runtimes
 │   ├── retro-deck-audio/        audio ownership state machine
 │   ├── retro-deck-platform/     Linux input and device adapters
 │   ├── retro-deck-policy/       bounded Lisp protocol and supervisor
@@ -274,7 +274,6 @@ retrodeck/
 │   ├── libretro_deck.cpp       NES, GB/GBC, and ZX host
 │   ├── chip8_deck.cpp          CHIP-8 frontend
 │   ├── chiptune_deck.cpp       GME and Ogg native music player
-│   ├── ten_seconds_deck.cpp    native timing game
 │   └── joypad_input.cpp        stable two-controller input
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
