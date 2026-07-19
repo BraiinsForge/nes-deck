@@ -1,0 +1,16 @@
+[package]
+name = "retro-deck-apps"
+description = "Native application models and renderers for Retro Deck"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+retro-deck-policy = { path = "../retro-deck-policy" }
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

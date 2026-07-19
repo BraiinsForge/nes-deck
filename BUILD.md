@@ -235,6 +235,7 @@ from the shared libretro frontend.
 ```text
 retrodeck/
 ├── crates/                      first-party Rust workspace
+│   ├── retro-deck-apps/         native application models and renderers
 │   ├── retro-deck-audio/        audio ownership state machine
 │   ├── retro-deck-policy/       bounded Lisp protocol and supervisor
 │   └── retro-deck-uploader/     authenticated ROM and appearance service
