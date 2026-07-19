@@ -5,6 +5,10 @@
 //! paths. The worker decides when to open and drop it using the lifecycle in
 //! `retro-deck-audio`.
 
+mod cue_worker;
+
+pub use cue_worker::{AudioGate, ToneCueEnqueue, ToneCueWorker, ToneWorkerError, ToneWorkerReport};
+
 use std::error::Error;
 use std::fmt;
 use std::fs::File;
