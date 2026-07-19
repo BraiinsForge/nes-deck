@@ -2,6 +2,7 @@
 members = [
   "crates/retro-deck-apps",
   "crates/retro-deck-audio",
+  "crates/retro-deck-emulator",
   "crates/retro-deck-platform",
   "crates/retro-deck-policy",
   "crates/retro-deck-uploader",

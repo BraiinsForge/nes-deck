@@ -377,6 +377,10 @@ name = "retro-deck-audio"
 version = "0.1.0"
 
 [[package]]
+name = "retro-deck-emulator"
+version = "0.1.0"
+
+[[package]]
 name = "retro-deck-platform"
 version = "0.1.0"
 dependencies = [
