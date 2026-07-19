@@ -1,6 +1,10 @@
 //! Deterministic 10 Seconds game state and bounded policy contract.
 
+mod render;
+
 use retro_deck_policy::{PolicyResponse, PolicySubmit, RequestId, Value};
+
+pub use render::{CANVAS_HEIGHT, CANVAS_WIDTH, RenderError, TimerFrame, rgb888_to_rgb565};
 
 const TARGET_CENTISECONDS: u16 = 1_000;
 const MAXIMUM_CENTISECONDS: u16 = 9_999;
