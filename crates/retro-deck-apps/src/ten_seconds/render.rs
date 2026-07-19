@@ -52,6 +52,15 @@ impl TimerFrame {
         Ok(frame)
     }
 
+    /// Redraw a complete view into the existing fixed allocation.
+    ///
+    /// This performs no allocation and discards every pixel from the previous
+    /// view before drawing the new one.
+    pub fn redraw(&mut self, view: TimerView) {
+        self.pixels.fill(BACKGROUND);
+        self.draw(view);
+    }
+
     /// Borrow tightly packed native-endian RGB565 pixels.
     #[must_use]
     #[allow(
@@ -410,5 +419,20 @@ mod tests {
                 2_612_144_829_727_006_395,
             ]
         );
+    }
+
+    #[test]
+    fn redraw_reuses_the_fixed_frame_allocation() {
+        let Some(mut frame) = TimerFrame::render(view(TimerPhase::Ready, 0)).ok() else {
+            return;
+        };
+        let allocation = frame.pixels.as_ptr();
+        let capacity = frame.pixels.capacity();
+
+        frame.redraw(view(TimerPhase::Running, 742));
+
+        assert_eq!(frame.pixels.as_ptr(), allocation);
+        assert_eq!(frame.pixels.capacity(), capacity);
+        assert_eq!(hash(&frame), 8_473_485_944_558_349_693);
     }
 }
