@@ -1,0 +1,33 @@
+[workspace]
+members = [
+  "crates/retro-deck-audio",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+license = "GPL-3.0-only"
+
+[workspace.lints.rust]
+missing_debug_implementations = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+allow_attributes_without_reason = "deny"
+clone_on_ref_ptr = "deny"
+dbg_macro = "deny"
+exit = "deny"
+float_cmp_const = "deny"
+indexing_slicing = "deny"
+large_include_file = "deny"
+missing_const_for_fn = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
