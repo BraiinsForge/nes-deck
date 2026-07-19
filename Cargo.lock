@@ -5,3 +5,7 @@ version = 4
 [[package]]
 name = "retro-deck-audio"
 version = "0.1.0"
+
+[[package]]
+name = "retro-deck-policy"
+version = "0.1.0"

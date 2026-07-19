@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/retro-deck-audio",
+  "crates/retro-deck-policy",
 ]
 resolver = "2"
 
