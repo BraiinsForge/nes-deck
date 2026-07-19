@@ -49,6 +49,8 @@ pub enum AudioAction {
 pub enum ReleaseReason {
     /// A finite sound ended normally and queued samples should drain.
     Finished,
+    /// A continuous source became silent and no longer needs its device.
+    Silent,
     /// The user muted audio. Release immediately.
     Muted,
     /// Playback was paused. Release immediately.
@@ -139,9 +141,9 @@ impl AudioLifecycle {
 
     /// Release active playback for the supplied reason.
     ///
-    /// Normal completion drains already queued samples. Muting, pausing,
-    /// hiding, and shutdown close immediately because the application no
-    /// longer has a valid reason to retain the device.
+    /// Normal finite completion drains already queued samples. Silence,
+    /// muting, pausing, hiding, and shutdown close immediately because the
+    /// application no longer has a valid reason to retain the device.
     pub const fn release(&mut self, reason: ReleaseReason) -> AudioAction {
         self.close_at_ms = None;
         if matches!(self.state, AudioState::Closed) {
@@ -250,6 +252,7 @@ mod tests {
     #[test]
     fn inactive_application_releases_immediately() {
         for reason in [
+            ReleaseReason::Silent,
             ReleaseReason::Muted,
             ReleaseReason::Paused,
             ReleaseReason::Hidden,
