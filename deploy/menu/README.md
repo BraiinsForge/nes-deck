@@ -14,8 +14,7 @@ Copy these files to the Deck without changing their basenames:
 | `games.tsv` | `/mnt/data/nes-deck/menu/games.tsv` |
 | `credits.tsv` | `/mnt/data/nes-deck/menu/credits.tsv` |
 | `palette.tsv` | `/mnt/data/nes-deck/menu/palette.tsv` |
-| `knekko-settings-icons.tsv` | `/mnt/data/nes-deck/menu/knekko-settings-icons.tsv` |
-| `uploader/settings-icons/` | `/mnt/data/nes-deck/menu/settings-icons/` |
+| `assets/settings-cog/gear-knekko-09.png` | `/mnt/data/nes-deck/menu/settings-icon.png` |
 | `compile-catalog.lisp` | `/mnt/data/nes-deck/menu/compile-catalog.lisp` |
 | `deck-menu-launcher` | `/mnt/data/nes-deck/menu/deck-menu-launcher` |
 | `deck-keyboard-quirks` | `/usr/sbin/deck-keyboard-quirks` |
@@ -188,21 +187,19 @@ written beside a process-specific temporary file and
 atomically renamed only after the complete catalog validates.
 
 The catalog also contains every dashboard color as a semantic 24-bit
-`#RRGGBB` value and a `:settings-icon` selected from the built-in pixel cogs or
-the complete knekko CC0 cog set.
-The compiler writes these to `palette.tsv`. A complete version-3 override at
-`/mnt/data/nes-deck/state/dashboard-palette.sexp` replaces the colors and icon.
-Existing version-2 color-only overrides remain valid and inherit the catalog's
-icon. The native dashboard validates the complete appearance before applying
-any of it. If the override, generated appearance, or checked-in fallback is
-malformed or missing, startup continues with the last usable layer or built-in
-defaults.
+`#RRGGBB` value. The compiler writes these to `palette.tsv`. A complete
+version-2 override at `/mnt/data/nes-deck/state/dashboard-palette.sexp`
+replaces the colors. Existing version-3 overrides remain valid: their colors
+are used and their retired cog choice is ignored. The native dashboard
+validates the complete palette before applying any of it. If the override,
+generated palette, or checked-in fallback is malformed or missing, startup
+continues with the last usable layer or built-in defaults.
 
 The checked-in `games.tsv` and `palette.tsv` files are known-good fallbacks.
-The first appearance row names the default settings icon, and the remaining
-rows contain the colors. If ECL, the source catalog, or generation is
-unavailable, the launcher uses those files and logs the reason. No shell
-evaluates catalog content.
+Every palette row contains one semantic color. If ECL, the source catalog, or
+generation is unavailable, the launcher uses those files and logs the reason.
+No shell evaluates catalog content. The settings button always uses the sole
+approved `gear-knekko-09` asset and an equivalent built-in fallback.
 
 Third-party artwork sources, licenses, and transformation details are recorded
 in [ASSETS.md](ASSETS.md).

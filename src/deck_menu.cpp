@@ -11,7 +11,7 @@
  *             --chiptune-player /absolute/path/to/chiptune-deck \
  *             --chiptune-directory /absolute/path/to/chiptunes \
  *             --manifest /absolute/path/to/games.tsv \
- *             --settings-icon-directory /absolute/path/to/settings-icons \
+ *             --settings-icon /absolute/path/to/settings-icon.png \
  *             --cover-directory /absolute/path/to/covers \
  *             --volume-state /absolute/path/to/volume.state \
  *             --brightness /sys/class/backlight/display-bl/brightness \
@@ -163,91 +163,24 @@ RgbColor kColorActive = {0x50, 0x33, 0x11};
 RgbColor kColorControlSurface = {0x30, 0x30, 0x30};
 RgbColor kColorMuted = {0x94, 0x94, 0x94};
 
-struct SettingsIconDefinition {
-  const char *name;
-  int size;
-  const char *rows[23];
+const int kSettingsIconSize = 23;
+
+// Exact four-shade fallback for the approved Knekko 09 PNG. A missing or
+// corrupt optional asset must not prevent the dashboard from starting.
+const char *const kSettingsIconFallback[kSettingsIconSize] = {
+    "..........000..........", ".........03320.........",
+    "...000...03220...000...", "..0333000222220003220..",
+    "..0322222222222232220..", "..0322222222222222210..",
+    "...03222100000222210...", "...0222100.1.0022220...",
+    "...022100..1..002220...", ".0022200...1...0022200.",
+    "0332220...010...0222220", "03222201111011110222220",
+    "0222220...010...0222210", ".0022200...1...0022200.",
+    "...022200..1..003220...", "...0222200.1.0032220...",
+    "...03222200000322220...", "..0322222222222222220..",
+    "..0222222222222222220..", "..0221000222220003110..",
+    "...000...02220...000...", ".........02210.........",
+    "..........000..........",
 };
-
-const SettingsIconDefinition kSettingsIconDefinitions[] = {
-    {"gear-classic", 9,
-     {"..##.##..", ".#######.", "###...###", "##.....##",
-      "##.....##", "##.....##", "###...###", ".#######.",
-      "..##.##.."}},
-    {"gear-square", 9,
-     {".##...##.", ".##...##.", "#########", "##.....##",
-      "##.....##", "##.....##", "#########", ".##...##.",
-      ".##...##."}},
-    {"gear-diamond", 9,
-     {"....#....", "..#####..", ".##...##.", "##.....##",
-      "#.......#", "##.....##", ".##...##.", "..#####..",
-      "....#...."}},
-    {"gear-eight", 9,
-     {".##...##.", "###...###", ".#######.", "..#...#..",
-      "..#...#..", "..#...#..", ".#######.", "###...###",
-      ".##...##."}},
-    {"gear-spoke", 9,
-     {"...###...", ".#.###.#.", "..#####..", "###.#.###",
-      "####.####", "###.#.###", "..#####..", ".#.###.#.",
-      "...###..."}},
-    {"gear-ring", 9,
-     {"...###...", ".#######.", "###...###", "##.....##",
-      "##.....##", "##.....##", "###...###", ".#######.",
-      "...###..."}},
-    {"gear-cross", 9,
-     {"...###...", "...###...", "..#####..", "###...###",
-      "###...###", "###...###", "..#####..", "...###...",
-      "...###..."}},
-    {"gear-compact", 9,
-     {".........", "...###...", "..#####..", ".##...##.",
-      ".##...##.", ".##...##.", "..#####..", "...###...",
-      "........."}},
-    {"gear-heavy", 9,
-     {".###.###.", "#########", "###...###", "##.....##",
-      "##.....##", "##.....##", "###...###", "#########",
-      ".###.###."}},
-    {"gear-rivet", 9,
-     {"..#...#..", ".#######.", "##.#.#.##", ".#.....#.",
-      ".#.....#.", ".#.....#.", "##.#.#.##", ".#######.",
-      "..#...#.."}},
-    {"gear-outline", 9,
-     {"..##.##..", "..#...#..", "##.###.##", "#.#...#.#",
-      "#.#...#.#", "#.#...#.#", "##.###.##", "..#...#..",
-      "..##.##.."}},
-    {"gear-steel-outline", 23,
-     {".......................", ".......#.......#.......",
-      ".......##.....##.......", ".......####.####.......",
-      ".......#########.......", "......###########......",
-      "......###.....###......", "..######.......######..",
-      "..#####.........#####..", "...###...........###...",
-      "....##...........##....", ".....#...........#.....",
-      "....##...........##....", "...###...........###...",
-      "..#####.........#####..", "..######.......######..",
-      "......###.....###......", "......###########......",
-      ".......#########.......", ".......####.####.......",
-      ".......##.....##.......", ".......#.......#.......",
-      "......................."}},
-};
-
-const size_t kLegacySettingsIconDefinitionCount =
-    sizeof(kSettingsIconDefinitions) / sizeof(kSettingsIconDefinitions[0]);
-
-struct KnekkoSettingsIconDefinition {
-  const char *name;
-  const char *filename;
-  int size;
-};
-
-#include "knekko_settings_icons_generated.inc"
-
-const size_t kKnekkoSettingsIconDefinitionCount =
-    sizeof(kKnekkoSettingsIconDefinitions) /
-    sizeof(kKnekkoSettingsIconDefinitions[0]);
-const size_t kSettingsIconDefinitionCount =
-    kLegacySettingsIconDefinitionCount +
-    kKnekkoSettingsIconDefinitionCount;
-const size_t kDefaultSettingsIcon = 11;
-size_t gSettingsIcon = kDefaultSettingsIcon;
 
 struct SettingsIconImage {
   int size;
@@ -268,27 +201,6 @@ struct SettingsIconImage {
 };
 
 SettingsIconImage gSettingsIconImage;
-
-const char *settings_icon_name(size_t index) {
-  if (index < kLegacySettingsIconDefinitionCount)
-    return kSettingsIconDefinitions[index].name;
-  index -= kLegacySettingsIconDefinitionCount;
-  if (index < kKnekkoSettingsIconDefinitionCount)
-    return kKnekkoSettingsIconDefinitions[index].name;
-  return NULL;
-}
-
-bool settings_icon_index(const std::string &name, size_t *result) {
-  for (size_t index = 0; index < kSettingsIconDefinitionCount; ++index) {
-    const char *icon_name = settings_icon_name(index);
-    if (icon_name && name == icon_name) {
-      if (result)
-        *result = index;
-      return true;
-    }
-  }
-  return false;
-}
 
 struct PaletteToken {
   const char *name;
@@ -331,8 +243,20 @@ bool reboot_confirmation_active(int64_t deadline, int64_t now) {
 void reset_dashboard_palette() {
   for (size_t index = 0; index < kPaletteTokenCount; ++index)
     *kPaletteTokens[index].value = kPaletteTokens[index].default_value;
-  gSettingsIcon = kDefaultSettingsIcon;
   gSettingsIconImage.clear();
+}
+
+bool valid_legacy_settings_icon(const std::string &name) {
+  if (name.empty() || name.size() > 64)
+    return false;
+  for (size_t index = 0; index < name.size(); ++index) {
+    const unsigned char character =
+        static_cast<unsigned char>(name[index]);
+    if (!((character >= 'a' && character <= 'z') ||
+          (character >= '0' && character <= '9') || character == '-'))
+      return false;
+  }
+  return true;
 }
 
 bool load_dashboard_palette(const std::string &path, std::string *error) {
@@ -362,8 +286,7 @@ bool load_dashboard_palette(const std::string &path, std::string *error) {
 
   std::vector<RgbColor> values(kPaletteTokenCount, RgbColor{0, 0, 0});
   std::vector<bool> seen(kPaletteTokenCount, false);
-  size_t settings_icon = kDefaultSettingsIcon;
-  bool saw_settings_icon = false;
+  bool saw_legacy_settings_icon = false;
   std::string line;
   size_t line_number = 0;
   while (std::getline(input, line)) {
@@ -380,19 +303,13 @@ bool load_dashboard_palette(const std::string &path, std::string *error) {
       return false;
     }
     if (fields[0] == "settings-icon") {
-      if (saw_settings_icon) {
+      if (saw_legacy_settings_icon || !valid_legacy_settings_icon(fields[1])) {
         if (error)
-          *error = "duplicate settings icon on line " +
+          *error = "invalid legacy settings icon on line " +
                    std::to_string(line_number);
         return false;
       }
-      if (!settings_icon_index(fields[1], &settings_icon)) {
-        if (error)
-          *error = "unknown settings icon on line " +
-                   std::to_string(line_number);
-        return false;
-      }
-      saw_settings_icon = true;
+      saw_legacy_settings_icon = true;
       continue;
     }
     size_t token = 0;
@@ -434,7 +351,6 @@ bool load_dashboard_palette(const std::string &path, std::string *error) {
   }
   for (size_t token = 0; token < kPaletteTokenCount; ++token)
     *kPaletteTokens[token].value = values[token];
-  gSettingsIcon = settings_icon;
   return true;
 }
 
@@ -713,26 +629,13 @@ bool load_png_cover_image(const std::string &path,
   return true;
 }
 
-bool load_selected_settings_icon(const std::string &directory,
-                                 std::string *error) {
+bool load_settings_icon(const std::string &path, std::string *error) {
   gSettingsIconImage.clear();
-  if (gSettingsIcon < kLegacySettingsIconDefinitionCount)
-    return true;
-  if (!is_absolute_path(directory)) {
+  if (!is_absolute_path(path)) {
     if (error)
-      *error = "settings icon directory must be an absolute path";
+      *error = "settings icon path must be absolute";
     return false;
   }
-  const size_t definition_index =
-      gSettingsIcon - kLegacySettingsIconDefinitionCount;
-  if (definition_index >= kKnekkoSettingsIconDefinitionCount) {
-    if (error)
-      *error = "selected settings icon is outside the asset catalog";
-    return false;
-  }
-  const KnekkoSettingsIconDefinition &definition =
-      kKnekkoSettingsIconDefinitions[definition_index];
-  const std::string path = directory + "/" + definition.filename;
   const int descriptor =
       open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
   if (descriptor < 0) {
@@ -769,8 +672,8 @@ bool load_selected_settings_icon(const std::string &directory,
     fclose(file);
     return false;
   }
-  if (image.width != static_cast<png_uint_32>(definition.size) ||
-      image.height != static_cast<png_uint_32>(definition.size)) {
+  if (image.width != static_cast<png_uint_32>(kSettingsIconSize) ||
+      image.height != static_cast<png_uint_32>(kSettingsIconSize)) {
     png_image_free(&image);
     fclose(file);
     if (error)
@@ -794,8 +697,8 @@ bool load_selected_settings_icon(const std::string &directory,
   }
 
   const size_t pixel_count =
-      static_cast<size_t>(definition.size * definition.size);
-  gSettingsIconImage.size = definition.size;
+      static_cast<size_t>(kSettingsIconSize * kSettingsIconSize);
+  gSettingsIconImage.size = kSettingsIconSize;
   gSettingsIconImage.pixels.resize(pixel_count);
   gSettingsIconImage.alpha.resize(pixel_count);
   for (size_t pixel = 0; pixel < pixel_count; ++pixel) {
@@ -1066,49 +969,41 @@ uint16_t blend_rgb565(uint16_t foreground, uint16_t background,
 }
 
 void draw_settings_icon(Canvas *canvas, const Rect &bounds, uint16_t color) {
-  if (gSettingsIcon >= kLegacySettingsIconDefinitionCount &&
-      gSettingsIconImage.loaded()) {
-    const int target_size =
-        std::max(1, std::min(50, std::min(bounds.width, bounds.height)));
-    const int left = bounds.x + (bounds.width - target_size) / 2;
-    const int top = bounds.y + (bounds.height - target_size) / 2;
-    for (int y = 0; y < target_size; ++y) {
-      const int source_y = y * gSettingsIconImage.size / target_size;
-      for (int x = 0; x < target_size; ++x) {
-        const int source_x = x * gSettingsIconImage.size / target_size;
-        const size_t source = static_cast<size_t>(
-            source_y * gSettingsIconImage.size + source_x);
-        const unsigned int alpha = gSettingsIconImage.alpha[source];
-        if (alpha != 0) {
-          uint16_t &destination =
-              (*canvas)[static_cast<size_t>(top + y) * kLogicalWidth + left +
-                        x];
-          destination =
-              alpha == 255
-                  ? gSettingsIconImage.pixels[source]
-                  : blend_rgb565(gSettingsIconImage.pixels[source],
-                                 destination, alpha);
+  (void)color;
+  const int target_size =
+      std::max(1, std::min(50, std::min(bounds.width, bounds.height)));
+  const int left = bounds.x + (bounds.width - target_size) / 2;
+  const int top = bounds.y + (bounds.height - target_size) / 2;
+  const bool loaded = gSettingsIconImage.loaded();
+  const uint16_t fallback_colors[] = {
+      RgbColor{0, 0, 0}.pixel(), RgbColor{46, 46, 46}.pixel(),
+      RgbColor{114, 114, 114}.pixel(), RgbColor{160, 160, 160}.pixel(),
+  };
+  for (int y = 0; y < target_size; ++y) {
+    const int source_y = y * kSettingsIconSize / target_size;
+    for (int x = 0; x < target_size; ++x) {
+      const int source_x = x * kSettingsIconSize / target_size;
+      const size_t source =
+          static_cast<size_t>(source_y * kSettingsIconSize + source_x);
+      unsigned int alpha = 0;
+      uint16_t foreground = 0;
+      if (loaded) {
+        alpha = gSettingsIconImage.alpha[source];
+        foreground = gSettingsIconImage.pixels[source];
+      } else {
+        const char shade = kSettingsIconFallback[source_y][source_x];
+        if (shade != '.') {
+          alpha = 255;
+          foreground = fallback_colors[static_cast<size_t>(shade - '0')];
         }
       }
-    }
-    return;
-  }
-  const size_t definition =
-      gSettingsIcon < kLegacySettingsIconDefinitionCount
-          ? gSettingsIcon
-          : kDefaultSettingsIcon;
-  const SettingsIconDefinition &icon = kSettingsIconDefinitions[definition];
-  const int pixel =
-      std::max(1, std::min(4, std::min(bounds.width / icon.size,
-                                      bounds.height / icon.size)));
-  const int left = bounds.x + (bounds.width - icon.size * pixel) / 2;
-  const int top = bounds.y + (bounds.height - icon.size * pixel) / 2;
-  for (int row = 0; row < icon.size; ++row) {
-    for (int column = 0; column < icon.size; ++column) {
-      if (icon.rows[row][column] == '#')
-        fill_rect(canvas,
-                  Rect{left + column * pixel, top + row * pixel, pixel, pixel},
-                  color);
+      if (alpha == 0)
+        continue;
+      uint16_t &destination =
+          (*canvas)[static_cast<size_t>(top + y) * kLogicalWidth + left + x];
+      destination = alpha == 255
+                        ? foreground
+                        : blend_rgb565(foreground, destination, alpha);
     }
   }
 }
@@ -3542,7 +3437,7 @@ struct Options {
   std::string manifest;
   std::string credits;
   std::string palette;
-  std::string settings_icon_directory;
+  std::string settings_icon;
   std::string cover_directory;
   std::string volume_state;
   std::string brightness;
@@ -3580,7 +3475,7 @@ void print_usage(const char *program) {
                "--deck-game PATH --chiptune-player PATH "
                "--chiptune-directory PATH --manifest PATH "
                "--credits PATH --palette PATH "
-               "--settings-icon-directory PATH "
+               "--settings-icon PATH "
                "--cover-directory PATH "
                "--volume-state PATH "
                "--brightness PATH --brightness-max PATH "
@@ -3636,7 +3531,7 @@ bool parse_options(int argc, char **argv, Options *options,
                argument == "--manifest" ||
                argument == "--credits" ||
                argument == "--palette" ||
-               argument == "--settings-icon-directory" ||
+               argument == "--settings-icon" ||
                argument == "--cover-directory" ||
                argument == "--volume-state" ||
                argument == "--brightness" ||
@@ -3670,8 +3565,8 @@ bool parse_options(int argc, char **argv, Options *options,
         destination = &options->credits;
       else if (argument == "--palette")
         destination = &options->palette;
-      else if (argument == "--settings-icon-directory")
-        destination = &options->settings_icon_directory;
+      else if (argument == "--settings-icon")
+        destination = &options->settings_icon;
       else if (argument == "--cover-directory")
         destination = &options->cover_directory;
       else if (argument == "--volume-state")
@@ -3735,7 +3630,7 @@ bool parse_options(int argc, char **argv, Options *options,
       options->chiptune_player.empty() || options->chiptune_directory.empty() ||
       options->manifest.empty() || options->credits.empty() ||
       options->palette.empty() ||
-      options->settings_icon_directory.empty() ||
+      options->settings_icon.empty() ||
       options->cover_directory.empty() ||
       options->volume_state.empty() || options->brightness.empty() ||
       options->brightness_max.empty() || options->brightness_state.empty() ||
@@ -3747,7 +3642,7 @@ bool parse_options(int argc, char **argv, Options *options,
                "--chip8-emulator, --deck-game, --chiptune-player, "
                "--chiptune-directory, --manifest, "
                "--credits, --palette, "
-               "--settings-icon-directory, "
+               "--settings-icon, "
                "--cover-directory, --volume-state, --brightness, "
                "--brightness-max, --brightness-state, "
                "--keymap-state, --terminal, --wifi-helper, and "
@@ -3776,15 +3671,14 @@ int application_main(const Options &options) {
       make_project_credits_crawl(project_credits);
   const bool reduced_credits_motion =
       std::getenv("RETRO_DECK_REDUCED_MOTION") != NULL;
-  if (!is_absolute_path(options.settings_icon_directory)) {
-    std::cerr << "deck-menu: settings icon directory must be an absolute path"
+  if (!is_absolute_path(options.settings_icon)) {
+    std::cerr << "deck-menu: settings icon path must be absolute"
               << std::endl;
     return 1;
   }
-  if (!load_selected_settings_icon(options.settings_icon_directory, &error)) {
+  if (!load_settings_icon(options.settings_icon, &error)) {
     std::cerr << "deck-menu: " << error
               << "; using the built-in settings icon" << std::endl;
-    gSettingsIcon = kDefaultSettingsIcon;
     gSettingsIconImage.clear();
     error.clear();
   }

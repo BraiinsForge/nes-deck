@@ -34,7 +34,7 @@ UPLOAD_DIR=$BASE/uploads
 UPLOAD_MANIFEST=$UPLOAD_DIR/games.tsv
 COMBINED_MANIFEST=$STATE_DIR/combined-games.tsv
 COVER_DIR=$BASE/covers
-SETTINGS_ICON_DIR=$MENU_DIR/settings-icons
+SETTINGS_ICON=$MENU_DIR/settings-icon.png
 COVER_FETCHER=$MENU_DIR/fetch-covers
 VOLUME_STATE=$STATE_DIR/menu-volume.state
 BRIGHTNESS_STATE=$STATE_DIR/menu-brightness.state
@@ -332,6 +332,6 @@ exec "$MENU" \
 	--manifest "$manifest" \
 	--credits "$CREDITS" \
 	--palette "$palette" \
-	--settings-icon-directory "$SETTINGS_ICON_DIR" \
+		--settings-icon "$SETTINGS_ICON" \
 	--cover-directory "$COVER_DIR" \
 	>> "$LOG_FILE" 2>&1

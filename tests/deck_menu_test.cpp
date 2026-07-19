@@ -1,5 +1,4 @@
 #include <iterator>
-#include <set>
 
 #define main deck_menu_cli_main
 #include "../src/deck_menu.cpp"
@@ -103,9 +102,8 @@ int main() {
   expect(load_dashboard_palette(palette_path, &error) &&
              kColorAccent.red == 0x12 && kColorAccent.green == 0x34 &&
              kColorAccent.blue == 0x56 && kColorMuted.red == 0x65 &&
-             kColorMuted.green == 0x43 && kColorMuted.blue == 0x21 &&
-             gSettingsIcon == 2,
-         "complete full RGB dashboard appearance loads");
+             kColorMuted.green == 0x43 && kColorMuted.blue == 0x21,
+         "complete full RGB dashboard appearance loads and ignores the legacy cog");
   const std::string bad_palette = "background\t#12345G\n";
   expect(write_file(bad_palette_path, bad_palette.data(), bad_palette.size()),
          "write invalid dashboard palette fixture");
@@ -115,14 +113,14 @@ int main() {
              kColorAccent.blue == 0x56,
          "invalid palette is rejected without partially changing colors");
   std::string bad_icon_palette = palette_fixture;
-  bad_icon_palette.replace(14, std::strlen("gear-diamond"), "gear-nope");
+  bad_icon_palette.replace(14, std::strlen("gear-diamond"), "gear_nope");
   expect(write_file(bad_palette_path, bad_icon_palette.data(),
                     bad_icon_palette.size()),
          "write invalid settings icon fixture");
   error.clear();
   expect(!load_dashboard_palette(bad_palette_path, &error) &&
-             gSettingsIcon == 2 && kColorAccent.red == 0x12,
-         "invalid settings icon is rejected without partially changing appearance");
+             kColorAccent.red == 0x12,
+         "invalid legacy settings icon is rejected without changing colors");
   reset_dashboard_palette();
 
   expect(menu_gamepad_key_to_button(BTN_THUMB2) == kMenuPadConfirm &&
@@ -726,63 +724,24 @@ int main() {
     tab_games.push_back(fourth_nes);
   }
 
-  std::set<uint64_t> settings_icon_hashes;
-  for (size_t icon = 0; icon < kLegacySettingsIconDefinitionCount; ++icon) {
-    Canvas icon_canvas(static_cast<size_t>(kLogicalWidth * kLogicalHeight), 0);
-    gSettingsIcon = icon;
-    draw_settings_icon(&icon_canvas, Rect{0, 0, 56, 56}, 0xffff);
-    uint64_t hash = 1469598103934665603ULL;
-    for (size_t pixel = 0; pixel < icon_canvas.size(); ++pixel) {
-      hash ^= icon_canvas[pixel];
-      hash *= 1099511628211ULL;
-    }
-    if (!settings_icon_hashes.insert(hash).second)
-      std::cerr << "duplicate settings icon rendering: "
-                << settings_icon_name(icon) << std::endl;
-  }
-  expect(kLegacySettingsIconDefinitionCount == 12 &&
-             settings_icon_hashes.size() ==
-                 kLegacySettingsIconDefinitionCount,
-         "all twelve built-in pixel cogs render distinctly");
-  char settings_icon_directory[PATH_MAX] = {};
-  expect(realpath("uploader/settings-icons", settings_icon_directory) != NULL,
-         "resolve the source settings icon directory");
-  std::set<uint64_t> source_icon_hashes;
-  if (settings_icon_directory[0] != '\0') {
-    for (size_t icon = kLegacySettingsIconDefinitionCount;
-         icon < kSettingsIconDefinitionCount; ++icon) {
-      Canvas icon_canvas(static_cast<size_t>(kLogicalWidth * kLogicalHeight),
-                         0);
-      gSettingsIcon = icon;
-      error.clear();
-      const bool loaded =
-          load_selected_settings_icon(settings_icon_directory, &error);
-      if (!loaded)
-        std::cerr << "source settings icon failed: "
-                  << settings_icon_name(icon) << ": " << error << std::endl;
-      expect(loaded, "load a source settings icon");
-      draw_settings_icon(&icon_canvas, Rect{0, 0, 56, 56}, 0xffff);
-      uint64_t hash = 1469598103934665603ULL;
-      for (size_t pixel = 0; pixel < icon_canvas.size(); ++pixel) {
-        hash ^= icon_canvas[pixel];
-        hash *= 1099511628211ULL;
-      }
-      if (!source_icon_hashes.insert(hash).second)
-        std::cerr << "duplicate source settings icon rendering: "
-                  << settings_icon_name(icon) << std::endl;
-    }
-  }
-  expect(kSettingsIconDefinitionCount == 48 &&
-             kKnekkoSettingsIconDefinitionCount == 36 &&
-             source_icon_hashes.size() ==
-                 kKnekkoSettingsIconDefinitionCount &&
-             std::strcmp(settings_icon_name(12), "gear-knekko-01") == 0 &&
-             std::strcmp(settings_icon_name(47), "gear-knekko-36") == 0,
-         "all 36 source cogs load and render distinctly");
-  expect(std::strcmp(kSettingsIconDefinitions[kDefaultSettingsIcon].name,
-                     "gear-steel-outline") == 0 &&
-             kSettingsIconDefinitions[kDefaultSettingsIcon].size == 23,
-         "the sourced 23-pixel cog is the native default");
+  char settings_icon_path[PATH_MAX] = {};
+  expect(realpath("assets/settings-cog/gear-knekko-09.png",
+                  settings_icon_path) != NULL,
+         "resolve the approved settings icon");
+  Canvas source_icon_canvas(
+      static_cast<size_t>(kLogicalWidth * kLogicalHeight), 0);
+  error.clear();
+  const bool settings_icon_loaded =
+      load_settings_icon(settings_icon_path, &error);
+  expect(settings_icon_loaded && gSettingsIconImage.size == kSettingsIconSize,
+         "load the approved settings icon");
+  draw_settings_icon(&source_icon_canvas, Rect{0, 0, 56, 56}, 0xffff);
+  gSettingsIconImage.clear();
+  Canvas fallback_icon_canvas(
+      static_cast<size_t>(kLogicalWidth * kLogicalHeight), 0);
+  draw_settings_icon(&fallback_icon_canvas, Rect{0, 0, 56, 56}, 0xffff);
+  expect(source_icon_canvas == fallback_icon_canvas,
+         "the built-in fallback exactly matches the approved settings icon");
   reset_dashboard_palette();
 
   render_menu(tab_games, "nes", 0, std::string(), &canvas, &menu_layout);
@@ -829,8 +788,8 @@ int main() {
   expect(menu_layout.settings_button.x == 1212 &&
              menu_layout.settings_button.y == 412 &&
              rect_contains_color(canvas, menu_layout.settings_button,
-                                 color_pixel(kColorFooter)),
-         "dim retro cog sits at the bottom-right inset");
+                                 RgbColor{114, 114, 114}.pixel()),
+         "approved retro cog sits at the bottom-right inset");
   expect(menu_layout.credits_button.x == 12 &&
              menu_layout.credits_button.y == 412 &&
              rect_contains_color(canvas, menu_layout.credits_button,
@@ -1145,7 +1104,7 @@ int main() {
       "--manifest",     "/tmp/games",
       "--credits",      "/tmp/credits",
       "--palette",      "/tmp/palette",
-      "--settings-icon-directory", "/tmp/settings-icons",
+      "--settings-icon", "/tmp/settings-icon.png",
       "--cover-directory", "/tmp/covers",
       "--volume-state", "/tmp/volume",      "--brightness",
       "/tmp/brightness", "--brightness-max", "/tmp/max-brightness",
@@ -1166,7 +1125,7 @@ int main() {
              options.wifi_helper == "/bin/echo" &&
              options.credits == "/tmp/credits" &&
              options.palette == "/tmp/palette" &&
-             options.settings_icon_directory == "/tmp/settings-icons" &&
+             options.settings_icon == "/tmp/settings-icon.png" &&
              options.wifi_status == "/var/run/deck-wifi/status" &&
              options.chiptune_player == "/bin/sleep" &&
              options.chiptune_directory == "/tmp/chiptunes" &&
