@@ -16,12 +16,13 @@ use super::{
     AudioGate, GATE_ACTIVE, GATE_MUTED, GATE_SHUTDOWN, OssError, OssPcm, OssProfile,
     PcmWriteOutcome, gate_release_reason, load_gate,
 };
+use crate::time::{FrameClock, FrameRate};
 
 const WAKE_QUEUE_CAPACITY: usize = 1;
 const ERROR_QUEUE_CAPACITY: usize = 8;
 const OPEN_RETRY_DELAY: Duration = Duration::from_secs(1);
-const STREAM_FRAMES_PER_SECOND: usize = 60;
-const MAXIMUM_STREAM_SAMPLES: usize = 192_000 / STREAM_FRAMES_PER_SECOND;
+const STREAM_FRAMES_PER_SECOND: u32 = 60;
+const MAXIMUM_STREAM_SAMPLES: usize = 192_000 / 60;
 const BASE_AMPLITUDE: i32 = 6_000;
 const WORKER_NAME: &str = "retro-deck-audio-stream";
 
@@ -451,6 +452,13 @@ fn run_worker<D: StreamDevice>(
 ) -> StreamWorkerReport {
     let mut state = StreamState::new();
     let mut buffer = [0_i16; MAXIMUM_STREAM_SAMPLES];
+    let Some(rate) = FrameRate::new(STREAM_FRAMES_PER_SECOND) else {
+        return StreamWorkerReport {
+            panicked: true,
+            ..StreamWorkerReport::default()
+        };
+    };
+    let mut clock = FrameClock::start(rate);
 
     loop {
         if controls.shutdown_requested() {
@@ -474,12 +482,34 @@ fn run_worker<D: StreamDevice>(
                 }
             }
         }
+        let wait = clock.wait_duration();
+        if !wait.is_zero() {
+            match wake_receiver.recv_timeout(wait) {
+                Ok(()) => continue,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    state.release(ReleaseReason::Shutdown, controls);
+                    return state.report;
+                }
+            }
+        }
         state.write_chunk(stream, controls, &mut buffer);
+        clock.complete_frame();
+        if state.device.is_none() && controls.playback_active() {
+            match wake_receiver.recv_timeout(OPEN_RETRY_DELAY) {
+                Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    state.release(ReleaseReason::Shutdown, controls);
+                    return state.report;
+                }
+            }
+        }
     }
 }
 
 fn stream_sample_count(rate: SampleRate) -> usize {
-    (usize::try_from(rate.get()).unwrap_or(MAXIMUM_STREAM_SAMPLES) / STREAM_FRAMES_PER_SECOND)
+    usize::try_from(rate.get() / STREAM_FRAMES_PER_SECOND)
+        .unwrap_or(MAXIMUM_STREAM_SAMPLES)
         .max(1)
 }
 
