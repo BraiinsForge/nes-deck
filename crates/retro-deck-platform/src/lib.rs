@@ -1,5 +1,6 @@
 //! Linux platform adapters kept separate from application state and policy.
 
+pub mod audio;
 pub mod display;
 pub mod input;
 pub mod wayland;

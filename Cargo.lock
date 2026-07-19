@@ -380,6 +380,7 @@ version = "0.1.0"
 dependencies = [
  "evdev",
  "memmap2",
+ "retro-deck-audio",
  "rustix",
  "wayland-client",
  "wayland-protocols-wlr",

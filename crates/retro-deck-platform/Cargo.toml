@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 evdev = "0.13.2"
 memmap2 = "0.9.11"
+retro-deck-audio = { path = "../retro-deck-audio" }
 rustix = { version = "1.1.4", features = ["event", "fs"] }
 wayland-client = "0.31.14"
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
