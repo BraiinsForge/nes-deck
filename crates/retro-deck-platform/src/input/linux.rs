@@ -12,8 +12,8 @@ use evdev::{AbsInfo, AbsoluteAxisCode, Device, EventSummary, KeyCode, Synchroniz
 use rustix::event::{PollFd, PollFlags, poll};
 
 use super::{
-    AxisRange, ControllerTracker, InputEvent, LOGICAL_HEIGHT, LOGICAL_WIDTH, PhysicalButton,
-    Player, TouchTracker,
+    AxisRange, ButtonSet, ControllerTracker, InputEvent, LOGICAL_HEIGHT, LOGICAL_WIDTH,
+    PhysicalButton, Player, TouchTracker,
 };
 use crate::time::duration_timespec;
 
@@ -138,7 +138,7 @@ pub struct InputDevices {
 ///
 /// Gameplay processes use this device set so the dashboard supervisor keeps
 /// receiving touchscreen reports for its hold-to-exit gesture.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ControllerDevices {
     controllers: Vec<ControllerDevice>,
 }
@@ -190,6 +190,15 @@ impl InputDevices {
     #[must_use]
     pub fn controller_count(&self) -> usize {
         self.controllers.len()
+    }
+
+    /// Current complete semantic button state for one stable controller slot.
+    #[must_use]
+    pub fn buttons(&self, player: Player) -> ButtonSet {
+        self.controllers
+            .iter()
+            .find(|controller| controller.player == player)
+            .map_or_else(ButtonSet::empty, |controller| controller.tracker.state())
     }
 
     /// Borrow all descriptors for integration into a platform event poll.
@@ -288,6 +297,15 @@ impl ControllerDevices {
     #[must_use]
     pub fn controller_count(&self) -> usize {
         self.controllers.len()
+    }
+
+    /// Current complete semantic button state for one stable controller slot.
+    #[must_use]
+    pub fn buttons(&self, player: Player) -> ButtonSet {
+        self.controllers
+            .iter()
+            .find(|controller| controller.player == player)
+            .map_or_else(ButtonSet::empty, |controller| controller.tracker.state())
     }
 
     /// Wait for controller or Wayland readiness until the runtime deadline.
@@ -699,5 +717,19 @@ mod tests {
             }
         );
         assert_eq!(output.len(), MAXIMUM_EVENTS_PER_DRAIN + 1);
+    }
+
+    #[test]
+    fn empty_controller_set_is_a_valid_gameplay_fallback() {
+        let mut controllers = ControllerDevices::default();
+        assert_eq!(controllers.controller_count(), 0);
+        assert_eq!(controllers.buttons(Player::One), ButtonSet::empty());
+        assert_eq!(controllers.buttons(Player::Two), ButtonSet::empty());
+        let mut events = Vec::new();
+        assert!(matches!(
+            controllers.drain_into(&mut events),
+            Ok(stats) if stats == DrainStats::default()
+        ));
+        assert!(events.is_empty());
     }
 }
