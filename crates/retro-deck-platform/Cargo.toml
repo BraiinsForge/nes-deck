@@ -8,6 +8,8 @@ license.workspace = true
 
 [dependencies]
 evdev = "0.13.2"
+wayland-client = "0.31.14"
+wayland-scanner = "0.31.10"
 
 [lib]
 path = "src/lib.rs"
