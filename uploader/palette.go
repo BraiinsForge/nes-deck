@@ -25,7 +25,7 @@ type settingsIconSpec struct {
 	rows     []string
 }
 
-const defaultSettingsIcon = "gear-steel-outline"
+const defaultSettingsIcon = "gear-knekko-09"
 
 var baseSettingsIconSpecs = []settingsIconSpec{
 	{name: "gear-classic", label: "Classic", rows: []string{"..##.##..", ".#######.", "###...###", "##.....##", "##.....##", "##.....##", "###...###", ".#######.", "..##.##.."}},
