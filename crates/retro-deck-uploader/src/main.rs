@@ -1,6 +1,6 @@
 use std::{env, io, process::ExitCode};
 
-use retro_deck_uploader::cli::{CliError, USAGE, execute, parse_args};
+use retro_deck_uploader::cli::{CliError, CommandOutcome, USAGE, execute, parse_args};
 
 fn main() -> ExitCode {
     let arguments = env::args_os().skip(1).collect::<Vec<_>>();
@@ -18,7 +18,18 @@ fn main() -> ExitCode {
     let input = io::stdin();
     let mut input = input.lock();
     match execute(&command, &mut input) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(outcome) => {
+            match outcome {
+                CommandOutcome::Completed => {}
+                CommandOutcome::SceneInstalled => {
+                    eprintln!("rom-uploader: Retro Deck scene installed");
+                }
+                CommandOutcome::SceneAlreadyPresent => {
+                    eprintln!("rom-uploader: Retro Deck scene already present");
+                }
+            }
+            ExitCode::SUCCESS
+        }
         Err(error) => {
             eprintln!("rom-uploader: {error}");
             ExitCode::FAILURE
