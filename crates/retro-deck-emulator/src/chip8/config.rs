@@ -79,6 +79,10 @@ impl Quirks {
         self
     }
 
+    pub(crate) const fn bits(self) -> u8 {
+        self.0
+    }
+
     const fn set(&mut self, quirk: Quirk, enabled: bool) {
         if enabled {
             self.0 |= quirk.mask();

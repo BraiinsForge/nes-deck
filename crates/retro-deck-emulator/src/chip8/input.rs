@@ -117,6 +117,10 @@ impl KeypadState {
         key < 16 && self.0 & (1_u16 << key) != 0
     }
 
+    pub(crate) const fn bits(self) -> u16 {
+        self.0
+    }
+
     const fn bind(&mut self, controls: u16, button: ControllerButton, key: u8) {
         if controls & button.mask() != 0 {
             self.0 |= 1_u16 << key;

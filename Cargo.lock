@@ -379,6 +379,9 @@ version = "0.1.0"
 [[package]]
 name = "retro-deck-emulator"
 version = "0.1.0"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "retro-deck-platform"
