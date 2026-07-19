@@ -11,6 +11,9 @@ const PROTOCOL_VERSION: i64 = 1;
 pub struct RequestId(i64);
 
 impl RequestId {
+    /// Identifier used when no valid request ID can be recovered.
+    pub const ZERO: Self = Self(0);
+
     /// Construct a valid request identifier.
     #[must_use]
     pub const fn new(value: i64) -> Option<Self> {
@@ -329,7 +332,7 @@ mod tests {
     use crate::Value;
 
     fn request_id(value: i64) -> RequestId {
-        RequestId::new(value).unwrap_or_else(|| RequestId::new(0).unwrap_or(RequestId(0)))
+        RequestId::new(value).unwrap_or(RequestId::ZERO)
     }
 
     #[test]

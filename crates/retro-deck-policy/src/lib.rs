@@ -6,8 +6,13 @@
 //! comments, ratios, floats, or character syntax.
 
 mod message;
+mod supervisor;
 
 pub use message::{MessageError, PolicyRequest, PolicyResponse, RequestId, decode_ready};
+pub use supervisor::{
+    PolicyClient, PolicyEvent, PolicyEventPoll, PolicySubmit, WorkerCommand, WorkerConfig,
+    WorkerFailure, WorkerStatus,
+};
 
 use std::fmt::{self, Write as _};
 
