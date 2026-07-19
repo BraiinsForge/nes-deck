@@ -2,6 +2,7 @@
 
 pub mod display;
 pub mod input;
+pub mod wayland;
 pub mod wayland_protocol;
 
 /// Logical width exposed by the Deck compositor and touchscreen.
