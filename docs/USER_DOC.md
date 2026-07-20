@@ -13,10 +13,10 @@ kept in the following documents:
 - [`deploy/uploader/README.md`](../deploy/uploader/README.md) describes the
   authenticated ROM and appearance interface and password rotation.
 
-The Rust and Common Lisp migration is in progress. The Rust ROM uploader is
-now authoritative for deployed management behavior. The dashboard,
-emulators, and native applications remain on their documented C++
-implementations until each replacement passes the gates in
+The Rust and Common Lisp migration is in progress. Rust is authoritative for
+the ROM uploader, CHIP-8, 10 Seconds, and the shared NES, GB/GBC, and ZX
+libretro host. The dashboard and chiptune player remain on their documented
+C++ implementations until their replacements pass the gates in
 [`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md). Device-local Lisp
 overrides are not yet an available release feature.
 

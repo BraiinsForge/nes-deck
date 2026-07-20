@@ -114,10 +114,10 @@ clean:
 tests/run-host-tests.sh
 ```
 
-It covers the NES mixer, APU noise, SRAM codec, controller and keyboard input,
-dashboard geometry and behavior, ROM catalog, cover cache, Wi-Fi profile
-helper, rlwrap-backed terminal lifecycle, shared framebuffer/audio runtime,
-timer configuration, and CHIP-8 core.
+It covers libretro lifecycle and persistence, controller and keyboard input,
+PCM queuing and resampling, dashboard geometry and behavior, ROM catalog,
+cover cache, Wi-Fi profile helper, rlwrap-backed terminal lifecycle, shared
+display/audio runtime, timer configuration, and the CHIP-8 core.
 
 The suite runs the strict Rust formatter, lints, and tests. Uploader coverage
 includes authentication, bounded HTTP and form parsing, ROM validation,
@@ -181,9 +181,9 @@ columns 0 through 479 are visible. Code must use the stride reported by
 
 The menu fills the complete 1280x480 logical surface. Emulators and the
 chiptune player use the shared scaler with a 16-pixel safe inset for the
-rounded display. fbterm uses a 1248x448 viewport for the same reason. Every
-frontend rejects unexpected geometry or color channel layouts rather than
-guessing.
+rounded display. fbterm uses a 1248x448 viewport for the same reason. The Rust
+emulator host validates every frame and adapts its nearest-neighbor source map
+when a core changes geometry without reallocating compositor buffers.
 
 On BMC compositor installations, Retro Deck is a fullscreen scene widget.
 The menu submits event-driven XRGB8888 shared-memory buffers through the Deck
@@ -232,13 +232,12 @@ overflow replaces the oldest sound. A streaming linear resampler keeps phase
 across callback boundaries and resets after a reported gap. The worker opens
 OSS only after PCM arrives, preserves the validated stream-ring priming
 sequence, drains and closes after 100 ms without source data, and resets
-immediately on mute, pause, hide, or shutdown. These rules become the live
-libretro behavior when the remaining C++ host is replaced.
+immediately on mute, pause, hide, or shutdown. NES, GB/GBC, and ZX all use
+this Rust audio path through the shared libretro host.
 
-The framebuffer has no page-flip API. Frontends build complete frames in
-cacheable memory and copy finished rows to fb0 to reduce tearing and protect
-audio timing. `RETRO_DECK_RUNTIME_DIAGNOSTICS=1` logs 60-frame timing windows
-from the shared libretro frontend.
+The Rust libretro host keeps three persistent Wayland SHM frame slots and
+drops a new presentation when all slots remain compositor-owned. It never
+waits for a buffer release in the input, emulation, or audio callback path.
 
 ## Source layout
 
@@ -281,10 +280,8 @@ retrodeck/
 │   ├── menu_text.cpp           path and display-text validation
 │   ├── menu_ui.cpp             shared dashboard drawing primitives
 │   ├── deck_runtime.cpp        video selection, audio, and frame clock
-│   ├── deck_wayland.cpp        shared-memory widget and game surfaces
-│   ├── libretro_deck.cpp       NES, GB/GBC, and ZX host
-│   ├── chiptune_deck.cpp       GME and Ogg native music player
-│   └── joypad_input.cpp        stable two-controller input
+│   ├── deck_wayland.cpp        legacy dashboard and chiptune Wayland path
+│   └── chiptune_deck.cpp       GME and Ogg native music player
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
 ├── vendor/emulators/           pinned emulator source and provenance

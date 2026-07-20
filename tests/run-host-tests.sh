@@ -43,13 +43,6 @@ compile_cpp_test() {
   "$work/$output"
 }
 
-compile_cpp_test tests/joypad_input_test.cpp joypad-input-test -pthread
-compile_cpp_test tests/joypad_input_zx_test.cpp joypad-input-zx-test -pthread
-
-fuse_src=$(nix eval --raw --impure --expr \
-  '(builtins.getFlake ("path:" + toString ./.)).inputs."fuse-src".outPath')
-compile_cpp_test tests/zx_keyboard_test.cpp zx-keyboard-test \
-  -Isrc -I"$fuse_src/src"
 compile_cpp_test tests/menu_text_test.cpp menu-text-test src/menu_text.cpp
 compile_cpp_test tests/menu_catalog_test.cpp menu-catalog-test \
   src/menu_catalog.cpp src/menu_io.cpp src/menu_text.cpp

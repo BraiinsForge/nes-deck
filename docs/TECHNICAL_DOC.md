@@ -4,18 +4,19 @@
 
 The current deployable system consists of static ARMv7 executables running on
 the Deck's OpenWrt userspace. Rust implements the CHIP-8 host, 10 Seconds game,
-authenticated ROM intake, Common Lisp policy boundary, and shared Wayland,
-input, timing, and lazy OSS audio layers. C++ remains in the dashboard,
-libretro hosts, legacy shared runtime, and chiptune player while those pieces
-are migrated. ECL provides the interactive Lisp program, runs the catalog
-compiler during activation, and loads bounded device-local behavior policy.
+authenticated ROM intake, the shared libretro host, Common Lisp policy
+boundary, and shared Wayland, input, timing, and lazy OSS audio layers. C++
+remains in the dashboard, its legacy shared runtime, and the chiptune player
+while those pieces are migrated. ECL provides the interactive Lisp program,
+runs the catalog compiler during activation, and loads bounded device-local
+behavior policy.
 
 The Rust audio foundation includes fixed-capacity PCM buffering, direct
 stereo-to-mono downmixing, callback-stable linear resampling, worker-side gain,
-and a lazy OSS stream worker. The deployed C++ libretro frontend still uses
-its legacy audio runtime until the host port is complete. The Rust worker is
-therefore tested platform capability, not yet a claim about live NES, GB/GBC,
-or ZX playback.
+and a lazy OSS stream worker. NES, GB/GBC, and ZX now use this worker through
+one Rust libretro host linked separately to each pinned upstream core. Audio
+callbacks only attempt a bounded queue operation; opening, priming, writing,
+and closing `/dev/dsp` stay on the worker thread.
 
 The BMC installation presents the dashboard as a scene widget. Games use a
 black fullscreen layer surface and a centered gameplay layer surface. The

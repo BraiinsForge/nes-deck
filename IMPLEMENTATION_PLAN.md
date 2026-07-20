@@ -130,9 +130,12 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   PCM path preserves the measured 32,768-to-32,000 Hz and
   48,000-to-47,328 Hz Deck corrections, stream-ring priming, bounded latency,
   and nonblocking callback contract.
-- Implement simple atomic save persistence and the remaining host wiring on
-  those shared adapters without carrying retired frontend formats forward.
-- Port the libretro host without changing pinned emulator implementations.
+- The Rust libretro host owns pinned-core lifecycle, input, adaptive
+  nearest-neighbor presentation, lazy audio, exact frame pacing, and bounded
+  native save persistence without retired frontend formats.
+- NES, GB/GBC, and ZX build as separate static ARMv7 outputs from the same
+  Rust host and pinned upstream archives. The superseded C++ host and its
+  direct-include tests have been removed.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
 
