@@ -7,6 +7,9 @@ use crate::{Action, Screen};
 const BURST_LIMIT: usize = 12;
 const BURST_WINDOW_MS: u64 = 1_000;
 const QUIET_RESET_MS: u64 = 1_000;
+const EXIT_HOLD_WIDTH: u16 = 96;
+const EXIT_HOLD_HEIGHT: u16 = 96;
+const EXIT_HOLD_MILLISECONDS: u64 = 2_000;
 
 /// Convert one committed controller edge to a pure dashboard action.
 ///
@@ -59,6 +62,98 @@ pub struct ControllerGuard {
     accepted: usize,
     last_edge_at: Option<u64>,
     suspended: bool,
+}
+
+/// Observable edge in the supervised top-left hold-to-exit gesture.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExitHoldEvent {
+    /// A clean contact began inside the exit target.
+    Started,
+    /// The contact ended or left the target before its deadline.
+    Cancelled,
+    /// The uninterrupted hold reached two seconds.
+    Completed,
+}
+
+/// Pure hold-to-exit recognizer that never reads a device or clock itself.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExitHold {
+    state: ExitHoldState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExitHoldState {
+    BlockedUntilRelease,
+    Ready,
+    Holding { started_at_ms: u64 },
+}
+
+impl ExitHold {
+    /// Start ready only when no contact was already present at discovery.
+    #[must_use]
+    pub const fn new(initially_down: bool) -> Self {
+        Self {
+            state: if initially_down {
+                ExitHoldState::BlockedUntilRelease
+            } else {
+                ExitHoldState::Ready
+            },
+        }
+    }
+
+    /// Advance the gesture from one committed logical touch state.
+    ///
+    /// The target is the top-left 96 by 96 logical pixels around the visible
+    /// cross. Leaving it while held cancels and requires a clean release.
+    #[must_use]
+    pub const fn update(
+        &mut self,
+        down: bool,
+        x: u16,
+        y: u16,
+        monotonic_ms: u64,
+    ) -> Option<ExitHoldEvent> {
+        let inside = down && x < EXIT_HOLD_WIDTH && y < EXIT_HOLD_HEIGHT;
+        match self.state {
+            ExitHoldState::BlockedUntilRelease => {
+                if !down {
+                    self.state = ExitHoldState::Ready;
+                }
+                None
+            }
+            ExitHoldState::Ready => {
+                if inside {
+                    self.state = ExitHoldState::Holding {
+                        started_at_ms: monotonic_ms,
+                    };
+                    Some(ExitHoldEvent::Started)
+                } else {
+                    None
+                }
+            }
+            ExitHoldState::Holding { started_at_ms } => {
+                if !inside {
+                    self.state = if down {
+                        ExitHoldState::BlockedUntilRelease
+                    } else {
+                        ExitHoldState::Ready
+                    };
+                    return Some(ExitHoldEvent::Cancelled);
+                }
+                if monotonic_ms.saturating_sub(started_at_ms) < EXIT_HOLD_MILLISECONDS {
+                    return None;
+                }
+                self.state = ExitHoldState::BlockedUntilRelease;
+                Some(ExitHoldEvent::Completed)
+            }
+        }
+    }
+}
+
+impl Default for ExitHold {
+    fn default() -> Self {
+        Self::new(false)
+    }
 }
 
 impl ControllerGuard {
@@ -167,7 +262,7 @@ impl TouchCommitter {
 mod tests {
     use retro_deck_platform::input::{Button, ButtonEdge};
 
-    use super::{ControllerGuard, TouchCommitter, controller_action};
+    use super::{ControllerGuard, ExitHold, ExitHoldEvent, TouchCommitter, controller_action};
     use crate::{Action, Screen};
 
     #[test]
@@ -258,5 +353,44 @@ mod tests {
         assert!(guard.accept(1_000));
         assert!(guard.accept(1_001));
         assert!(!guard.suspended());
+    }
+
+    #[test]
+    fn exit_hold_requires_two_seconds_inside_the_visible_corner_target() {
+        let mut hold = ExitHold::new(false);
+        assert_eq!(
+            hold.update(true, 40, 40, 1_000),
+            Some(ExitHoldEvent::Started)
+        );
+        assert_eq!(hold.update(true, 40, 40, 2_999), None);
+        assert_eq!(
+            hold.update(true, 40, 40, 3_000),
+            Some(ExitHoldEvent::Completed)
+        );
+        assert_eq!(hold.update(true, 40, 40, 4_000), None);
+        assert_eq!(hold.update(false, 40, 40, 4_001), None);
+        assert_eq!(
+            hold.update(true, 95, 95, 4_002),
+            Some(ExitHoldEvent::Started)
+        );
+    }
+
+    #[test]
+    fn exit_hold_rejects_launch_contacts_and_dragging_outside() {
+        let mut held_at_launch = ExitHold::new(true);
+        assert_eq!(held_at_launch.update(true, 20, 20, 10_000), None);
+        assert_eq!(held_at_launch.update(true, 20, 20, 20_000), None);
+        assert_eq!(held_at_launch.update(false, 20, 20, 20_001), None);
+        assert_eq!(
+            held_at_launch.update(true, 20, 20, 20_002),
+            Some(ExitHoldEvent::Started)
+        );
+        assert_eq!(
+            held_at_launch.update(true, 100, 20, 21_000),
+            Some(ExitHoldEvent::Cancelled)
+        );
+        assert_eq!(held_at_launch.update(true, 20, 20, 30_000), None);
+        assert_eq!(held_at_launch.update(false, 20, 20, 30_001), None);
+        assert_eq!(held_at_launch.update(true, 200, 200, 30_002), None);
     }
 }
