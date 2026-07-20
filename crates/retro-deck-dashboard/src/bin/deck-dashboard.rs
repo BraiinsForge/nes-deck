@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 use retro_deck_audio::{SampleRate, Volume};
 use retro_deck_config::{Catalog, MAXIMUM_CATALOG_BYTES, MAXIMUM_PALETTE_BYTES, Palette};
 use retro_deck_dashboard::{
-    Action, AssetPathError, Brightness, ControllerGuard, CreditsCrawl, DashboardAssetPaths,
-    DashboardAssets, DashboardAssetsError, DashboardFrame, DashboardModel, Intent, Keymap, MenuCue,
-    NetworkView, RenderError, Screen, SettingChange, SettingsView, TouchCommitter, VolumeState,
-    controller_action, menu_notes,
+    Action, ArtworkStore, AssetPathError, Brightness, ControllerGuard, CreditsCrawl,
+    DashboardAssetPaths, DashboardAssets, DashboardAssetsError, DashboardFrame, DashboardModel,
+    Intent, Keymap, MenuCue, NetworkView, RenderError, Screen, SettingChange, SettingsView,
+    TouchCommitter, VolumeState, controller_action, menu_notes,
 };
 use retro_deck_platform::audio::{AudioGate, ToneCueWorker, ToneWorkerReport};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
@@ -32,6 +32,7 @@ const BUSY_RETRY: Duration = Duration::from_millis(8);
 const CREDITS_FRAME: Duration = Duration::from_millis(40);
 const CONTROLLER_SCAN: Duration = Duration::from_secs(1);
 const CUE_SAMPLE_RATE: u32 = 44_100;
+const COVER_DIRECTORY: &str = "/mnt/data/nes-deck/covers";
 
 fn main() -> ExitCode {
     let command = match parse_arguments(env::args_os().skip(1)) {
@@ -206,6 +207,7 @@ struct DashboardRuntime {
     source_dimensions: Dimensions,
     model: DashboardModel,
     credits: CreditsCrawl,
+    artwork: ArtworkStore,
     palette: Palette,
     frame: DashboardFrame,
     touch: TouchCommitter,
@@ -236,8 +238,10 @@ impl DashboardRuntime {
             Brightness::new(60).map_err(|_| RuntimeError::InvalidDefaults)?,
             Keymap::Us,
         );
+        let artwork = load_artwork(assets.catalog().entries());
         let palette = *assets.palette();
-        let frame = DashboardFrame::render_menu(&model, &palette).map_err(RuntimeError::Render)?;
+        let frame = DashboardFrame::render_menu_with_artwork(&model, &palette, &artwork)
+            .map_err(RuntimeError::Render)?;
         let source_dimensions = source_dimensions()?;
         let presentation = WaylandPresentation::connect_widget(source_dimensions)
             .map_err(RuntimeError::Presentation)?;
@@ -258,6 +262,7 @@ impl DashboardRuntime {
             source_dimensions,
             model,
             credits: assets.credits().clone(),
+            artwork,
             palette,
             frame,
             touch: TouchCommitter::default(),
@@ -487,7 +492,10 @@ impl DashboardRuntime {
 
     fn redraw(&mut self) {
         match self.model.screen() {
-            Screen::Dashboard => self.frame.redraw_menu(&self.model, &self.palette),
+            Screen::Dashboard => {
+                self.frame
+                    .redraw_menu_with_artwork(&self.model, &self.palette, &self.artwork);
+            }
             Screen::Settings => self.frame.redraw_settings(
                 &self.model,
                 &self.palette,
@@ -518,6 +526,31 @@ impl DashboardRuntime {
     fn monotonic_ms(&self) -> u64 {
         elapsed_milliseconds(self.started_at)
     }
+}
+
+fn load_artwork(entries: &[retro_deck_config::CatalogEntry]) -> ArtworkStore {
+    let store = match ArtworkStore::load(COVER_DIRECTORY, entries) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("{APPLICATION}: {error}; continuing without cover art");
+            return ArtworkStore::default();
+        }
+    };
+    for issue in store.issues() {
+        eprintln!("{APPLICATION}: {issue}");
+    }
+    let report = store.report();
+    if report.capacity_skipped != 0 {
+        eprintln!(
+            "{APPLICATION}: skipped {} cover(s) after the decoded-art budget was full",
+            report.capacity_skipped
+        );
+    }
+    eprintln!(
+        "{APPLICATION}: loaded {} cached cover(s); {} missing and {} invalid",
+        report.loaded, report.missing, report.invalid
+    );
+    store
 }
 
 fn start_audio(volume: Volume, gate: AudioGate) -> Option<ToneCueWorker<MenuCue>> {
