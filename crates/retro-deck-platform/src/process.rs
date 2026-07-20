@@ -5,7 +5,7 @@ use std::fmt;
 use std::io;
 use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus};
+use std::process::{Child, ChildStdin, Command, ExitStatus};
 use std::time::{Duration, Instant};
 
 use rustix::process::{Pid, Signal, kill_process_group};
@@ -108,6 +108,15 @@ impl ManagedChild {
     )]
     pub fn program(&self) -> &Path {
         &self.program
+    }
+
+    /// Take the child's piped standard input exactly once.
+    ///
+    /// Returns `None` when the command did not request
+    /// [`std::process::Stdio::piped`], the pipe was already taken, or the child
+    /// has already been reaped.
+    pub fn take_stdin(&mut self) -> Option<ChildStdin> {
+        self.child.as_mut()?.stdin.take()
     }
 
     /// Ask the complete child process group to stop gracefully.
@@ -267,7 +276,8 @@ impl Error for ManagedChildError {
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -294,6 +304,29 @@ mod tests {
         let Some(mut child) = ManagedChild::spawn(&mut command).ok() else {
             return;
         };
+        let Some(exit) = wait_for_exit(&mut child, Instant::now()) else {
+            return;
+        };
+        assert!(exit.status().success());
+        assert_eq!(exit.cause(), ManagedExitCause::Natural);
+    }
+
+    #[test]
+    fn piped_stdin_is_taken_once_without_exposing_child_ownership() {
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("IFS= read -r value && test \"$value\" = bounded")
+            .stdin(Stdio::piped());
+        let Some(mut child) = ManagedChild::spawn(&mut command).ok() else {
+            return;
+        };
+        let Some(mut input) = child.take_stdin() else {
+            return;
+        };
+        assert!(child.take_stdin().is_none());
+        assert!(input.write_all(b"bounded\n").is_ok());
+        drop(input);
         let Some(exit) = wait_for_exit(&mut child, Instant::now()) else {
             return;
         };
