@@ -11,6 +11,7 @@ use std::fmt;
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::slice;
 use std::time::Duration;
 
 use retro_deck_audio::SampleRate;
@@ -18,7 +19,7 @@ use retro_deck_platform::display::Dimensions;
 
 use super::abi;
 use super::callbacks::{CallbackBinding, CallbackBindingError};
-use super::{Content, ControllerDevice, LibretroCore};
+use super::{Content, ControllerDevice, LibretroCore, MAXIMUM_SAVE_BYTES, MemoryKind};
 
 const MAXIMUM_FRAMES_PER_SECOND: f64 = 1_000.0;
 const MAXIMUM_SAMPLE_RATE: f64 = 192_000.0;
@@ -313,6 +314,44 @@ impl Error for CoreSessionError {
     }
 }
 
+/// Invalid memory region reported by an initialized libretro core.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CoreMemoryError {
+    /// A nonempty region has no address.
+    NullPointer {
+        /// Profile memory kind being queried.
+        kind: MemoryKind,
+        /// Nonzero byte count reported by the core.
+        bytes: usize,
+    },
+    /// A region exceeds the persistence allocation bound.
+    TooLarge {
+        /// Profile memory kind being queried.
+        kind: MemoryKind,
+        /// Byte count reported by the core.
+        bytes: usize,
+    },
+}
+
+impl fmt::Display for CoreMemoryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NullPointer { kind, bytes } => {
+                write!(
+                    formatter,
+                    "core reports {bytes} bytes of {kind:?} memory at a null address"
+                )
+            }
+            Self::TooLarge { kind, bytes } => write!(
+                formatter,
+                "core reports {bytes} bytes of {kind:?} memory; maximum is {MAXIMUM_SAVE_BYTES}"
+            ),
+        }
+    }
+}
+
+impl Error for CoreMemoryError {}
+
 #[derive(Clone, Copy, Debug)]
 struct CoreApi {
     set_environment: unsafe extern "C" fn(abi::EnvironmentCallback),
@@ -411,6 +450,47 @@ impl CoreLifecycle {
         unsafe { (self.api.get_system_av_info)(ptr::from_mut(&mut info)) };
         info
     }
+
+    fn memory_mut(&mut self, kind: MemoryKind) -> Result<Option<&mut [u8]>, CoreMemoryError> {
+        let Some((pointer, bytes)) = self.memory_region(kind)? else {
+            return Ok(None);
+        };
+        // SAFETY: The pinned loaded core reports `bytes` writable bytes for
+        // this region. The bound is far below `isize::MAX`, the pointer is
+        // non-null, and the mutable lifecycle borrow prevents `retro_run` or
+        // another region query while the slice is live.
+        Ok(Some(unsafe { slice::from_raw_parts_mut(pointer, bytes) }))
+    }
+
+    fn memory(&self, kind: MemoryKind) -> Result<Option<&[u8]>, CoreMemoryError> {
+        let Some((pointer, bytes)) = self.memory_region(kind)? else {
+            return Ok(None);
+        };
+        // SAFETY: The pinned loaded core reports `bytes` readable bytes for
+        // this region. The bound is far below `isize::MAX`, the pointer is
+        // non-null, and callers cannot mutably drive the lifecycle while this
+        // shared slice is live.
+        Ok(Some(unsafe { slice::from_raw_parts(pointer, bytes) }))
+    }
+
+    fn memory_region(&self, kind: MemoryKind) -> Result<Option<(*mut u8, usize)>, CoreMemoryError> {
+        let identifier = memory_identifier(kind);
+        // SAFETY: Content is loaded and the identifier is defined by API v1.
+        let bytes = unsafe { (self.api.get_memory_size)(identifier) };
+        if bytes == 0 {
+            return Ok(None);
+        }
+        if bytes > MAXIMUM_SAVE_BYTES {
+            return Err(CoreMemoryError::TooLarge { kind, bytes });
+        }
+        // SAFETY: Content is loaded and the identifier is defined by API v1.
+        let pointer = unsafe { (self.api.get_memory_data)(identifier) }.cast::<u8>();
+        if pointer.is_null() {
+            Err(CoreMemoryError::NullPointer { kind, bytes })
+        } else {
+            Ok(Some((pointer, bytes)))
+        }
+    }
 }
 
 impl Drop for CoreLifecycle {
@@ -432,6 +512,13 @@ fn content_directory(path: &Path) -> &Path {
     path.parent()
         .filter(|directory| !directory.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
+}
+
+const fn memory_identifier(kind: MemoryKind) -> c_uint {
+    match kind {
+        MemoryKind::SaveRam => abi::MEMORY_SAVE_RAM,
+        MemoryKind::Rtc => abi::MEMORY_RTC,
+    }
 }
 
 fn metadata(core: LibretroCore, info: abi::SystemInfo) -> CoreMetadata {
@@ -490,6 +577,10 @@ mod tests {
         av_info: abi::SystemAvInfo,
         content: Vec<u8>,
         controllers: Vec<(c_uint, c_uint)>,
+        save_ram: Vec<u8>,
+        rtc: Vec<u8>,
+        null_memory: Option<MemoryKind>,
+        reported_memory_size: Option<(MemoryKind, usize)>,
     }
 
     impl Default for FakeCore {
@@ -502,6 +593,10 @@ mod tests {
                 av_info: valid_av_info(),
                 content: Vec::new(),
                 controllers: Vec::new(),
+                save_ram: Vec::new(),
+                rtc: Vec::new(),
+                null_memory: None,
+                reported_memory_size: None,
             }
         }
     }
@@ -652,6 +747,51 @@ mod tests {
         assert!(CoreAvInfo::validate(raw).is_err());
     }
 
+    #[test]
+    fn memory_regions_are_empty_mutable_bounded_and_nonnull() {
+        let _session = serialize_test_sessions();
+        reset_fake();
+        let (_directory, content) = content_fixture(LibretroCore::Gambatte);
+        let mut session = CoreSession::open_with_api(LibretroCore::Gambatte, content, test_api())
+            .expect("valid fake core session");
+        assert!(matches!(
+            session.lifecycle.memory_mut(MemoryKind::SaveRam),
+            Ok(None)
+        ));
+
+        fake().save_ram = vec![0x11; 8];
+        let memory = session
+            .lifecycle
+            .memory_mut(MemoryKind::SaveRam)
+            .expect("valid memory")
+            .expect("nonempty memory");
+        memory.copy_from_slice(b"save ram");
+        assert_eq!(fake().save_ram, b"save ram");
+        assert!(matches!(
+            session.lifecycle.memory(MemoryKind::SaveRam),
+            Ok(Some(memory)) if memory == b"save ram"
+        ));
+
+        fake().reported_memory_size = Some((MemoryKind::Rtc, MAXIMUM_SAVE_BYTES + 1));
+        assert!(matches!(
+            session.lifecycle.memory(MemoryKind::Rtc),
+            Err(CoreMemoryError::TooLarge {
+                kind: MemoryKind::Rtc,
+                bytes
+            }) if bytes == MAXIMUM_SAVE_BYTES + 1
+        ));
+        fake().reported_memory_size = None;
+        fake().rtc = vec![0; 4];
+        fake().null_memory = Some(MemoryKind::Rtc);
+        assert!(matches!(
+            session.lifecycle.memory(MemoryKind::Rtc),
+            Err(CoreMemoryError::NullPointer {
+                kind: MemoryKind::Rtc,
+                bytes: 4
+            })
+        ));
+    }
+
     unsafe extern "C" fn fake_set_environment(_: abi::EnvironmentCallback) {
         fake().events.push("set environment");
     }
@@ -744,11 +884,39 @@ mod tests {
 
     const unsafe extern "C" fn fake_run() {}
 
-    const unsafe extern "C" fn fake_get_memory_data(_: c_uint) -> *mut c_void {
-        ptr::null_mut()
+    unsafe extern "C" fn fake_get_memory_data(identifier: c_uint) -> *mut c_void {
+        let mut state = fake();
+        let kind = memory_kind(identifier);
+        if state.null_memory == kind {
+            return ptr::null_mut();
+        }
+        match kind {
+            Some(MemoryKind::SaveRam) => state.save_ram.as_mut_ptr().cast(),
+            Some(MemoryKind::Rtc) => state.rtc.as_mut_ptr().cast(),
+            None => ptr::null_mut(),
+        }
     }
 
-    const unsafe extern "C" fn fake_get_memory_size(_: c_uint) -> usize {
-        0
+    unsafe extern "C" fn fake_get_memory_size(identifier: c_uint) -> usize {
+        let state = fake();
+        let kind = memory_kind(identifier);
+        if let Some((reported_kind, bytes)) = state.reported_memory_size {
+            if Some(reported_kind) == kind {
+                return bytes;
+            }
+        }
+        match kind {
+            Some(MemoryKind::SaveRam) => state.save_ram.len(),
+            Some(MemoryKind::Rtc) => state.rtc.len(),
+            None => 0,
+        }
+    }
+
+    const fn memory_kind(identifier: c_uint) -> Option<MemoryKind> {
+        match identifier {
+            abi::MEMORY_SAVE_RAM => Some(MemoryKind::SaveRam),
+            abi::MEMORY_RTC => Some(MemoryKind::Rtc),
+            _ => None,
+        }
     }
 }
