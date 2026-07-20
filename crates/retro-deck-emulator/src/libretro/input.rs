@@ -109,6 +109,12 @@ impl JoypadState {
     pub const fn contains(self, button: JoypadButton) -> bool {
         self.value(button.id()) != 0
     }
+
+    /// Combine simultaneous input sources into one joypad snapshot.
+    #[must_use]
+    pub const fn merged(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
 }
 
 const fn projected_bit(buttons: ButtonSet, button: JoypadButton) -> u16 {
@@ -171,5 +177,14 @@ mod tests {
             JoypadState::from_buttons(ButtonSet::empty()),
             JoypadState::default()
         );
+    }
+
+    #[test]
+    fn merged_snapshots_preserve_both_sources() {
+        let first = JoypadState::from_buttons(ButtonSet::empty().with(Button::A, true));
+        let second = JoypadState::from_buttons(ButtonSet::empty().with(Button::B, true));
+        let merged = first.merged(second);
+        assert!(merged.contains(JoypadButton::A));
+        assert!(merged.contains(JoypadButton::B));
     }
 }
