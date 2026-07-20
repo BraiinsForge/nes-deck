@@ -15,8 +15,9 @@ use std::ptr;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use retro_deck_platform::input::KeyboardState;
+use retro_deck_platform::{audio::PcmStreamWorker, input::KeyboardState};
 
+use super::audio::{AudioBatchError, stereo_frames};
 use super::environment::{Environment, EnvironmentError};
 use super::{
     JoypadState, LibretroCore, PixelFormat, abi, joypad_from_keyboard, medium_raw_key_for_retro,
@@ -35,6 +36,8 @@ struct CallbackState {
     player_one: JoypadState,
     player_two: JoypadState,
     keyboard: KeyboardState,
+    audio: Option<PcmStreamWorker>,
+    audio_batch_error: Option<AudioBatchError>,
 }
 
 /// Exclusive binding between one core session and its context-free callbacks.
@@ -68,6 +71,8 @@ impl CallbackBinding {
                 player_one: JoypadState::default(),
                 player_two: JoypadState::default(),
                 keyboard: KeyboardState::default(),
+                audio: None,
+                audio_batch_error: None,
             }),
             not_send_or_sync: PhantomData,
         };
@@ -113,6 +118,47 @@ impl CallbackBinding {
     )]
     pub(super) const fn input_state_callback(&self) -> abi::InputStateCallback {
         input_state_callback
+    }
+
+    #[allow(
+        clippy::unused_self,
+        reason = "requiring a live binding to obtain callbacks documents the ownership invariant"
+    )]
+    pub(super) const fn audio_sample_callback(&self) -> abi::AudioSampleCallback {
+        audio_sample_callback
+    }
+
+    #[allow(
+        clippy::unused_self,
+        reason = "requiring a live binding to obtain callbacks documents the ownership invariant"
+    )]
+    pub(super) const fn audio_sample_batch_callback(&self) -> abi::AudioSampleBatchCallback {
+        audio_sample_batch_callback
+    }
+
+    /// Attach the sole PCM worker, returning it unchanged if one is present.
+    #[must_use]
+    pub(super) fn attach_audio_worker(
+        &mut self,
+        worker: PcmStreamWorker,
+    ) -> Option<PcmStreamWorker> {
+        if self.state.audio.is_some() {
+            Some(worker)
+        } else {
+            self.state.audio = Some(worker);
+            None
+        }
+    }
+
+    /// Detach the worker so its diagnostics and shutdown remain explicit.
+    #[must_use]
+    pub(super) fn take_audio_worker(&mut self) -> Option<PcmStreamWorker> {
+        self.state.audio.take()
+    }
+
+    /// Take the first malformed batch observed since the previous call.
+    pub(super) fn take_audio_batch_error(&mut self) -> Option<AudioBatchError> {
+        self.state.audio_batch_error.take()
     }
 
     pub(super) fn set_input(
@@ -185,6 +231,44 @@ unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) ->
 
 const unsafe extern "C" fn input_poll_callback() {}
 
+unsafe extern "C" fn audio_sample_callback(left: i16, right: i16) {
+    CALLBACK_STATE.with(|slot| {
+        // SAFETY: A non-null slot points to the binding's live boxed state,
+        // and `CallbackBinding` cannot leave the installing thread.
+        let Some(state) = (unsafe { slot.get().as_ref() }) else {
+            return;
+        };
+        if let Some(worker) = &state.audio {
+            let _submission = worker.try_push_stereo(&[[left, right]]);
+        }
+    });
+}
+
+unsafe extern "C" fn audio_sample_batch_callback(data: *const i16, frames: usize) -> usize {
+    CALLBACK_STATE.with(|slot| {
+        // SAFETY: A non-null slot points to the binding's live boxed state,
+        // and `CallbackBinding` cannot leave the installing thread.
+        let Some(state) = (unsafe { slot.get().as_mut() }) else {
+            return frames;
+        };
+        // SAFETY: The trusted core owns this callback extent. The helper
+        // rejects null, unaligned, and unreasonably large batches before use.
+        match unsafe { stereo_frames(data, frames) } {
+            Ok(samples) => {
+                if let Some(worker) = &state.audio {
+                    let _submission = worker.try_push_stereo(samples);
+                }
+            }
+            Err(error) => {
+                if state.audio_batch_error.is_none() {
+                    state.audio_batch_error = Some(error);
+                }
+            }
+        }
+        frames
+    })
+}
+
 unsafe extern "C" fn input_state_callback(
     port: c_uint,
     device: c_uint,
@@ -225,7 +309,9 @@ unsafe extern "C" fn input_state_callback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use retro_deck_audio::{SampleRate, Volume};
     use retro_deck_platform::input::{Button, ButtonSet, MediumRawKey};
+    use std::ptr;
     use std::sync::{Mutex, MutexGuard};
     use std::thread;
 
@@ -382,5 +468,56 @@ mod tests {
         assert_eq!(unsafe { callback(1, abi::DEVICE_JOYPAD, 0, 0) }, 1);
         // SAFETY: The poll callback has no parameters or side effects.
         unsafe { binding.input_poll_callback()() };
+    }
+
+    #[test]
+    fn audio_callbacks_consume_disabled_and_malformed_batches() {
+        let _test_session = serialize_sessions();
+        let mut binding = CallbackBinding::install(LibretroCore::Gambatte, Path::new("/roms/gb"))
+            .expect("callback binding");
+        let batch = binding.audio_sample_batch_callback();
+        let samples = [1_i16, -1, 2, -2];
+        // SAFETY: `samples` contains two aligned stereo frames.
+        assert_eq!(unsafe { batch(samples.as_ptr(), 2) }, 2);
+        // SAFETY: A null nonempty batch is rejected before dereference.
+        assert_eq!(unsafe { batch(ptr::null(), 7) }, 7);
+        // SAFETY: The callback rejects this excessive size before dereference.
+        assert_eq!(unsafe { batch(samples.as_ptr(), 65_537) }, 65_537);
+        assert_eq!(
+            binding.take_audio_batch_error(),
+            Some(AudioBatchError::NullData)
+        );
+        assert_eq!(binding.take_audio_batch_error(), None);
+
+        let single = binding.audio_sample_callback();
+        // SAFETY: The single-frame callback has no pointer parameters.
+        unsafe { single(i16::MIN, i16::MAX) };
+        drop(binding);
+        // SAFETY: A stale callback consumes without accessing callback state.
+        assert_eq!(unsafe { batch(ptr::null(), 3) }, 3);
+    }
+
+    #[test]
+    fn audio_callbacks_submit_to_an_inactive_worker_without_device_io() {
+        let _test_session = serialize_sessions();
+        let mut binding = CallbackBinding::install(LibretroCore::Fceumm, Path::new("/roms/nes"))
+            .expect("callback binding");
+        let rate = SampleRate::new(48_000).expect("valid sample rate");
+        let worker = PcmStreamWorker::spawn(rate, Volume::MUTED).expect("PCM worker");
+        assert!(binding.attach_audio_worker(worker).is_none());
+
+        let single = binding.audio_sample_callback();
+        // SAFETY: The single-frame callback has no pointer parameters.
+        unsafe { single(100, -100) };
+        let samples = [1_i16, -1, 2, -2];
+        // SAFETY: `samples` contains two aligned stereo frames.
+        assert_eq!(
+            unsafe { binding.audio_sample_batch_callback()(samples.as_ptr(), 2) },
+            2
+        );
+
+        let worker = binding.take_audio_worker().expect("attached PCM worker");
+        assert_eq!(worker.stats().inactive_frames, 3);
+        assert!(!worker.shutdown().panicked);
     }
 }
