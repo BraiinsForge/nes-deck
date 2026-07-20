@@ -415,6 +415,7 @@ dependencies = [
 name = "retro-deck-dashboard"
 version = "0.1.0"
 dependencies = [
+ "retro-deck-audio",
  "retro-deck-config",
  "retro-deck-platform",
  "retro-deck-ui",

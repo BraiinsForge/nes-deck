@@ -1,6 +1,7 @@
 //! Native Retro Deck dashboard model, renderer, and runtime seams.
 
 mod assets;
+mod audio;
 mod catalog;
 mod controls;
 mod credits;
@@ -13,6 +14,7 @@ pub use assets::{
     AssetKind, AssetPathError, CreditsFallback, DashboardAssetPaths, DashboardAssets,
     DashboardAssetsError, PaletteFallback,
 };
+pub use audio::menu_notes;
 pub use catalog::{Category, DashboardCatalog, DashboardCatalogError, MAXIMUM_DASHBOARD_ENTRIES};
 pub use controls::{ControllerGuard, TouchCommitter, controller_action};
 pub use credits::{CreditsCrawl, CreditsLayout};
