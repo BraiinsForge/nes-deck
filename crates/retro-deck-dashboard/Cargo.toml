@@ -34,5 +34,10 @@ tracing = { version = "0.1.41", optional = true }
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "retro-deck"
+path = "src/bin/retro-deck.rs"
+required-features = ["bmc-native"]
+
 [lints]
 workspace = true
