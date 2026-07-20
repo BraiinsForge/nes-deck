@@ -1,228 +1,157 @@
-# Rust and Common Lisp migration
+# BMC-native Rust and Common Lisp migration
 
 ## Objective
 
-Retro Deck will use Rust for its native appliance runtime and Common Lisp for
-trusted, startup-loaded behavior. The first-party Go uploader has been
-removed after its Rust replacement passed behavioral, security, and build
-parity. First-party C++ will be removed after each replacement passes the same
-gates. Third-party emulator implementations remain pinned upstream
-dependencies with their provenance and local patches organized in one
-predictable hierarchy.
+Retro Deck is a native BMC widget and game launcher. It is not a second
+compositor toolkit, settings service, web framework, or hardware-management
+stack. First-party code is mainly idiomatic Rust and Common Lisp. Emulator
+sources remain pinned upstream dependencies with ordered local patches.
 
-The Rust runtimes and current C++ dashboard form the deployable baseline during
-the remaining migration. A replacement becomes the default only after its own
-tests, the complete host suite, the ARMv7 closure audit, and a live Deck check
-pass.
+The current C++ dashboard and the self-contained Rust candidate are rollback
+references while the BMC-backed widget is built. Neither becomes a reason to
+preserve duplicate infrastructure. A replacement is selected only after host,
+ARMv7, BMC integration, and live Deck checks pass.
 
-## Required properties
+## Ownership boundary
 
-1. Rust owns Wayland and framebuffer buffers, input devices, monotonic clocks,
-   audio devices, emulator foreign interfaces, process supervision, HTTP
-   boundaries, and atomic filesystem updates.
-2. Common Lisp owns application policy, declarative UI behavior, catalog
-   compilation, and device-local overrides that load after tracked behavior.
-3. A malformed, crashing, or unresponsive Lisp override cannot prevent the
-   Rust dashboard from starting with safe built-in behavior.
-4. Lisp code never receives raw device descriptors or unvalidated pointers.
-5. Audio is owned by one Rust manager per active runtime. It opens lazily,
-   drains before closing, and releases the device when muted, paused, hidden,
-   or idle. Active continuous emulator playback keeps its lease.
-6. Input dispatch never waits for audio playback, an audio-device operation,
-   or a Lisp reply. Short cues use a bounded nonblocking queue; overload drops
-   stale sound feedback instead of delaying touch or controller events.
-7. Deployments preserve the root-owned local Lisp override directory and never
-   add its contents to Git or the upload web interface.
-8. Every upstream emulator has a pinned revision, license record, build
-   adapter, and ordered patch series. Generated sources and build outputs are
-   not mixed with first-party source.
-9. Emulator and frontend compatibility is not a migration requirement. The
-   replacement does not need to read retired save encodings, configuration
-   formats, command lines, or reproduce accidental implementation behavior.
-10. Owner-supplied ROMs and current persistent data remain outside executable
-    replacement paths and are never deleted as part of a migration.
-11. Network configuration is a separate safety-critical boundary. Emulator
-    migration work does not alter live Wi-Fi, WireGuard, routing, or network
-    deployment behavior. Any network change requires explicit scope,
-    validation, preserved recovery access, and a rollback path.
+| Concern | Owner |
+| --- | --- |
+| Widget lifecycle, touch, visibility, frame callbacks and DMA-BUF slots | `bmc-widget` |
+| GPU canvas, layout, text, icons, images and hit testing | `bmc-render` |
+| System brightness, reboot, global sound and Wi-Fi recovery | BMC services and protocols |
+| HTTP transport, authentication, sessions, CSRF and multipart parsing | BMC web stack, or an established Rust web stack until integration exists |
+| ROM validation, catalog meaning, cover selection and save paths | Retro Deck |
+| Game/app state, retro styling and controller mappings | Retro Deck |
+| Emulator ABI adaptation and pinned-core patches | Retro Deck |
+| Real-time emulator and chiptune PCM | A narrow lazy Rust adapter until BMC exposes streaming audio |
+| Trusted local behavior patches | Supervised Common Lisp with a bounded Rust boundary |
 
-## Target source layout
+BMC sources are dependencies, not copied or vendored into this repository.
+When BMC becomes public, pin one reviewed commit. During local integration a
+sibling checkout may be selected outside Git, but no machine-specific path or
+private network topology is committed.
 
-```text
-Cargo.toml                    Rust workspace and shared lint policy
-Cargo.lock                    pinned Rust dependency graph
-crates/
-  retro-deck-platform/        display, input, audio, time, and process APIs
-  retro-deck-policy/          supervised Lisp worker and S-expression protocol
-  retro-deck-config/          side-effect-free catalog and console schemas
-  retro-deck-dashboard/       dashboard model, renderer, and launcher
-  retro-deck-emulator/        libretro and c-octo hosts
-  retro-deck-apps/            timer and chiptune applications
-  retro-deck-ui/              fixed RGB565 canvas and complete 5x7 font
-  retro-deck-uploader/        authenticated ROM and appearance service
-lisp/
-  retro-deck.asd              tracked Common Lisp system
-  package.lisp                single project package
-  policy/                     hook registry and worker protocol
-  apps/                       tracked application behavior
-vendor/
-  emulators/
-    <project>/
-      provenance.md           revision, source, license, and integration notes
-      patches/series          ordered local patch list
-      patches/*.patch         patches applied in listed order
-```
+## Dependency rule
 
-Installed local overrides live outside the tracked source tree at
-`/mnt/data/nes-deck/lisp/site.d/*.lisp`. Files load in lexical order after the
-tracked Lisp system. Deployment treats this directory as persistent state.
+Before adding a first-party subsystem, check in this order:
 
-## Runtime boundary
+1. BMC's public widget, render, protocol, platform, audio, and web crates.
+2. A maintained Rust crate with a compatible target and license.
+3. A small adapter around a pinned upstream implementation.
+4. New first-party infrastructure only when the first three cannot satisfy a
+   measured Deck requirement.
 
-The Rust host starts a disposable ECL worker with pipes connected to standard
-input and output. The worker loads tracked Lisp, then the local override
-directory, and reports readiness only after all forms load successfully.
-Messages are bounded, one-line S-expressions with an explicit protocol
-version and request identifier. Rust validates every reply before applying it.
+An exception must name the missing upstream capability and its deletion
+condition. Static linking and closure-free deployment are verification
+properties, not justification for recreating a mature library.
 
-Low-frequency events such as navigation, timer transitions, layout changes,
-and cue selection may cross this boundary asynchronously. Raw input is drained
-and applied in Rust before any policy request is made. Frame publication,
-audio sample production, input draining, emulator callbacks, and filesystem
-security do not cross the boundary. If startup, parsing, timeout, or validation
-fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
+## Code to retain
+
+- Side-effect-free catalog, palette, launch and application state.
+- ROM format checks, safe paths, transactional installation and native saves.
+- Controller semantics and emulator-specific keyboard projection.
+- Libretro session behavior that has no suitable maintained frontend library.
+- The CHIP-8 core adapter and neatly recorded emulator provenance and patches.
+- Timer and chiptune product behavior.
+- The bounded Common Lisp override contract, after simplifying it to the
+  behavior actually required on the device.
+- Tests for retained product behavior and safety boundaries.
+
+## Code to replace and delete
+
+- Replace the widget half of `retro-deck-platform` Wayland, shared-memory
+  presentation, visibility and touch code with `bmc-widget`.
+- Replace dashboard raster primitives, layout, PNG scaling and duplicated
+  interaction geometry with `bmc-render`. Retro pixel art remains an asset or
+  a small renderer component, not a parallel UI toolkit.
+- Send finite dashboard cues through the widget action protocol. Do not keep a
+  dashboard OSS worker beside BMC sound ownership.
+- Move brightness, reboot and Wi-Fi recovery behind BMC-owned controls. Retro
+  Deck must not independently modify those resources.
+- Put ROM endpoints behind BMC authentication and Axum routing. Delete the
+  hand-written HTTP, session, CSRF, form and multipart implementation once the
+  route is integrated.
+- Prefer compositor-delivered keyboard input when BMC exposes it. Until then,
+  keep only the small evdev keyboard/controller gap, release grabs whenever the
+  widget is dormant, and document the upstream capability still missing.
+- Split gameplay layer-shell presentation from widget presentation. Keep the
+  smallest measured adapter until BMC offers an application/game surface API.
+- Remove superseded C++, protocol copies, generated bindings, shell plumbing,
+  obsolete tests and unused dependencies as each vertical slice moves.
+
+The pivot must reduce net first-party LOC. No new platform abstraction lands
+without deleting the duplicate it replaces. The first review target is below
+30,000 Rust code lines including inline tests, excluding pinned upstream
+sources. This is a review threshold, not an invitation to game the counter.
+
+## Audio contract
+
+Frantisek Bohacek's guidance is the governing ownership rule: audio is open
+only while something needs to play. BMC owns finite widget sounds. Retro Deck
+requests a cue and never opens `/dev/dsp` for menu navigation.
+
+Real-time emulator and chiptune PCM is different from BMC's current file-based
+`madplay` service. Until BMC supplies a streaming API, one Rust owner per active
+game or player opens lazily, writes off the input thread, and closes on mute,
+pause, dormancy, exit, idle, or first silence as appropriate. Input never waits
+for audio. If a BMC streaming service lands, this adapter is deleted.
 
 ## Migration sequence
 
-### Phase 1: foundation
+### 1. Freeze and measure
 
-- Add the pinned Rust workspace with repository-wide formatting, lint, and
-  test entry points.
-- Add the narrow S-expression protocol and supervised Lisp worker.
-- The tested audio lifecycle now drives finite cues, continuous square tones,
-  and general bounded PCM workers. PCM callbacks never wait, the OSS stream
-  opens lazily, and mute, pause, hide, shutdown, and idle release are explicit.
-- Extend ARMv7 verification to reject dynamic binaries and Nix references.
+- Preserve `migration/rust-lisp` as the self-contained reference.
+- Perform all integration work on `integration/bmc-widget`.
+- Record first-party LOC by crate and identify product, test, adapter and
+  duplicate infrastructure before each deletion series.
 
-### Phase 2: management service (code complete)
+### 2. Replace the dashboard platform
 
-- Ported password configuration, authentication, sessions, CSRF protection,
-  origin checks, bounded uploads, ROM validation, atomic catalogs, palette
-  updates, BMC scene installation, and embedded assets to Rust.
-- Verified password-record compatibility, host tests, and a static,
-  closure-free ARMv7 Nix build, then removed the Go module.
-- Keep the live Deck login, upload, palette, restart, and password-rotation
-  exercise in the final release gate.
+- Consume `DeckWidgetSurfaceClient`, lifecycle events, touch events, frame
+  callbacks and reusable DMA-BUF slots from `bmc-widget`.
+- Render the authoritative dashboard screens with `bmc-render` on BMC's GPU
+  path, preserving the approved visual design rather than pixel identity with
+  the temporary C++ implementation.
+- Drive menu cues through widget sound actions.
+- Delete the superseded widget protocol, poll, touch, buffer and menu-audio
+  implementations immediately after the vertical slice passes.
 
-### Phase 3: native applications
+### 3. Use BMC system and web services
 
-- The 10 Seconds state machine, renderer, display, nonblocking input, audio,
-  clock, process integration, and bounded Common Lisp policy boundary are in
-  Rust. Its superseded C++ executable has been removed.
-- CHIP-8 uses the checked-in c-octo source through a narrow C adapter owned by
-  Rust. Rust owns bounded program loading, configuration, two-controller
-  state, crisp fixed-geometry presentation, 60 Hz pacing, and lazy audio. The
-  superseded first-party C/C++ host and external source input have been
-  removed.
-- The chiptune catalog, controls, renderer, Ogg decoder, GME ownership wrapper,
-  60 Hz runtime, diagnostics, and atomic volume persistence are in Rust. Audio
-  opens lazily off the input path and releases on pause, mute, hide, or exit.
-  Its superseded first-party C++ player and shared runtime have been removed.
+- Remove direct dashboard brightness, reboot and Wi-Fi mutation.
+- Agree on a widget-safe system-control surface with BMC instead of binding the
+  settings-overlay-only protocol opportunistically.
+- Add ROM intake to BMC's authenticated Axum service, keeping only Retro Deck's
+  ROM/catalog/storage domain code.
+- Keep network deployment unchanged until a separately reviewed BMC-backed
+  replacement preserves recovery access and is live-tested.
 
-### Phase 4: emulator host and dashboard
+### 4. Minimize game and application adapters
 
-- Shared Rust display, input, frame-clock, and audio adapters are present. The
-  PCM path preserves the measured 32,768-to-32,000 Hz and
-  48,000-to-47,328 Hz Deck corrections, stream-ring priming, bounded latency,
-  and nonblocking callback contract.
-- The Rust libretro host owns pinned-core lifecycle, input, adaptive
-  nearest-neighbor presentation, lazy audio, exact frame pacing, and bounded
-  native save persistence without retired frontend formats.
-- NES, GB/GBC, and ZX build as separate static ARMv7 outputs from the same
-  Rust host and pinned upstream archives. The superseded C++ host and its
-  direct-include tests have been removed.
-- Console identity, the bounded catalog, and the complete full-RGB semantic
-  palette are shared Rust configuration types. Uploader-specific file access,
-  durable override storage, and ROM intake policy remain outside that
-  side-effect-free model. The checked-in palette is tested against a compiled
-  fallback so a missing or malformed optional palette cannot block startup.
-- The Rust dashboard crate now combines base, uploaded, and generated native
-  entries behind one duplicate-checked category view with fixed NES, GB, GBC,
-  ZX, CHIP-8, and Deck ordering. Its capacity reserves seven native slots
-  beyond the shared 64-entry owner and upload catalog limit.
-- Standard native applications have unique catalog identities below
-  `/mnt/data/nes-deck/games/`. Their executable commands and REPL modes are a
-  separate launch contract, so shared launchers no longer masquerade as ROM or
-  application-data paths.
-- A closed Rust launch classification now maps every console entry, native
-  game, REPL mode, chiptune player, terminal, and reboot entry without storing
-  executable paths in display data. Unknown native applications fail closed.
-- Its pure state machine owns per-category carousel position, modal and
-  settings navigation, mute restoration, bounded volume and brightness,
-  keymap selection, and typed launch or persistence effects. Input handling
-  performs no filesystem, audio-device, process, or network operation.
-- Controller routing consumes committed press edges only. D-pad axes keep
-  category and carousel movement separate, L/R change volume, and touch
-  activation requires matching press and release targets. Audio feedback is
-  downstream from these actions and cannot quarantine or delay input. A fixed
-  twelve-edge window suspends a flooding controller until one quiet second.
-- A device-independent RGB565 canvas now owns clipped drawing, panels, lines,
-  text fitting, fixed-capacity labels, and the complete case-sensitive 5x7
-  font. The Rust timer uses it without changing any reference pixel snapshot,
-  and Wi-Fi fields render capitalization unambiguously.
-- The Rust catalog screen now renders into one fixed 1280x480 allocation with
-  bounded tabs, cards, indicators, cover-art borrowing, approved cog fallback,
-  and hit targets that return semantic model actions. Its canonical NES frame
-  is pixel-identical to the current C++ renderer, and a host PPM capture uses
-  the production Rust pixel path.
-- The Rust settings screen is also pixel-identical to its C++ reference. It
-  renders case-sensitive SSID, WLAN, WireGuard, selector, login-shell, volume,
-  brightness, and keymap values from a bounded read-only view. Its hit targets
-  return typed actions only; no network or device mutation occurs in rendering.
-- The pixel-identical Rust Wi-Fi editor keeps SSID and passphrase data in fixed
-  printable-ASCII buffers, freezes input during an explicit save, erases a
-  successful or closed passphrase, and correlates asynchronous completions so
-  an old request cannot update a reopened editor. The managed helper receives
-  credentials over standard input and may only store a profile; it does not
-  scan, reload, roam, or alter the active connection.
-- Read-only network snapshots query fixed `wlan0` and `wg0` identities plus the
-  credential-free selector status every two seconds off the input path. A
-  collection failure preserves the last good view, and unavailable status or
-  worker startup cannot prevent the dashboard from starting.
-- The bounded Rust credits schema rejects malformed, duplicate, empty, or
-  excessive manifests. Its intro, perspective crawl, and reduced-motion views
-  are pixel-identical to the C++ references while sampling the shared font
-  directly instead of retaining per-line raster masks.
-- Startup reads the required catalog and optional credits and palette through
-  bounded regular-file descriptors that reject final symlinks. Catalog failure
-  stops before display setup; credits and palette failures remain observable
-  while selecting safe unavailable and compiled-color fallbacks.
-- A staged native dashboard binary now drives the production Rust Wayland
-  widget, controller discovery and hotplug, touch commits, visibility-aware
-  polling, menu/settings switching, and 25 Hz credits frames through one reused
-  allocation. Preferences persist on a bounded worker and menu cues acquire
-  audio lazily without delaying input.
-- Fixed launch plans now hand audio ownership to managed child process groups,
-  keep the Wayland connection serviced, supervise emulator exit through a
-  touchscreen-only hold, contain failed children, discard stale menu input,
-  and adopt validated child volume state.
-- The staged binary is packaged separately as `deck-dashboard` and is included
-  in the full static ARMv7 closure audit. The deployed launcher still selects
-  the current dashboard; do not select or deploy the Rust candidate until its
-  controlled live Deck touch, controller, sound, launch, and Wi-Fi checks pass.
-- Generate screenshots from the same Rust renderer used on the Deck.
+- Reassess the libretro frontend against maintained crates and RetroArch before
+  retaining custom ABI code.
+- Keep only measured Deck-specific gameplay presentation, controller, save and
+  streaming-audio gaps.
+- Share BMC rendering and lifecycle facilities with the timer and chiptune
+  player where their surface role permits it.
+- Simplify Common Lisp supervision to the startup-loaded patch behavior that is
+  actually used, without exposing device descriptors or blocking frame/input
+  paths.
 
-### Phase 5: dependency organization and removal
+### 5. Organize dependencies and remove the fallback
 
-- Move emulator provenance and patch series into `vendor/emulators/`.
-- Remove superseded first-party C++, headers, and obsolete test harnesses.
-- Keep vendored fbterm isolated until a tested Rust terminal replacement is
-  available; never describe its code as first-party.
+- Keep each emulator under `vendor/emulators/<name>/` with provenance,
+  revision, license, ordered `patches/series`, and local patches only.
+- Mark upstream sources as vendored for repository language statistics.
+- Remove all superseded first-party C++, Go remnants, generated protocol copies
+  and dead deployment branches.
+- Keep private ROMs, saves, credentials and site Lisp outside executable source
+  replacement paths.
 
 ## Verification gates
 
-Each vertical migration commit runs its focused Rust and Lisp tests. Before a
-replacement becomes deployable, all of the following must pass:
+Every retained Rust and Lisp unit passes its focused tests. Before selecting
+the BMC widget, run:
 
 ```sh
 cargo fmt --all --check
@@ -233,14 +162,16 @@ tests/run-host-tests.sh
 tests/verify-arm-builds.sh
 ```
 
-The Lisp command is mandatory for the tracked Lisp runtime.
-The final gate is a read-only health report followed by manual touch,
-controller, sound, swipe, upload, and save-game checks on a BMC Deck.
+Also build the pinned BMC integration, verify the widget manifest/package,
+audit first-party LOC and dependencies, and confirm no copied BMC sources or
+machine-specific topology entered Git. The final gate is a controlled live
+Deck exercise covering swipe lifecycle, touch, two controllers, keyboard
+handoff, menu sound, continuous game audio, launches, saves, ROM upload and
+network recovery. Network behavior is never inferred from emulator tests.
 
 ## Commit discipline
 
-Every commit is one independently reviewable structural change, regression
-fix, or vertical replacement. Relevant checks run before the commit, and the
-commit is pushed immediately. Generated files are committed only when the
-runtime consumes them directly and their generator and drift check are also
-tracked.
+Each commit is one reviewable replacement, deletion, or product change with an
+imperative subject. Run the relevant checks and push it immediately. Preserve
+unrelated worktree changes. Do not deploy or mutate a Deck without explicit
+authorization.
