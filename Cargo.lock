@@ -462,6 +462,7 @@ name = "retro-deck-platform"
 version = "0.1.0"
 dependencies = [
  "evdev",
+ "libc",
  "memmap2",
  "retro-deck-audio",
  "rustix",
