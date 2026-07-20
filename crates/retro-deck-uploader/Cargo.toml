@@ -11,6 +11,7 @@ base64 = "0.22.1"
 getrandom = "0.2.16"
 httparse = "1.10.1"
 pbkdf2 = "0.12.2"
+retro-deck-config = { path = "../retro-deck-config" }
 retro-deck-policy = { path = "../retro-deck-policy" }
 rustix = { version = "1.0.8", features = ["fs", "process"] }
 serde_json = "1.0.140"

@@ -5,9 +5,9 @@ use std::{
     fmt,
     io::{Cursor, Read},
     path::Path,
-    str::FromStr,
 };
 
+pub use retro_deck_config::{System, SystemError};
 use zip::ZipArchive;
 
 /// Maximum compressed or raw upload size accepted before format inspection.
@@ -18,101 +18,6 @@ const NINTENDO_LOGO: [u8; 48] = [
     0x00, 0x08, 0x11, 0x1f, 0x88, 0x89, 0x00, 0x0e, 0xdc, 0xcc, 0x6e, 0xe6, 0xdd, 0xdd, 0xd9, 0x99,
     0xbb, 0xbb, 0x67, 0x63, 0x6e, 0x0e, 0xec, 0xcc, 0xdd, 0xdc, 0x99, 0x9f, 0xbb, 0xb9, 0x33, 0x3e,
 ];
-
-/// A console accepted by ROM intake.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum System {
-    /// Nintendo Entertainment System.
-    Nes,
-    /// Original Game Boy.
-    GameBoy,
-    /// Game Boy Color.
-    GameBoyColor,
-    /// ZX Spectrum TAP image.
-    ZxSpectrum,
-    /// CHIP-8 program.
-    Chip8,
-}
-
-impl System {
-    /// Canonical catalog and directory shorthand.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Nes => "nes",
-            Self::GameBoy => "gb",
-            Self::GameBoyColor => "gbc",
-            Self::ZxSpectrum => "zx",
-            Self::Chip8 => "chip8",
-        }
-    }
-
-    /// Required lowercase ROM filename suffix.
-    #[must_use]
-    pub const fn extension(self) -> &'static str {
-        match self {
-            Self::Nes => ".nes",
-            Self::GameBoy => ".gb",
-            Self::GameBoyColor => ".gbc",
-            Self::ZxSpectrum => ".tap",
-            Self::Chip8 => ".ch8",
-        }
-    }
-
-    /// Default dashboard accent retained from the deployed uploader.
-    #[must_use]
-    pub const fn color(self) -> &'static str {
-        match self {
-            Self::Nes => "#FF5F00",
-            Self::GameBoy => "#87AF87",
-            Self::GameBoyColor => "#5F87D7",
-            Self::ZxSpectrum => "#AF87D7",
-            Self::Chip8 => "#5FD7D7",
-        }
-    }
-
-    /// Maximum accepted uncompressed ROM size.
-    #[must_use]
-    pub const fn maximum_bytes(self) -> usize {
-        match self {
-            Self::Chip8 => 65_024,
-            Self::Nes | Self::GameBoy | Self::GameBoyColor | Self::ZxSpectrum => 8 * 1_024 * 1_024,
-        }
-    }
-}
-
-impl fmt::Display for System {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-impl FromStr for System {
-    type Err = SystemError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "nes" => Ok(Self::Nes),
-            "gb" => Ok(Self::GameBoy),
-            "gbc" => Ok(Self::GameBoyColor),
-            "zx" => Ok(Self::ZxSpectrum),
-            "chip8" => Ok(Self::Chip8),
-            _ => Err(SystemError),
-        }
-    }
-}
-
-/// A string does not name one of the supported systems.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SystemError;
-
-impl fmt::Display for SystemError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("choose a supported system")
-    }
-}
-
-impl std::error::Error for SystemError {}
 
 /// A validated user-facing title.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -187,6 +92,15 @@ impl fmt::Display for TitleError {
 
 impl std::error::Error for TitleError {}
 
+const fn maximum_rom_bytes(system: System) -> usize {
+    match system {
+        System::Chip8 => 65_024,
+        System::Nes | System::GameBoy | System::GameBoyColor | System::ZxSpectrum => {
+            8 * 1_024 * 1_024
+        }
+    }
+}
+
 /// Bytes whose system-specific ROM structure has been validated.
 pub struct ValidatedRom {
     system: System,
@@ -201,9 +115,9 @@ impl ValidatedRom {
     /// Returns [`RomError`] for an empty or excessive payload, or for a
     /// malformed system-specific header, checksum, or block structure.
     pub fn new(system: System, bytes: Vec<u8>) -> Result<Self, RomError> {
-        if bytes.is_empty() || bytes.len() > system.maximum_bytes() {
+        if bytes.is_empty() || bytes.len() > maximum_rom_bytes(system) {
             return Err(RomError::InvalidSize {
-                maximum: system.maximum_bytes(),
+                maximum: maximum_rom_bytes(system),
             });
         }
         match system {
@@ -431,7 +345,7 @@ fn decode_zip(system: System, archive: Vec<u8>) -> Result<ValidatedRom, UploadEr
         }
         if !has_extension(member.name(), system.extension())
             || member.size()
-                > u64::try_from(system.maximum_bytes())
+                > u64::try_from(maximum_rom_bytes(system))
                     .map_err(|_| UploadError::CouldNotReadMember)?
         {
             return Err(UploadError::InvalidMember {
@@ -443,7 +357,7 @@ fn decode_zip(system: System, archive: Vec<u8>) -> Result<ValidatedRom, UploadEr
     let mut member = archive
         .by_index(index)
         .map_err(|_| UploadError::CouldNotOpenMember)?;
-    let maximum = system.maximum_bytes();
+    let maximum = maximum_rom_bytes(system);
     let limit =
         u64::try_from(maximum.saturating_add(1)).map_err(|_| UploadError::CouldNotReadMember)?;
     let mut bytes = Vec::new();
@@ -559,7 +473,7 @@ fn validate_zx(bytes: &[u8]) -> Result<(), RomError> {
 mod tests {
     use super::{
         GameTitle, MAXIMUM_ARCHIVE_BYTES, NINTENDO_LOGO, RomError, System, UploadError,
-        ValidatedRom, decode_upload,
+        ValidatedRom, decode_upload, maximum_rom_bytes,
     };
     use std::{
         io::{Cursor, Write as _},
@@ -797,7 +711,7 @@ mod tests {
             decode_upload(System::Nes, "game.zip", wrong_type.as_slice()),
             Err(UploadError::InvalidMember { required: ".nes" })
         ));
-        let oversized = vec![0_u8; System::Chip8.maximum_bytes() + 1];
+        let oversized = vec![0_u8; maximum_rom_bytes(System::Chip8) + 1];
         let archive = zip_members(&[("large.ch8", oversized.as_slice())])?;
         assert!(matches!(
             decode_upload(System::Chip8, "large.zip", archive.as_slice()),

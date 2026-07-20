@@ -404,6 +404,10 @@ name = "retro-deck-audio"
 version = "0.1.0"
 
 [[package]]
+name = "retro-deck-config"
+version = "0.1.0"
+
+[[package]]
 name = "retro-deck-emulator"
 version = "0.1.0"
 dependencies = [
@@ -441,6 +445,7 @@ dependencies = [
  "getrandom 0.2.17",
  "httparse",
  "pbkdf2",
+ "retro-deck-config",
  "retro-deck-policy",
  "rustix",
  "serde_json",
