@@ -411,6 +411,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "retro-deck-dashboard"
+version = "0.1.0"
+dependencies = [
+ "retro-deck-config",
+]
+
+[[package]]
 name = "retro-deck-emulator"
 version = "0.1.0"
 dependencies = [

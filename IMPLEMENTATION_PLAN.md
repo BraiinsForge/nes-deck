@@ -145,6 +145,9 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   durable override storage, and ROM intake policy remain outside that
   side-effect-free model. The checked-in palette is tested against a compiled
   fallback so a missing or malformed optional palette cannot block startup.
+- The Rust dashboard crate now combines base, uploaded, and generated native
+  entries behind one duplicate-checked category view with fixed NES, GB, GBC,
+  ZX, CHIP-8, and Deck ordering.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
 
