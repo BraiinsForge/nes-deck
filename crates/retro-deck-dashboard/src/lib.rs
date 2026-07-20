@@ -8,6 +8,7 @@ mod controls;
 mod credits;
 mod launch;
 mod preference_io;
+mod preference_worker;
 mod preferences;
 mod render;
 mod settings;
@@ -25,6 +26,10 @@ pub use credits::{CreditsCrawl, CreditsLayout};
 pub use launch::{LaunchTarget, LaunchTargetError, TerminalMode};
 pub use preference_io::{
     PreferenceLoad, PreferenceLoadError, PreferenceLoadIssue, PreferencePathError, PreferencePaths,
+};
+pub use preference_worker::{
+    BrightnessDevicePaths, BrightnessPathError, PreferenceSubmit, PreferenceWorker,
+    PreferenceWorkerError, PreferenceWorkerReport, PreferenceWriteError, brightness_raw_value,
 };
 pub use preferences::{
     DashboardPreferences, EncodedPreference, MAXIMUM_PREFERENCE_BYTES, PreferenceField,
