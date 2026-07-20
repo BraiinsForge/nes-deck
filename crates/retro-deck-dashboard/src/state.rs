@@ -115,12 +115,18 @@ impl SettingsTarget {
 }
 
 /// Terminal keymap selected in settings.
+#[cfg_attr(
+    feature = "application-wire",
+    derive(serde::Deserialize, serde::Serialize)
+)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Keymap {
     /// US ANSI key positions.
+    #[cfg_attr(feature = "application-wire", serde(rename = "us"))]
     #[default]
     Us,
     /// Czech key positions.
+    #[cfg_attr(feature = "application-wire", serde(rename = "cz"))]
     Czech,
 }
 

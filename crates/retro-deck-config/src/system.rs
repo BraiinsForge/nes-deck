@@ -3,17 +3,23 @@
 use std::{fmt, str::FromStr};
 
 /// A console accepted by the catalog and ROM intake.
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum System {
     /// Nintendo Entertainment System.
+    #[cfg_attr(feature = "serde", serde(rename = "nes"))]
     Nes,
     /// Original Game Boy.
+    #[cfg_attr(feature = "serde", serde(rename = "gb"))]
     GameBoy,
     /// Game Boy Color.
+    #[cfg_attr(feature = "serde", serde(rename = "gbc"))]
     GameBoyColor,
     /// ZX Spectrum TAP image.
+    #[cfg_attr(feature = "serde", serde(rename = "zx"))]
     ZxSpectrum,
     /// CHIP-8 program.
+    #[cfg_attr(feature = "serde", serde(rename = "chip8"))]
     Chip8,
 }
 

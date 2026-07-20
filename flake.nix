@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da";
+    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb";
     fceumm-src = {
       url = "github:libretro/libretro-fceumm/3a84a6fd0ba20dd4877c06b1d58741172148395f";
       flake = false;
@@ -48,6 +48,14 @@
         features = [ "bmc-native" ];
         noDefaultFeatures = true;
         manifest = ./deploy/widget/manifest.json;
+        application = {
+          name = "retro-deck";
+          packageName = "retro-deck-dashboard";
+          binName = "retro-deck-launcher";
+          features = [ "application-launcher" ];
+          noDefaultFeatures = true;
+          manifest = ./deploy/application/manifest.json;
+        };
       };
 
       waylandNativeInputs = [ pkgs.wayland-scanner ];

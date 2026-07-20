@@ -116,7 +116,7 @@ dependencies = [
 [[package]]
 name = "bmc-gpu-render-lock"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "anyhow",
  "rustix 0.38.44",
@@ -126,7 +126,7 @@ dependencies = [
 [[package]]
 name = "bmc-ipc"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "bmc-shared-time",
  "bmc-shared-utils",
@@ -140,7 +140,7 @@ dependencies = [
 [[package]]
 name = "bmc-log"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "file-rotate",
  "libc",
@@ -151,7 +151,7 @@ dependencies = [
 [[package]]
 name = "bmc-render"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "anyhow",
  "bmc-render-skin",
@@ -173,7 +173,7 @@ dependencies = [
 [[package]]
 name = "bmc-render-skin"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "bmc-wasm-protocol",
 ]
@@ -181,7 +181,7 @@ dependencies = [
 [[package]]
 name = "bmc-shared-time"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -195,7 +195,7 @@ dependencies = [
 [[package]]
 name = "bmc-shared-utils"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "formato",
  "serde",
@@ -204,7 +204,7 @@ dependencies = [
 [[package]]
 name = "bmc-svg-compiler"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "usvg",
 ]
@@ -212,7 +212,7 @@ dependencies = [
 [[package]]
 name = "bmc-wasm-protocol"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "palette",
 ]
@@ -220,7 +220,7 @@ dependencies = [
 [[package]]
 name = "bmc-widget"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "anyhow",
  "bmc-ipc",
@@ -241,7 +241,7 @@ dependencies = [
 [[package]]
 name = "bmc-widget-protocol"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 dependencies = [
  "bmc-shared-time",
  "bmc-shared-utils",
@@ -1002,7 +1002,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "ii-stopwatch"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da#308836b6e7844dd1ee7b612b228e498284be31da"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=bf4004e3c2fdcb4224c060ab7657ba1338e098cb#bf4004e3c2fdcb4224c060ab7657ba1338e098cb"
 
 [[package]]
 name = "image"
@@ -1571,6 +1571,7 @@ name = "retro-deck-config"
 version = "0.1.0"
 dependencies = [
  "retro-deck-policy",
+ "serde",
 ]
 
 [[package]]
@@ -1589,6 +1590,8 @@ dependencies = [
  "retro-deck-platform",
  "retro-deck-ui",
  "rustix 1.1.4",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 

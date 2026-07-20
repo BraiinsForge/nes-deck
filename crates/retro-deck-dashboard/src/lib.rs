@@ -1,5 +1,7 @@
 //! Native Retro Deck dashboard model, renderer, and runtime seams.
 
+#[cfg(feature = "application-wire")]
+mod application;
 #[cfg(feature = "legacy-runtime")]
 mod artwork;
 #[cfg(feature = "legacy-runtime")]
@@ -38,6 +40,11 @@ mod wifi_session;
 #[cfg(feature = "legacy-runtime")]
 mod wifi_writer;
 
+#[cfg(feature = "application-wire")]
+pub use application::{
+    ApplicationRequest, ApplicationRequestError, BMC_APPLICATION_ID,
+    MAXIMUM_APPLICATION_INPUT_BYTES,
+};
 #[cfg(feature = "legacy-runtime")]
 pub use artwork::{ArtworkError, ArtworkIssue, ArtworkReport, ArtworkStore, ArtworkStoreError};
 #[cfg(feature = "legacy-runtime")]

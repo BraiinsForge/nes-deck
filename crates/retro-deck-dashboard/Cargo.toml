@@ -14,7 +14,10 @@ legacy-runtime = [
     "dep:retro-deck-platform",
     "dep:retro-deck-ui",
 ]
+application-wire = ["dep:serde", "dep:serde_json", "retro-deck-config/serde"]
+application-launcher = ["application-wire", "dep:anyhow"]
 bmc-native = [
+    "application-wire",
     "dep:anyhow",
     "dep:bmc-gpu-render-lock",
     "dep:bmc-log",
@@ -27,10 +30,10 @@ bmc-native = [
 
 [dependencies]
 anyhow = { version = "1.0.98", optional = true }
-bmc-gpu-render-lock = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "308836b6e7844dd1ee7b612b228e498284be31da", optional = true }
-bmc-log = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "308836b6e7844dd1ee7b612b228e498284be31da", optional = true }
-bmc-render = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "308836b6e7844dd1ee7b612b228e498284be31da", optional = true }
-bmc-widget = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "308836b6e7844dd1ee7b612b228e498284be31da", features = ["gpu"], optional = true }
+bmc-gpu-render-lock = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "bf4004e3c2fdcb4224c060ab7657ba1338e098cb", optional = true }
+bmc-log = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "bf4004e3c2fdcb4224c060ab7657ba1338e098cb", optional = true }
+bmc-render = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "bf4004e3c2fdcb4224c060ab7657ba1338e098cb", optional = true }
+bmc-widget = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "bf4004e3c2fdcb4224c060ab7657ba1338e098cb", features = ["gpu"], optional = true }
 glow = { version = "0.16.0", optional = true }
 png = { version = "0.18.1", optional = true }
 retro-deck-audio = { path = "../retro-deck-audio", optional = true }
@@ -38,6 +41,8 @@ retro-deck-config = { path = "../retro-deck-config" }
 retro-deck-platform = { path = "../retro-deck-platform", optional = true }
 retro-deck-ui = { path = "../retro-deck-ui", optional = true }
 rustix = { version = "1.1.4", features = ["fs"], optional = true }
+serde = { version = "1.0.219", features = ["derive"], optional = true }
+serde_json = { version = "1.0.140", optional = true }
 tracing = { version = "0.1.41", optional = true }
 
 [lib]
@@ -57,6 +62,11 @@ required-features = ["legacy-runtime"]
 name = "retro-deck"
 path = "src/bin/retro-deck.rs"
 required-features = ["bmc-native"]
+
+[[bin]]
+name = "retro-deck-launcher"
+path = "src/bin/retro-deck-launcher.rs"
+required-features = ["application-launcher"]
 
 [lints]
 workspace = true

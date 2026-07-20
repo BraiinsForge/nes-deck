@@ -20,8 +20,9 @@ use bmc_widget::surface::{
 };
 use glow::HasContext as _;
 use retro_deck_dashboard::{
-    BmcScreen, BmcUiAction, Brightness, DashboardModel, Keymap, MenuCue, VolumeState,
-    bmc_action_for_touch, build_bmc_tree, load_native_catalog,
+    ApplicationRequest, BMC_APPLICATION_ID, BmcScreen, BmcUiAction, Brightness, DashboardModel,
+    Intent, Keymap, LaunchTarget, MenuCue, TerminalMode, VolumeState, bmc_action_for_touch,
+    build_bmc_tree, load_native_catalog,
 };
 
 const MANIFEST_ENV: &str = "RETRO_DECK_MANIFEST";
@@ -244,10 +245,56 @@ impl NativeRuntime {
                         self.play_menu_cue(cue);
                     }
                     if let Some(intent) = transition.intent {
-                        tracing::info!(?intent, "native launch integration remains pending");
+                        self.request_intent(intent);
                     }
                 }
             }
+        }
+    }
+
+    fn request_intent(&self, intent: Intent) {
+        let target = match intent {
+            Intent::Launch(index) => {
+                let Some(entry) = self.model.catalog().entry(index) else {
+                    tracing::warn!(index, "rejected missing native catalog launch");
+                    return;
+                };
+                match LaunchTarget::from_entry(entry) {
+                    Ok(target) => target,
+                    Err(error) => {
+                        tracing::warn!(index, ?error, "rejected unknown native catalog launch");
+                        return;
+                    }
+                }
+            }
+            Intent::OpenTerminal => LaunchTarget::Terminal(TerminalMode::Shell),
+            Intent::OpenWifi => {
+                tracing::warn!("native Wi-Fi settings require a BMC-owned settings action");
+                return;
+            }
+        };
+        let request =
+            match ApplicationRequest::from_target(target, self.model.volume(), self.model.keymap())
+            {
+                Ok(request) => request,
+                Err(error) => {
+                    tracing::warn!(?error, "native launch requires a different BMC capability");
+                    return;
+                }
+            };
+        let input = match serde_json::to_string(&request) {
+            Ok(input) => input,
+            Err(error) => {
+                tracing::warn!(?error, "failed to encode native application request");
+                return;
+            }
+        };
+        let action = ActionPayload::LaunchApplication {
+            application_id: BMC_APPLICATION_ID.to_owned(),
+            input,
+        };
+        if let Err(error) = self.surface.request_action(&action) {
+            tracing::warn!(?error, "BMC application launch request failed");
         }
     }
 

@@ -20,6 +20,11 @@ const VOLUME_STATE: &str = "/mnt/data/nes-deck/state/menu-volume.state";
 const REBOOT_PROGRAM: &str = "/sbin/reboot";
 
 /// Terminal or REPL mode accepted by the managed terminal launcher.
+#[cfg_attr(
+    feature = "application-wire",
+    derive(serde::Deserialize, serde::Serialize)
+)]
+#[cfg_attr(feature = "application-wire", serde(rename_all = "snake_case"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalMode {
     /// Login shell.
