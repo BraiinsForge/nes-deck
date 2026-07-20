@@ -13,6 +13,7 @@ mod preferences;
 mod render;
 mod settings;
 mod state;
+mod wifi;
 
 pub use artwork::{ArtworkError, ArtworkIssue, ArtworkReport, ArtworkStore, ArtworkStoreError};
 pub use assets::{
@@ -46,4 +47,8 @@ pub use state::{
     Action, Brightness, BrightnessError, DEFAULT_BRIGHTNESS_PERCENT, DEFAULT_VOLUME_PERCENT,
     DashboardModel, Intent, Keymap, MenuCue, Screen, SettingChange, SettingsTarget, Status,
     Transition, VolumeError, VolumeState,
+};
+pub use wifi::{
+    MAXIMUM_PASSPHRASE_BYTES, MAXIMUM_SSID_BYTES, MINIMUM_PASSPHRASE_BYTES, WifiAction,
+    WifiCredentials, WifiEditor, WifiEffect, WifiField, WifiStatus, WifiTransition,
 };
