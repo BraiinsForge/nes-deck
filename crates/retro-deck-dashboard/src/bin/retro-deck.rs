@@ -11,6 +11,7 @@ use bmc_render::gpu::FemtoVgRenderer;
 use bmc_render::interaction::TouchEvent;
 use bmc_render::renderer::{FrameClear, Renderer as _};
 use bmc_render::{TreeUi, tree::TreeResult};
+use bmc_widget::ActionPayload;
 use bmc_widget::egl::{
     Depth, DoubleBufferState, EglContext, SharedRenderScratch, SlotReleaseState,
 };
@@ -20,7 +21,7 @@ use bmc_widget::surface::{
 use glow::HasContext as _;
 use retro_deck_dashboard::{
     BmcScreen, BmcUiAction, Brightness, DashboardAssetPaths, DashboardAssets, DashboardModel,
-    Keymap, VolumeState, bmc_action_for_touch, build_bmc_tree,
+    Keymap, MenuCue, VolumeState, bmc_action_for_touch, build_bmc_tree,
 };
 
 const MANIFEST_ENV: &str = "RETRO_DECK_MANIFEST";
@@ -236,21 +237,38 @@ impl NativeRuntime {
                 BmcUiAction::OpenCarousel => {
                     self.screen = BmcScreen::Carousel;
                     self.pending_render = true;
+                    self.play_menu_cue(MenuCue::Confirm);
                 }
                 BmcUiAction::CloseCarousel => {
                     self.screen = BmcScreen::Categories;
                     self.pending_render = true;
+                    self.play_menu_cue(MenuCue::Back);
                 }
                 BmcUiAction::Model(action) => {
                     let elapsed_ms =
                         u64::try_from(self.started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
                     let transition = self.model.apply_at(action, elapsed_ms);
                     self.pending_render |= transition.redraw;
+                    if let Some(cue) = transition.cue {
+                        self.play_menu_cue(cue);
+                    }
                     if let Some(intent) = transition.intent {
                         tracing::info!(?intent, "native launch integration remains pending");
                     }
                 }
             }
+        }
+    }
+
+    fn play_menu_cue(&self, cue: MenuCue) {
+        if self.model.volume().is_muted() {
+            return;
+        }
+        let action = ActionPayload::PlaySound {
+            sound: menu_cue_sound(cue).to_owned(),
+        };
+        if let Err(error) = self.surface.request_action(&action) {
+            tracing::warn!(?error, ?cue, "BMC menu sound request failed");
         }
     }
 
@@ -389,6 +407,14 @@ const fn has_render_target(lifecycle: Option<LifecycleState>) -> bool {
     )
 }
 
+const fn menu_cue_sound(cue: MenuCue) -> &'static str {
+    match cue {
+        MenuCue::Previous | MenuCue::Back => "PriceDown",
+        MenuCue::Next => "PriceUp",
+        MenuCue::Confirm | MenuCue::Volume => "Confirmation",
+    }
+}
+
 #[expect(
     clippy::cast_possible_truncation,
     reason = "Deck touch coordinates are bounded by the configured viewport"
@@ -437,5 +463,14 @@ mod tests {
         }
         assert!(!has_render_target(Some(LifecycleState::Dormant)));
         assert!(!has_render_target(None));
+    }
+
+    #[test]
+    fn menu_cues_use_finite_bmc_sounds() {
+        assert_eq!(menu_cue_sound(MenuCue::Previous), "PriceDown");
+        assert_eq!(menu_cue_sound(MenuCue::Next), "PriceUp");
+        assert_eq!(menu_cue_sound(MenuCue::Confirm), "Confirmation");
+        assert_eq!(menu_cue_sound(MenuCue::Back), "PriceDown");
+        assert_eq!(menu_cue_sound(MenuCue::Volume), "Confirmation");
     }
 }
