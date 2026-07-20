@@ -20,16 +20,12 @@ use bmc_widget::surface::{
 };
 use glow::HasContext as _;
 use retro_deck_dashboard::{
-    BmcScreen, BmcUiAction, Brightness, DashboardAssetPaths, DashboardAssets, DashboardModel,
-    Keymap, MenuCue, VolumeState, bmc_action_for_touch, build_bmc_tree,
+    BmcScreen, BmcUiAction, Brightness, DashboardModel, Keymap, MenuCue, VolumeState,
+    bmc_action_for_touch, build_bmc_tree, load_native_catalog,
 };
 
 const MANIFEST_ENV: &str = "RETRO_DECK_MANIFEST";
-const CREDITS_ENV: &str = "RETRO_DECK_CREDITS";
-const PALETTE_ENV: &str = "RETRO_DECK_PALETTE";
 const DEFAULT_MANIFEST_PATH: &str = "/mnt/data/nes-deck/menu/games.tsv";
-const DEFAULT_CREDITS_PATH: &str = "/mnt/data/nes-deck/menu/credits.tsv";
-const DEFAULT_PALETTE_PATH: &str = "/mnt/data/nes-deck/menu/palette.tsv";
 
 fn main() -> ExitCode {
     bmc_log::init_console();
@@ -43,15 +39,10 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
-    let paths = DashboardAssetPaths::new(
-        configured_path(MANIFEST_ENV, DEFAULT_MANIFEST_PATH),
-        configured_path(CREDITS_ENV, DEFAULT_CREDITS_PATH),
-        configured_path(PALETTE_ENV, DEFAULT_PALETTE_PATH),
-    )
-    .context("construct canonical dashboard asset paths")?;
-    let assets = DashboardAssets::load(&paths).context("load Retro Deck catalog")?;
+    let catalog = load_native_catalog(configured_path(MANIFEST_ENV, DEFAULT_MANIFEST_PATH))
+        .context("load Retro Deck catalog")?;
     let model = DashboardModel::new(
-        assets.catalog().clone(),
+        catalog,
         VolumeState::DEFAULT,
         Brightness::DEFAULT,
         Keymap::default(),

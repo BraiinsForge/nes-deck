@@ -1588,6 +1588,7 @@ dependencies = [
  "retro-deck-config",
  "retro-deck-platform",
  "retro-deck-ui",
+ "rustix 1.1.4",
  "tracing",
 ]
 
