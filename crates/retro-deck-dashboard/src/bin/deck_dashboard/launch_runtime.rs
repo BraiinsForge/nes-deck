@@ -162,7 +162,10 @@ impl DashboardRuntime {
         let Some(pending) = self.pending_launch.take() else {
             return false;
         };
+        self.keyboards.release_for_child();
+        self.keyboard_ownership = super::KeyboardOwnership::Released;
         self.run_pending_launch(pending);
+        self.sync_keyboard_ownership();
         self.reload_child_volume();
         self.restore_audio_gate();
         self.dirty = true;
@@ -262,6 +265,9 @@ impl DashboardRuntime {
 
     pub(super) fn discard_menu_input(&mut self) {
         self.input_events.clear();
+        self.keyboard_events.clear();
+        let _stats = self.keyboards.drain_into(&mut self.keyboard_events);
+        self.keyboard_events.clear();
         let _stats = self.controllers.drain_into(&mut self.input_events);
         self.input_events.clear();
         let _reports = self.presentation.take_touch_reports();

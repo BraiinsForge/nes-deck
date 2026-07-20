@@ -18,12 +18,15 @@ use retro_deck_dashboard::{
     DashboardFrame, DashboardModel, DashboardPreferences, MenuCue, NetworkStatus,
     NetworkStatusWorker, PreferenceLoad, PreferencePathError, PreferencePaths, PreferenceSubmit,
     PreferenceWorker, PreferenceWorkerReport, RenderError, Screen, SettingChange, SettingsView,
-    TouchCommitter, WifiAction, WifiProfileWriter, WifiSession, controller_action, menu_notes,
+    TouchCommitter, WifiAction, WifiProfileWriter, WifiSession, controller_action, keyboard_action,
+    menu_notes, wifi_keyboard_action,
 };
 use retro_deck_platform::audio::{AudioGate, ToneCueWorker, ToneWorkerReport};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
 use retro_deck_platform::file::{BoundedReadError, read_regular_bounded};
-use retro_deck_platform::input::{ControllerDevices, InputError, InputEvent};
+use retro_deck_platform::input::{
+    ControllerDevices, InputError, InputEvent, KeyboardDevices, KeyboardKey,
+};
 use retro_deck_platform::shutdown::ShutdownFlag;
 use retro_deck_platform::wayland::{PresentOutcome, WaylandPresentation, WaylandPresentationError};
 
@@ -40,6 +43,7 @@ use wifi_runtime::{start_wifi_writer, wifi_controller_action};
 
 const APPLICATION: &str = "deck-dashboard";
 const INPUT_EVENT_CAPACITY: usize = 64;
+const KEYBOARD_EVENT_CAPACITY: usize = 64;
 const IDLE_POLL: Duration = Duration::from_millis(250);
 const BUSY_RETRY: Duration = Duration::from_millis(8);
 const CREDITS_FRAME: Duration = Duration::from_millis(40);
@@ -220,7 +224,9 @@ fn require_absolute(path: &Path, role: &'static str) -> Result<(), RuntimeError>
 struct DashboardRuntime {
     shutdown: ShutdownFlag,
     controllers: ControllerDevices,
+    keyboards: KeyboardDevices,
     input_events: Vec<InputEvent>,
+    keyboard_events: Vec<KeyboardKey>,
     presentation: WaylandPresentation,
     source_dimensions: Dimensions,
     model: DashboardModel,
@@ -243,9 +249,16 @@ struct DashboardRuntime {
     started_at: Instant,
     credits_started_at: Instant,
     last_credits_frame: Instant,
-    last_controller_scan: Instant,
+    last_input_scan: Instant,
+    keyboard_ownership: KeyboardOwnership,
     reduced_motion: bool,
     dirty: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KeyboardOwnership {
+    Released,
+    Dashboard,
 }
 
 impl DashboardRuntime {
@@ -281,20 +294,37 @@ impl DashboardRuntime {
         let presentation = WaylandPresentation::connect_widget(source_dimensions)
             .map_err(RuntimeError::Presentation)?;
         let controllers = ControllerDevices::discover().map_err(RuntimeError::Input)?;
+        let keyboard_ownership = if presentation.visible() {
+            KeyboardOwnership::Dashboard
+        } else {
+            KeyboardOwnership::Released
+        };
+        let mut keyboards = KeyboardDevices::default();
+        if keyboard_ownership == KeyboardOwnership::Dashboard {
+            match keyboards.rescan() {
+                Ok(_) => {}
+                Err(error) => {
+                    eprintln!("{APPLICATION}: keyboard navigation unavailable: {error}");
+                }
+            }
+        }
         let volume = Volume::new(model.volume().percent()).ok_or(RuntimeError::InvalidDefaults)?;
         let audio_gate = desired_audio_gate(presentation.visible(), volume.muted());
         let audio = start_audio(volume, audio_gate);
         let wifi_writer = start_wifi_writer();
         let network_worker = start_network_worker();
         eprintln!(
-            "{APPLICATION}: native navigation runtime started with {} controller(s)",
-            controllers.controller_count()
+            "{APPLICATION}: native navigation runtime started with {} controller(s) and {} keyboard(s)",
+            controllers.controller_count(),
+            keyboards.keyboard_count()
         );
         let now = Instant::now();
         Ok(Self {
             shutdown,
             controllers,
+            keyboards,
             input_events: Vec::with_capacity(INPUT_EVENT_CAPACITY),
+            keyboard_events: Vec::with_capacity(KEYBOARD_EVENT_CAPACITY),
             presentation,
             source_dimensions,
             model,
@@ -317,7 +347,8 @@ impl DashboardRuntime {
             started_at: now,
             credits_started_at: now,
             last_credits_frame: now,
-            last_controller_scan: now,
+            last_input_scan: now,
+            keyboard_ownership,
             reduced_motion: env::var_os("RETRO_DECK_REDUCED_MOTION").is_some(),
             dirty: true,
         })
@@ -337,6 +368,7 @@ impl DashboardRuntime {
             self.presentation
                 .dispatch_nonblocking()
                 .map_err(RuntimeError::Presentation)?;
+            self.sync_keyboard_ownership();
             self.sync_audio_gate();
             self.report_audio_errors();
             self.report_preference_errors();
@@ -349,10 +381,11 @@ impl DashboardRuntime {
             if suppress_menu_input {
                 self.discard_menu_input();
             } else {
-                self.scan_controllers();
+                self.scan_input_devices();
                 self.recover_controller();
                 self.handle_touch();
                 self.handle_controllers();
+                self.handle_keyboards();
             }
             let now_ms = self.monotonic_ms();
             self.dirty |= self.model.advance_time(now_ms);
@@ -361,17 +394,21 @@ impl DashboardRuntime {
                 break;
             }
             self.controllers
-                .wait_readable_with(self.presentation.as_fd(), self.wait_duration())
+                .wait_readable_with_keyboards(
+                    &self.keyboards,
+                    self.presentation.as_fd(),
+                    self.wait_duration(),
+                )
                 .map_err(RuntimeError::Input)?;
         }
         Ok(())
     }
 
-    fn scan_controllers(&mut self) {
-        if self.last_controller_scan.elapsed() < CONTROLLER_SCAN {
+    fn scan_input_devices(&mut self) {
+        if self.last_input_scan.elapsed() < CONTROLLER_SCAN {
             return;
         }
-        self.last_controller_scan = Instant::now();
+        self.last_input_scan = Instant::now();
         match self.controllers.rescan() {
             Ok(stats) if stats.attached() > 0 => eprintln!(
                 "{APPLICATION}: attached {} controller(s); {} connected",
@@ -380,6 +417,46 @@ impl DashboardRuntime {
             ),
             Ok(_) => {}
             Err(error) => eprintln!("{APPLICATION}: controller rescan failed: {error}"),
+        }
+        if self.keyboard_ownership != KeyboardOwnership::Dashboard {
+            return;
+        }
+        match self.keyboards.rescan() {
+            Ok(stats) if stats.attached() > 0 => eprintln!(
+                "{APPLICATION}: attached {} keyboard(s); {} connected",
+                stats.attached(),
+                stats.connected()
+            ),
+            Ok(_) => {}
+            Err(error) => eprintln!("{APPLICATION}: keyboard rescan failed: {error}"),
+        }
+    }
+
+    fn sync_keyboard_ownership(&mut self) {
+        let requested = if self.presentation.visible() {
+            KeyboardOwnership::Dashboard
+        } else {
+            KeyboardOwnership::Released
+        };
+        if requested == self.keyboard_ownership {
+            return;
+        }
+        self.keyboard_ownership = requested;
+        self.keyboard_events.clear();
+        if requested == KeyboardOwnership::Released {
+            self.keyboards.release_for_child();
+            return;
+        }
+        self.last_input_scan = Instant::now();
+        match self.keyboards.rescan() {
+            Ok(stats) if stats.attached() > 0 => eprintln!(
+                "{APPLICATION}: dashboard visible; attached {} keyboard(s)",
+                stats.attached()
+            ),
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("{APPLICATION}: cannot reacquire dashboard keyboards: {error}");
+            }
         }
     }
 
@@ -436,6 +513,51 @@ impl DashboardRuntime {
             }
         }
         self.input_events = events;
+    }
+
+    fn handle_keyboards(&mut self) {
+        self.keyboard_events.clear();
+        let stats = self.keyboards.drain_into(&mut self.keyboard_events);
+        if stats.dropped() > 0 {
+            eprintln!(
+                "{APPLICATION}: discarded {} keyboard event(s) after the bounded drain",
+                stats.dropped()
+            );
+        }
+        if stats.disconnected() > 0 {
+            eprintln!(
+                "{APPLICATION}: {} keyboard(s) disconnected",
+                stats.disconnected()
+            );
+        }
+
+        let events = std::mem::take(&mut self.keyboard_events);
+        for key in events.iter().copied() {
+            let screen_before = self.model.screen();
+            let wifi_before = self.wifi_session.is_open();
+            if wifi_before {
+                let Some(action) = wifi_keyboard_action(key) else {
+                    continue;
+                };
+                self.touch.cancel();
+                self.wifi_touch.cancel();
+                self.apply_wifi_action(action);
+            } else {
+                let Some(action) = keyboard_action(screen_before, key) else {
+                    continue;
+                };
+                self.touch.cancel();
+                self.wifi_touch.cancel();
+                self.apply_action(action);
+            }
+            if self.pending_launch.is_some()
+                || wifi_before != self.wifi_session.is_open()
+                || screen_before != self.model.screen()
+            {
+                break;
+            }
+        }
+        self.keyboard_events = events;
     }
 
     fn accept_controller_edge(&mut self) -> bool {
