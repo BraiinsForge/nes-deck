@@ -225,6 +225,16 @@ impl GmeDecoder {
         self.start_track(target)
     }
 
+    /// Select one exact zero-based subsong.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GmeDecoderError`] if the index is out of range or GME cannot
+    /// start or describe it.
+    pub fn select_track(&mut self, track: usize) -> Result<(), GmeDecoderError> {
+        self.start_track(track)
+    }
+
     /// Restart the current subsong from its beginning.
     ///
     /// # Errors

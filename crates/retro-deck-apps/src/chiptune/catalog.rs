@@ -61,6 +61,12 @@ impl ChiptuneCatalog {
         &self.files
     }
 
+    /// Consume the scan result into its ordered playable paths.
+    #[must_use]
+    pub fn into_files(self) -> Box<[PathBuf]> {
+        self.files
+    }
+
     /// Number of child paths that disappeared or could not be inspected.
     #[must_use]
     pub const fn inaccessible_entries(&self) -> usize {
