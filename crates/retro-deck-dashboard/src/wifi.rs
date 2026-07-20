@@ -149,6 +149,9 @@ impl WifiEditor {
     /// Apply one semantic action without performing external work.
     #[must_use]
     pub fn apply(&mut self, action: WifiAction) -> WifiTransition {
+        if self.status == WifiStatus::Saving && action != WifiAction::Close {
+            return WifiTransition::NONE;
+        }
         match action {
             WifiAction::Close => WifiTransition {
                 redraw: false,
@@ -222,13 +225,17 @@ impl WifiEditor {
     ///
     /// A successful save erases the in-memory passphrase. A failed save keeps
     /// it available for an explicit retry.
-    pub fn resolve_save(&mut self, saved: bool) {
+    pub fn resolve_save(&mut self, saved: bool) -> bool {
+        if self.status != WifiStatus::Saving {
+            return false;
+        }
         if saved {
             self.passphrase.clear();
             self.status = WifiStatus::Saved;
         } else {
             self.status = WifiStatus::SaveFailed;
         }
+        true
     }
 
     fn select_field(&mut self, field: WifiField) -> WifiTransition {
@@ -426,6 +433,7 @@ mod tests {
         assert_eq!(transition.effect, Some(WifiEffect::Save));
         assert_eq!(editor.status(), WifiStatus::Saving);
         assert_eq!(editor.apply(WifiAction::Save).effect, None);
+        assert!(!editor.apply(WifiAction::Delete).redraw);
         let Some(credentials) = editor.credentials() else {
             return;
         };
@@ -444,10 +452,15 @@ mod tests {
         assert!(diagnostics.contains("passphrase_bytes: 9"));
         assert!(!diagnostics.contains("secret123"));
 
-        editor.resolve_save(true);
+        assert_eq!(
+            editor.apply(WifiAction::Save).effect,
+            Some(WifiEffect::Save)
+        );
+        assert!(editor.resolve_save(true));
         assert_eq!(editor.status(), WifiStatus::Saved);
         assert_eq!(editor.passphrase_len(), 0);
         assert!(editor.credentials().is_none());
+        assert!(!editor.resolve_save(false));
     }
 
     #[test]
@@ -457,7 +470,7 @@ mod tests {
         let _ = editor.apply(WifiAction::SelectField(WifiField::Passphrase));
         type_text(&mut editor, "secret123");
         let _ = editor.apply(WifiAction::Save);
-        editor.resolve_save(false);
+        assert!(editor.resolve_save(false));
         assert_eq!(editor.status(), WifiStatus::SaveFailed);
         assert_eq!(editor.passphrase_len(), 9);
 
