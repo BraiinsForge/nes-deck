@@ -90,7 +90,9 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 - Add the pinned Rust workspace with repository-wide formatting, lint, and
   test entry points.
 - Add the narrow S-expression protocol and supervised Lisp worker.
-- Add a tested audio lifecycle state machine before an OSS backend uses it.
+- The tested audio lifecycle now drives finite cues, continuous square tones,
+  and general bounded PCM workers. PCM callbacks never wait, the OSS stream
+  opens lazily, and mute, pause, hide, shutdown, and idle release are explicit.
 - Extend ARMv7 verification to reject dynamic binaries and Nix references.
 
 ### Phase 2: management service (code complete)
@@ -117,7 +119,12 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 
 ### Phase 4: emulator host and dashboard
 
-- Port the shared display, input, audio, save, and frame-clock runtime.
+- Shared Rust display, input, frame-clock, and audio adapters are present. The
+  PCM path preserves the measured 32,768-to-32,000 Hz and
+  48,000-to-47,328 Hz Deck corrections, stream-ring priming, bounded latency,
+  and nonblocking callback contract.
+- Port save persistence and the remaining host wiring onto those shared
+  adapters.
 - Port the libretro host without changing pinned emulator implementations.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.

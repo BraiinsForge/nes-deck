@@ -10,6 +10,13 @@ libretro hosts, legacy shared runtime, and chiptune player while those pieces
 are migrated. ECL provides the interactive Lisp program, runs the catalog
 compiler during activation, and loads bounded device-local behavior policy.
 
+The Rust audio foundation includes fixed-capacity PCM buffering, direct
+stereo-to-mono downmixing, callback-stable linear resampling, worker-side gain,
+and a lazy OSS stream worker. The deployed C++ libretro frontend still uses
+its legacy audio runtime until the host port is complete. The Rust worker is
+therefore tested platform capability, not yet a claim about live NES, GB/GBC,
+or ZX playback.
+
 The BMC installation presents the dashboard as a scene widget. Games use a
 black fullscreen layer surface and a centered gameplay layer surface. The
 native runtime can fall back to direct framebuffer output. Audio uses the ALSA
@@ -43,8 +50,13 @@ Input and audio are independent execution paths. Touch and controller events
 update Rust state immediately and only try to enqueue a small cue identifier
 on a bounded channel. They never open `/dev/dsp`, write samples, wait for a
 sound child, or observe an audio cooldown. The audio worker may coalesce or
-drop stale cues when it falls behind. The same rule applies to Common Lisp:
-policy work is supervised and deadline-bound, never an input-loop dependency.
+drop stale cues when it falls behind. Continuous PCM producers follow the
+same contract: they only attempt a queue lock and bounded wakeup. Contention
+or overload discards old sound rather than delaying an emulator callback.
+Opening, ring priming, gain, resampling, writing, draining, resetting, and
+retry timing all remain on the dedicated audio thread. The same rule applies
+to Common Lisp: policy work is supervised and deadline-bound, never an
+input-loop dependency.
 
 The complete target layout, migration order, and proof gates are defined in
 [`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md).

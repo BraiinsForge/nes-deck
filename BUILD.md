@@ -225,6 +225,16 @@ use 44.1 kHz. Gambatte produces 32,768 Hz and is explicitly resampled to the
 Deck's verified 32 kHz OSS rate. Gain is applied in the native mixer because
 the kernel OSS path bypasses ALSA userspace soft volume.
 
+The Rust platform audio path keeps 16,384 recent mono source frames and moves
+at most 2,048 frames per worker operation. Emulator callbacks use a
+nonblocking queue attempt; lock contention drops that callback and queue
+overflow replaces the oldest sound. A streaming linear resampler keeps phase
+across callback boundaries and resets after a reported gap. The worker opens
+OSS only after PCM arrives, preserves the validated stream-ring priming
+sequence, drains and closes after 100 ms without source data, and resets
+immediately on mute, pause, hide, or shutdown. These rules become the live
+libretro behavior when the remaining C++ host is replaced.
+
 The framebuffer has no page-flip API. Frontends build complete frames in
 cacheable memory and copy finished rows to fb0 to reduce tearing and protect
 audio timing. `RETRO_DECK_RUNTIME_DIAGNOSTICS=1` logs 60-frame timing windows
@@ -236,9 +246,9 @@ from the shared libretro frontend.
 retrodeck/
 ├── crates/                      first-party Rust workspace
 │   ├── retro-deck-apps/         native app models, renderers, and runtimes
-│   ├── retro-deck-audio/        audio ownership state machine
+│   ├── retro-deck-audio/        audio lifecycle, PCM queue, and resampler
 │   ├── retro-deck-emulator/     safe emulator hosts and c-octo boundary
-│   ├── retro-deck-platform/     Linux input and device adapters
+│   ├── retro-deck-platform/     Linux input, display, and lazy audio workers
 │   ├── retro-deck-policy/       bounded Lisp protocol and supervisor
 │   └── retro-deck-uploader/     authenticated ROM and appearance service
 ├── chiptunes/                  CC0 seed tracks and provenance
