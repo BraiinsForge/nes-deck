@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=308836b6e7844dd1ee7b612b228e498284be31da";
     fceumm-src = {
       url = "github:libretro/libretro-fceumm/3a84a6fd0ba20dd4877c06b1d58741172148395f";
       flake = false;
@@ -22,12 +23,32 @@
   };
 
   outputs =
-    { self, nixpkgs, fceumm-src, gambatte-src, fuse-src, lua-src }:
+    { self, nixpkgs, bmc-main, fceumm-src, gambatte-src, fuse-src, lua-src }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       pkgsCross = pkgs.pkgsCross.armv7l-hf-multiplatform;
       staticCross = pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsStatic;
+      # Nixpkgs vendors every Git source named by the shared lock, even when a
+      # package does not enable bmc-native. All BMC crates use this one revision,
+      # so one source hash covers the complete Git workspace.
+      cargoLock = {
+        lockFile = ./Cargo.lock;
+        outputHashes = {
+          "bmc-render-0.1.0" = "sha256-9ouWZND/DOod9ZTHivlXCq2n3Az90Tp0B3yZ6pVui+E=";
+          "smithay-0.7.0" = "sha256-7oa5N61giQTl9cWSrY+Ap8rlHP4zeNJyN83w8swTqSo=";
+        };
+      };
+      nativeDashboardWidget = bmc-main.bmc.${system}.lib.mkExternalNativeWidgetPackage {
+        name = "retro-deck";
+        src = ./.;
+        cratePath = "crates/retro-deck-dashboard";
+        packageName = "retro-deck-dashboard";
+        binName = "retro-deck";
+        features = [ "bmc-native" ];
+        noDefaultFeatures = true;
+        manifest = ./deploy/widget/manifest.json;
+      };
 
       waylandNativeInputs = [ pkgs.wayland-scanner ];
       waylandStaticInputs = [ staticCross.wayland staticCross.libffi ];
@@ -145,7 +166,7 @@
           inherit pname version;
 
           src = libretroRustSources;
-          cargoLock.lockFile = ./Cargo.lock;
+          inherit cargoLock;
           cargoBuildFlags = [
             "-p"
             "retro-deck-emulator"
@@ -187,7 +208,7 @@
         pname = "rom-uploader";
         version = "0.1.0";
         src = uploaderSources;
-        cargoLock.lockFile = ./Cargo.lock;
+        inherit cargoLock;
         cargoBuildFlags = [ "-p" "retro-deck-uploader" ];
         doCheck = false;
 
@@ -200,6 +221,7 @@
     {
       packages.${system} = {
         runtime-licenses = runtimeLicenses;
+        retro-deck-widget = nativeDashboardWidget;
 
         nes-deck = mkLibretroHost {
           pname = "nes-deck";
@@ -309,7 +331,7 @@
           pname = "deck-dashboard";
           version = "0.1.0";
           src = dashboardRustSources;
-          cargoLock.lockFile = ./Cargo.lock;
+          inherit cargoLock;
           cargoBuildFlags = [
             "-p"
             "retro-deck-dashboard"
@@ -339,7 +361,7 @@
           pname = "chiptune-deck";
           version = "0.1.0";
           src = chiptuneRustSources;
-          cargoLock.lockFile = ./Cargo.lock;
+          inherit cargoLock;
           cargoBuildFlags = [
             "-p"
             "retro-deck-apps"
@@ -408,7 +430,7 @@
           pname = "ten-seconds-deck";
           version = "0.1.0";
           src = timerRustSources;
-          cargoLock.lockFile = ./Cargo.lock;
+          inherit cargoLock;
           cargoBuildFlags = [
             "-p"
             "retro-deck-apps"
@@ -536,7 +558,7 @@
           pname = "chip8-deck";
           version = "0.1.0";
           src = chip8RustSources;
-          cargoLock.lockFile = ./Cargo.lock;
+          inherit cargoLock;
           cargoBuildFlags = [
             "-p"
             "retro-deck-emulator"
