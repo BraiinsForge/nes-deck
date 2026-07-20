@@ -13,6 +13,7 @@ pub(super) const API_VERSION: c_uint = 1;
 pub(super) const DEVICE_JOYPAD: c_uint = 1;
 pub(super) const DEVICE_KEYBOARD: c_uint = 3;
 pub(super) const DEVICE_TYPE_SHIFT: c_uint = 8;
+pub(super) const DEVICE_MASK: c_uint = (1 << DEVICE_TYPE_SHIFT) - 1;
 
 pub(super) const MEMORY_SAVE_RAM: c_uint = 0;
 pub(super) const MEMORY_RTC: c_uint = 1;

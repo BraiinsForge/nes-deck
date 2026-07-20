@@ -15,8 +15,12 @@ use std::ptr;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use retro_deck_platform::input::KeyboardState;
+
 use super::environment::{Environment, EnvironmentError};
-use super::{LibretroCore, PixelFormat, abi};
+use super::{
+    JoypadState, LibretroCore, PixelFormat, abi, joypad_from_keyboard, medium_raw_key_for_retro,
+};
 
 static SESSION_ACTIVE: AtomicBool = AtomicBool::new(false);
 
@@ -26,7 +30,11 @@ thread_local! {
 
 #[derive(Debug)]
 struct CallbackState {
+    core: LibretroCore,
     environment: Environment,
+    player_one: JoypadState,
+    player_two: JoypadState,
+    keyboard: KeyboardState,
 }
 
 /// Exclusive binding between one core session and its context-free callbacks.
@@ -54,7 +62,13 @@ impl CallbackBinding {
             }
         };
         let mut binding = Self {
-            state: Box::new(CallbackState { environment }),
+            state: Box::new(CallbackState {
+                core,
+                environment,
+                player_one: JoypadState::default(),
+                player_two: JoypadState::default(),
+                keyboard: KeyboardState::default(),
+            }),
             not_send_or_sync: PhantomData,
         };
         let pointer = ptr::from_mut(binding.state.as_mut());
@@ -83,6 +97,37 @@ impl CallbackBinding {
     )]
     pub(super) const fn environment_callback(&self) -> abi::EnvironmentCallback {
         environment_callback
+    }
+
+    #[allow(
+        clippy::unused_self,
+        reason = "requiring a live binding to obtain callbacks documents the ownership invariant"
+    )]
+    pub(super) const fn input_poll_callback(&self) -> abi::InputPollCallback {
+        input_poll_callback
+    }
+
+    #[allow(
+        clippy::unused_self,
+        reason = "requiring a live binding to obtain callbacks documents the ownership invariant"
+    )]
+    pub(super) const fn input_state_callback(&self) -> abi::InputStateCallback {
+        input_state_callback
+    }
+
+    pub(super) fn set_input(
+        &mut self,
+        player_one: JoypadState,
+        player_two: JoypadState,
+        keyboard: KeyboardState,
+    ) {
+        self.state.player_one = if self.state.core == LibretroCore::Fuse {
+            player_one
+        } else {
+            player_one.merged(joypad_from_keyboard(keyboard))
+        };
+        self.state.player_two = player_two;
+        self.state.keyboard = keyboard;
     }
 }
 
@@ -138,9 +183,49 @@ unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) ->
     })
 }
 
+const unsafe extern "C" fn input_poll_callback() {}
+
+unsafe extern "C" fn input_state_callback(
+    port: c_uint,
+    device: c_uint,
+    index: c_uint,
+    identifier: c_uint,
+) -> i16 {
+    CALLBACK_STATE.with(|slot| {
+        // SAFETY: A non-null slot points to the binding's live boxed state,
+        // and `CallbackBinding` cannot leave the installing thread.
+        let Some(state) = (unsafe { slot.get().as_ref() }) else {
+            return 0;
+        };
+        let device = device & abi::DEVICE_MASK;
+        if device == abi::DEVICE_KEYBOARD {
+            if state.core != LibretroCore::Fuse || port != 0 || index != 0 {
+                return 0;
+            }
+            return medium_raw_key_for_retro(identifier)
+                .is_some_and(|key| state.keyboard.contains(key))
+                .into();
+        }
+        if device != abi::DEVICE_JOYPAD
+            || index != 0
+            || usize::try_from(port)
+                .map_or(true, |port| port >= state.core.controller_ports().len())
+        {
+            return 0;
+        }
+        let joypad = match port {
+            0 => state.player_one,
+            1 => state.player_two,
+            _ => return 0,
+        };
+        i16::try_from(joypad.value(identifier)).unwrap_or_default()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use retro_deck_platform::input::{Button, ButtonSet, MediumRawKey};
     use std::sync::{Mutex, MutexGuard};
     use std::thread;
 
@@ -234,5 +319,68 @@ mod tests {
             )
         });
         assert_eq!(binding.pixel_format(), PixelFormat::Rgb565);
+    }
+
+    #[test]
+    fn console_cores_merge_keyboard_controls_into_player_one() {
+        let _test_session = serialize_sessions();
+        let mut binding = CallbackBinding::install(LibretroCore::Fceumm, Path::new("/roms/nes"))
+            .expect("first callback binding");
+        let player_one = JoypadState::from_buttons(
+            ButtonSet::empty()
+                .with(Button::B, true)
+                .with(Button::Left, true),
+        );
+        let player_two = JoypadState::from_buttons(ButtonSet::empty().with(Button::Start, true));
+        let space = MediumRawKey::new(57).expect("Space key code");
+        binding.set_input(
+            player_one,
+            player_two,
+            KeyboardState::empty().with(space, true),
+        );
+        let callback = binding.input_state_callback();
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_JOYPAD, 0, 8) }, 1);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_JOYPAD, 0, 0) }, 1);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_JOYPAD, 0, 6) }, 1);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(1, abi::DEVICE_JOYPAD, 0, 3) }, 1);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_JOYPAD, 0, 256) }, 0x141);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(2, abi::DEVICE_JOYPAD, 0, 8) }, 0);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_KEYBOARD, 0, 32) }, 0);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_JOYPAD, 1, 8) }, 0);
+    }
+
+    #[test]
+    fn zx_keeps_keyboard_and_joystick_queries_separate() {
+        let _test_session = serialize_sessions();
+        let mut binding = CallbackBinding::install(LibretroCore::Fuse, Path::new("/roms/zx"))
+            .expect("first callback binding");
+        let letter_a = MediumRawKey::new(30).expect("A key code");
+        binding.set_input(
+            JoypadState::from_buttons(ButtonSet::empty().with(Button::A, true)),
+            JoypadState::from_buttons(ButtonSet::empty().with(Button::B, true)),
+            KeyboardState::empty().with(letter_a, true),
+        );
+        let callback = binding.input_state_callback();
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_KEYBOARD, 0, 97) }, 1);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_KEYBOARD, 0, 282) }, 0);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(
+            unsafe { callback(0, abi::device_subclass(abi::DEVICE_JOYPAD, 1), 0, 8) },
+            1
+        );
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(1, abi::DEVICE_JOYPAD, 0, 0) }, 1);
+        // SAFETY: The poll callback has no parameters or side effects.
+        unsafe { binding.input_poll_callback()() };
     }
 }
