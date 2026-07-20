@@ -26,6 +26,11 @@ The separate uploader bundle installs `nes-deck-uploader.init` as
 `/etc/init.d/nes-deck-uploader` and the static service as
 `/mnt/data/nes-deck/uploader/rom-uploader`.
 
+Deployment also installs the verified Rust replacement side by side as
+`/mnt/data/nes-deck/menu/deck-dashboard.candidate`. Nothing in the widget,
+service, or launcher selects that file. The explicit `.candidate` suffix is a
+guard against treating an untested-on-device runtime as the boot dashboard.
+
 On a BMC compositor installation, the deployment also installs the Retro Deck
 widget manifest and launcher under `/mnt/data/bmc-widgets/retro-deck`. The
 dashboard runs as a normal swipeable scene. Games and native Deck programs use

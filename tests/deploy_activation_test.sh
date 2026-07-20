@@ -40,6 +40,15 @@ grep -Fq "[[ -f \$activate_script && ! -L \$activate_script ]]" "$deployer" ||
   fail 'deployer does not validate the activation script'
 grep -Fq 'cp lisp/package.lisp lisp/retro-deck.asd lisp/run-worker.lisp' \
   "$deployer" || fail 'deployer does not stage managed Lisp sources'
+grep -Fq 'dashboard=$(build_flake .#deck-dashboard)' "$deployer" ||
+  fail 'deployer does not build the staged Rust dashboard'
+grep -Fq '"$payload/nes-deck/menu/deck-dashboard.candidate"' "$deployer" ||
+  fail 'deployer does not keep the Rust dashboard visibly non-default'
+grep -Fq '"$stage/nes-deck/menu/deck-dashboard.candidate" --validate-manifest' \
+  "$activation" || fail 'activation does not preflight the Rust dashboard catalog'
+grep -Fq 'exec /mnt/data/nes-deck/menu/deck-menu-launcher' \
+  "$repo_root/deploy/widget/retro-deck" ||
+  fail 'the installed widget no longer defaults to the proven launcher'
 grep -Fq "\"\$stage/deploy/install-lisp-tree\" --check \"\$stage/nes-deck/lisp\"" \
   "$activation" || fail 'activation does not preflight managed Lisp sources'
 grep -Fq "\"\$stage/deploy/install-lisp-tree\" \"\$stage/nes-deck/lisp\" \"\$base/lisp\"" \
