@@ -4,10 +4,15 @@ use std::collections::TryReserveError;
 use std::error::Error;
 use std::fmt;
 use std::fs::File;
-use std::io::{self, Read as _};
+use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use rustix::fs::{Mode, OFlags, open};
+use rustix::fs::{AtFlags, Mode, OFlags, fchmod, fsync, open, openat, renameat, unlinkat};
+
+const PRIVATE_MODE: Mode = Mode::from_raw_mode(0o600);
+const TEMPORARY_ATTEMPTS: u64 = 8;
+static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
 /// Read one nonempty regular file without following its final symlink.
 ///
@@ -78,6 +83,103 @@ pub fn read_regular_bounded(
     Ok(bytes)
 }
 
+/// Durably replace one absolute private state file without following a final
+/// destination symlink.
+///
+/// A mode-0600 sibling is fully written and synced before atomic rename. The
+/// containing directory is then synced, and any failed temporary is removed.
+///
+/// # Errors
+///
+/// Returns [`AtomicWriteError`] for an unsafe path, oversized value,
+/// temporary-name exhaustion, or filesystem failure.
+pub fn write_private_atomic(
+    path: impl AsRef<Path>,
+    contents: &[u8],
+    maximum_bytes: usize,
+) -> Result<(), AtomicWriteError> {
+    let path = path.as_ref();
+    if !path.is_absolute() || maximum_bytes == 0 {
+        return Err(AtomicWriteError::UnsafePath(path.to_path_buf()));
+    }
+    if contents.len() > maximum_bytes {
+        return Err(AtomicWriteError::Oversized {
+            size: contents.len(),
+            maximum: maximum_bytes,
+        });
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| AtomicWriteError::UnsafePath(path.to_path_buf()))?;
+    let filename = path
+        .file_name()
+        .filter(|filename| !filename.is_empty())
+        .ok_or_else(|| AtomicWriteError::UnsafePath(path.to_path_buf()))?;
+    let directory = open(
+        parent,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::DIRECTORY,
+        Mode::empty(),
+    )
+    .map_err(|source| AtomicWriteError::Io {
+        path: path.to_path_buf(),
+        operation: "open parent directory",
+        source: source.into(),
+    })?;
+
+    let serial = NEXT_TEMPORARY.fetch_add(TEMPORARY_ATTEMPTS, Ordering::Relaxed);
+    let mut temporary = None;
+    let mut last_error = None;
+    for attempt in 0..TEMPORARY_ATTEMPTS {
+        let name = format!(
+            ".retro-deck.{}.{}.tmp",
+            std::process::id(),
+            serial.saturating_add(attempt)
+        );
+        match openat(
+            &directory,
+            name.as_str(),
+            OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::CREATE | OFlags::EXCL,
+            PRIVATE_MODE,
+        ) {
+            Ok(descriptor) => {
+                temporary = Some((name, File::from(descriptor)));
+                break;
+            }
+            Err(source) => last_error = Some(source),
+        }
+    }
+    let Some((temporary_name, mut file)) = temporary else {
+        let source = last_error.map_or_else(
+            || io::Error::other("temporary name attempts exhausted"),
+            io::Error::from,
+        );
+        return Err(AtomicWriteError::Io {
+            path: path.to_path_buf(),
+            operation: "create temporary state",
+            source,
+        });
+    };
+
+    let result = (|| {
+        fchmod(&file, PRIVATE_MODE).map_err(io::Error::from)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        renameat(&directory, temporary_name.as_str(), &directory, filename)
+            .map_err(io::Error::from)?;
+        fsync(&directory).map_err(io::Error::from)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ignored = unlinkat(&directory, temporary_name.as_str(), AtFlags::empty());
+    }
+    result.map_err(|source| AtomicWriteError::Io {
+        path: path.to_path_buf(),
+        operation: "replace private state",
+        source,
+    })
+}
+
 /// Failure while securely reading one bounded regular file.
 #[derive(Debug)]
 pub enum BoundedReadError {
@@ -138,10 +240,63 @@ impl Error for BoundedReadError {
     }
 }
 
+/// Failure while durably replacing one private state file.
+#[derive(Debug)]
+pub enum AtomicWriteError {
+    /// The destination is relative, lacks a filename, or has no parent.
+    UnsafePath(PathBuf),
+    /// The caller-provided value exceeds its explicit cap.
+    Oversized {
+        /// Requested byte count.
+        size: usize,
+        /// Accepted byte count.
+        maximum: usize,
+    },
+    /// One named filesystem operation failed.
+    Io {
+        /// Requested final destination.
+        path: PathBuf,
+        /// Failed operation.
+        operation: &'static str,
+        /// Operating-system failure.
+        source: io::Error,
+    },
+}
+
+impl fmt::Display for AtomicWriteError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsafePath(path) => write!(
+                formatter,
+                "{} is not a safe absolute state path",
+                path.display()
+            ),
+            Self::Oversized { size, maximum } => {
+                write!(formatter, "state has {size} bytes; maximum is {maximum}")
+            }
+            Self::Io {
+                path,
+                operation,
+                source,
+            } => write!(formatter, "cannot {operation} {}: {source}", path.display()),
+        }
+    }
+}
+
+impl Error for AtomicWriteError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::UnsafePath(_) | Self::Oversized { .. } => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
     use std::os::unix::fs::symlink;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -219,6 +374,60 @@ mod tests {
         assert!(matches!(
             read_regular_bounded(&fixture.root, 4),
             Err(BoundedReadError::NotRegular)
+        ));
+    }
+
+    #[test]
+    fn private_state_replacement_is_atomic_and_mode_restricted() {
+        let fixture = Fixture::new();
+        let path = fixture.root.join("volume.state");
+        write_private_atomic(&path, b"42\n", 8).expect("initial private state is written");
+        write_private_atomic(&path, b"55\n", 8).expect("private state is replaced");
+        assert_eq!(fs::read(&path).expect("private state is readable"), b"55\n");
+        let mode = fs::metadata(&path)
+            .expect("private state metadata is readable")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn replacement_overwrites_a_symlink_without_touching_its_target() {
+        let fixture = Fixture::new();
+        let target = fixture.root.join("target");
+        let path = fixture.root.join("volume.state");
+        fs::write(&target, b"target").expect("atomic-write target is created");
+        symlink(&target, &path).expect("atomic-write symlink is created");
+        write_private_atomic(&path, b"42\n", 8).expect("symlink is atomically replaced");
+        assert_eq!(
+            fs::read(&target).expect("target remains readable"),
+            b"target"
+        );
+        assert_eq!(
+            fs::read(&path).expect("state replacement is readable"),
+            b"42\n"
+        );
+        assert!(
+            !fs::symlink_metadata(&path)
+                .expect("replacement metadata is readable")
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    #[test]
+    fn atomic_state_write_requires_an_absolute_bounded_path() {
+        assert!(matches!(
+            write_private_atomic("relative.state", b"42\n", 8),
+            Err(AtomicWriteError::UnsafePath(_))
+        ));
+        assert!(matches!(
+            write_private_atomic("/tmp/oversized.state", b"12345", 4),
+            Err(AtomicWriteError::Oversized {
+                size: 5,
+                maximum: 4
+            })
         ));
     }
 }
