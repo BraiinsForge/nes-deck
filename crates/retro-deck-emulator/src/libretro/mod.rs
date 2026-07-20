@@ -2,6 +2,7 @@
 
 mod abi;
 mod content;
+mod environment;
 mod input;
 mod keyboard;
 mod options;
@@ -9,6 +10,7 @@ mod profile;
 mod save;
 
 pub use content::{Content, ContentError};
+pub use environment::PixelFormat;
 pub use input::{JOYPAD_MASK_ID, JoypadButton, JoypadState};
 pub use keyboard::{joypad_from_keyboard, medium_raw_key_for_retro};
 pub use options::CoreOption;
