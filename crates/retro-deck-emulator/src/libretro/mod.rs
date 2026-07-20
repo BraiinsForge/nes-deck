@@ -1,6 +1,7 @@
 //! Safe models and boundaries for statically linked libretro cores.
 
 mod abi;
+mod audio;
 mod callbacks;
 mod content;
 mod environment;
