@@ -21,12 +21,15 @@ ARMv7, BMC integration, and live Deck checks pass.
 | --- | --- |
 | Widget lifecycle, touch, visibility, frame callbacks and DMA-BUF slots | `bmc-widget` |
 | GPU canvas, layout, text, icons, images and hit testing | `bmc-render` |
+| Keyboard/controller discovery, hotplug, focus and routing | BMC compositor and input services |
+| Declared application launch, supervision and return to the dashboard | BMC application service |
+| Native application packaging and its runtime closure | BMC package tooling |
 | System brightness, reboot, global sound and Wi-Fi recovery | BMC services and protocols |
 | HTTP transport, authentication, sessions, CSRF and multipart parsing | BMC web stack, or an established Rust web stack until integration exists |
 | ROM validation, catalog meaning, cover selection and save paths | Retro Deck |
 | Game/app state, retro styling and controller mappings | Retro Deck |
 | Emulator ABI adaptation and pinned-core patches | Retro Deck |
-| Real-time emulator and chiptune PCM | A narrow lazy Rust adapter until BMC exposes streaming audio |
+| Real-time emulator and chiptune PCM | BMC streaming-audio service; a migration-only adapter may bridge the gap |
 | Trusted local behavior patches | Supervised Common Lisp with a bounded Rust boundary |
 
 BMC sources are dependencies, not copied or vendored into this repository.
@@ -40,6 +43,12 @@ service capability is genuinely missing or defective, fix or extend it in
 `bmc-main` as a generally useful facility and consume that facility here. Do
 not compensate with a Retro Deck-specific compositor fork or parallel platform
 stack.
+
+This also applies to integration plumbing. Retro Deck must ship through BMC's
+native-application package format, receive input from BMC, and request declared
+child applications through BMC. It must not retain its own device discovery,
+Wayland protocol copy, process supervisor, or ad-hoc dynamic-library closure as
+the selected production path.
 
 ## Dependency rule
 
@@ -81,9 +90,13 @@ properties, not justification for recreating a mature library.
 - Put ROM endpoints behind BMC authentication and Axum routing. Delete the
   hand-written HTTP, session, CSRF, form and multipart implementation once the
   route is integrated.
-- Prefer compositor-delivered keyboard input when BMC exposes it. Until then,
-  keep only the small evdev keyboard/controller gap, release grabs whenever the
-  widget is dormant, and document the upstream capability still missing.
+- Add keyboard/controller discovery, hotplug, focus and routing to BMC. Until
+  that public capability is usable, keep the existing evdev path only as an
+  unselected rollback implementation; do not add evdev access to the native
+  dashboard.
+- Add a BMC-owned application-launch contract whose allowed targets are
+  declared at install time. The native dashboard sends logical launch requests
+  and does not execute catalog-derived paths itself.
 - Split gameplay layer-shell presentation from widget presentation. Keep the
   smallest measured adapter until BMC offers an application/game surface API.
 - Remove superseded C++, protocol copies, generated bindings, shell plumbing,
@@ -101,10 +114,12 @@ only while something needs to play. BMC owns finite widget sounds. Retro Deck
 requests a cue and never opens `/dev/dsp` for menu navigation.
 
 Real-time emulator and chiptune PCM is different from BMC's current file-based
-`madplay` service. Until BMC supplies a streaming API, one Rust owner per active
-game or player opens lazily, writes off the input thread, and closes on mute,
-pause, dormancy, exit, idle, or first silence as appropriate. Input never waits
-for audio. If a BMC streaming service lands, this adapter is deleted.
+`madplay` service. Add a BMC streaming API with explicit acquisition and
+release semantics. While that API is being built, the existing Rust adapter is
+a rollback path only: one owner per active game or player opens lazily, writes
+off the input thread, and closes on mute, pause, dormancy, exit, idle, or first
+silence as appropriate. Input never waits for audio. Delete the adapter when
+the BMC service lands.
 
 ## Migration sequence
 
@@ -121,6 +136,8 @@ for audio. If a BMC streaming service lands, this adapter is deleted.
   do not compile it to WASM or host it inside the WASM runtime.
 - Consume `DeckWidgetSurfaceClient`, lifecycle events, touch events, frame
   callbacks and reusable DMA-BUF slots from `bmc-widget`.
+- Build and install the executable through BMC's native-application package
+  tooling so its dynamic runtime closure is owned by the platform.
 - Render the authoritative dashboard screens with `bmc-render` on BMC's GPU
   path, preserving the approved visual design rather than pixel identity with
   the temporary C++ implementation.
