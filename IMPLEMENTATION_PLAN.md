@@ -2,10 +2,13 @@
 
 ## Objective
 
-Retro Deck is a native BMC widget and game launcher. It is not a second
-compositor toolkit, settings service, web framework, or hardware-management
-stack. First-party code is mainly idiomatic Rust and Common Lisp. Emulator
-sources remain pinned upstream dependencies with ordered local patches.
+Retro Deck is a native Rust application and game launcher presented as a
+swipeable scene by the BMC Wayland compositor. "Widget" refers only to that
+native compositor surface contract: Retro Deck is not a WASM guest. It is not
+a second compositor toolkit, settings service, web framework, or
+hardware-management stack. First-party code is mainly idiomatic Rust and
+Common Lisp. Emulator sources remain pinned upstream dependencies with ordered
+local patches.
 
 The current C++ dashboard and the self-contained Rust candidate are rollback
 references while the BMC-backed widget is built. Neither becomes a reason to
@@ -30,6 +33,13 @@ BMC sources are dependencies, not copied or vendored into this repository.
 When BMC becomes public, pin one reviewed commit. During local integration a
 sibling checkout may be selected outside Git, but no machine-specific path or
 private network topology is committed.
+
+Retro Deck consumes the public native application boundary that `bmc-main`
+provides. When a required compositor, input, rendering, lifecycle, or system
+service capability is genuinely missing or defective, fix or extend it in
+`bmc-main` as a generally useful facility and consume that facility here. Do
+not compensate with a Retro Deck-specific compositor fork or parallel platform
+stack.
 
 ## Dependency rule
 
@@ -107,6 +117,8 @@ for audio. If a BMC streaming service lands, this adapter is deleted.
 
 ### 2. Replace the dashboard platform
 
+- Run the dashboard as a native process registered as a swipeable BMC scene;
+  do not compile it to WASM or host it inside the WASM runtime.
 - Consume `DeckWidgetSurfaceClient`, lifecycle events, touch events, frame
   callbacks and reusable DMA-BUF slots from `bmc-widget`.
 - Render the authoritative dashboard screens with `bmc-render` on BMC's GPU
