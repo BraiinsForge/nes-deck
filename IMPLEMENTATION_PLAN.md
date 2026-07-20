@@ -190,8 +190,15 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 - A staged native dashboard binary now drives the production Rust Wayland
   widget, controller discovery and hotplug, touch commits, visibility-aware
   polling, menu/settings switching, and 25 Hz credits frames through one reused
-  allocation. It is not packaged or deployed until external effects land.
-- Port the dashboard model and renderer, using Lisp only on state changes.
+  allocation. Preferences persist on a bounded worker and menu cues acquire
+  audio lazily without delaying input.
+- Fixed launch plans now hand audio ownership to managed child process groups,
+  keep the Wayland connection serviced, supervise emulator exit through a
+  touchscreen-only hold, contain failed children, discard stale menu input,
+  and adopt validated child volume state. Wi-Fi mutation remains deliberately
+  isolated from this runtime.
+- Keep the staged dashboard unpackaged and undeployed until its complete host
+  gates, ARMv7 closure audit, and live Deck checks pass.
 - Generate screenshots from the same Rust renderer used on the Deck.
 
 ### Phase 5: dependency organization and removal
