@@ -312,6 +312,15 @@ pub fn fit_text_scale(text: &str, maximum_width: usize, preferred: usize, minimu
     }
 }
 
+/// Number of complete glyph cells that fit in one horizontal extent.
+#[must_use]
+pub const fn text_capacity(maximum_width: usize, scale: usize) -> usize {
+    if scale == 0 {
+        return 0;
+    }
+    maximum_width.saturating_add(scale) / GLYPH_ADVANCE.saturating_mul(scale)
+}
+
 /// Convert packed `0xRRGGBB` to native RGB565 without dithering.
 #[must_use]
 #[allow(
@@ -347,6 +356,14 @@ impl<const CAPACITY: usize> TextBuffer<CAPACITY> {
     pub fn from_bytes(bytes: &[u8]) -> Self {
         let mut output = Self::new();
         output.push_bytes(bytes);
+        output
+    }
+
+    /// Construct display ASCII with one `?` for each non-ASCII character.
+    #[must_use]
+    pub fn from_display(text: &str) -> Self {
+        let mut output = Self::new();
+        output.push_display(text);
         output
     }
 
@@ -388,6 +405,22 @@ impl<const CAPACITY: usize> TextBuffer<CAPACITY> {
         }
     }
 
+    /// Append display ASCII with one glyph for each Unicode character.
+    pub fn push_display(&mut self, text: &str) {
+        for character in text.chars() {
+            let character = if character.is_ascii() {
+                u8::try_from(u32::from(character)).unwrap_or(b'?')
+            } else {
+                b'?'
+            };
+            let Some(destination) = self.bytes.get_mut(self.len) else {
+                return;
+            };
+            *destination = character;
+            self.len = self.len.saturating_add(1);
+        }
+    }
+
     /// Clip the current value and append an ASCII ellipsis when possible.
     pub fn clip_with_ellipsis(&mut self, maximum: usize) {
         let maximum = maximum.min(CAPACITY);
@@ -398,8 +431,22 @@ impl<const CAPACITY: usize> TextBuffer<CAPACITY> {
             self.len = maximum;
             return;
         }
-        self.len = maximum - 3;
+        let mut prefix = maximum - 3;
+        while prefix > 0
+            && self
+                .bytes
+                .get(..prefix)
+                .is_some_and(|bytes| std::str::from_utf8(bytes).is_err())
+        {
+            prefix = prefix.saturating_sub(1);
+        }
+        self.len = prefix;
         self.push_bytes(b"...");
+    }
+
+    /// Clip to the number of scaled glyphs that fit in `maximum_width`.
+    pub fn fit_width(&mut self, maximum_width: usize, scale: usize) {
+        self.clip_with_ellipsis(text_capacity(maximum_width, scale));
     }
 }
 
@@ -518,7 +565,9 @@ const fn glyph_rows(character: u8) -> [u8; GLYPH_HEIGHT] {
 
 #[cfg(test)]
 mod tests {
-    use super::{Canvas, Rect, TextBuffer, fit_text_scale, rgb888_to_rgb565, text_width};
+    use super::{
+        Canvas, Rect, TextBuffer, fit_text_scale, rgb888_to_rgb565, text_capacity, text_width,
+    };
     use std::fmt::Write as _;
 
     #[test]
@@ -561,5 +610,11 @@ mod tests {
         text.push_bytes(b" PERCENT");
         text.clip_with_ellipsis(10);
         assert_eq!(text.as_bytes(), b"VOL 42 ...");
+
+        let mut display = TextBuffer::<16>::from_display("Wi-Fi Česko");
+        assert_eq!(display.as_str(), "Wi-Fi ?esko");
+        assert_eq!(text_capacity(29, 1), 5);
+        display.fit_width(29, 1);
+        assert_eq!(display.as_str(), "Wi...");
     }
 }
