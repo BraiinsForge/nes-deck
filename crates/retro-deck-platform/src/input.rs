@@ -90,6 +90,17 @@ impl ButtonSet {
         self.0 & button.mask() != 0
     }
 
+    /// Return a copy with one semantic button changed.
+    #[must_use]
+    pub const fn with(mut self, button: Button, pressed: bool) -> Self {
+        if pressed {
+            self.insert(button);
+        } else {
+            self.0 &= !button.mask();
+        }
+        self
+    }
+
     const fn insert(&mut self, button: Button) {
         self.0 |= button.mask();
     }
@@ -420,6 +431,17 @@ mod tests {
                 maximum: 1
             })
         );
+    }
+
+    #[test]
+    fn button_sets_compose_without_exposing_storage() {
+        let state = ButtonSet::empty()
+            .with(Button::A, true)
+            .with(Button::Start, true)
+            .with(Button::A, false);
+        assert!(!state.contains(Button::A));
+        assert!(state.contains(Button::Start));
+        assert_eq!(state, state.with(Button::Start, true));
     }
 
     #[test]
