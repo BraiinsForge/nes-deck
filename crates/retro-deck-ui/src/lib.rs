@@ -270,11 +270,9 @@ impl<'pixels> Canvas<'pixels> {
         if scale == 0 {
             return;
         }
-        let rows = glyph_rows(character);
-        for (row, bits) in rows.into_iter().enumerate() {
+        for row in 0..GLYPH_HEIGHT {
             for column in 0..GLYPH_WIDTH {
-                let shift = GLYPH_WIDTH.saturating_sub(1).saturating_sub(column);
-                if bits & (1_u8 << shift) == 0 {
+                if !glyph_pixel(character, column, row) {
                     continue;
                 }
                 self.fill_rect(
@@ -294,6 +292,29 @@ impl<'pixels> Canvas<'pixels> {
             }
         }
     }
+}
+
+/// Whether one source pixel is set in the shared 5x7 ASCII font.
+///
+/// Coordinates outside the source glyph are always clear. Unknown bytes use
+/// the same question-mark glyph as ordinary text rendering.
+#[must_use]
+pub const fn glyph_pixel(character: u8, column: usize, row: usize) -> bool {
+    if column >= GLYPH_WIDTH || row >= GLYPH_HEIGHT {
+        return false;
+    }
+    let [row_0, row_1, row_2, row_3, row_4, row_5, row_6] = glyph_rows(character);
+    let bits = match row {
+        0 => row_0,
+        1 => row_1,
+        2 => row_2,
+        3 => row_3,
+        4 => row_4,
+        5 => row_5,
+        _ => row_6,
+    };
+    let shift = GLYPH_WIDTH - 1 - column;
+    bits & (1_u8 << shift) != 0
 }
 
 /// Rendered width of UTF-8 text under the one-glyph-per-character policy.
@@ -579,7 +600,8 @@ const fn glyph_rows(character: u8) -> [u8; GLYPH_HEIGHT] {
 #[cfg(test)]
 mod tests {
     use super::{
-        Canvas, Rect, TextBuffer, fit_text_scale, rgb888_to_rgb565, text_capacity, text_width,
+        Canvas, Rect, TextBuffer, fit_text_scale, glyph_pixel, rgb888_to_rgb565, text_capacity,
+        text_width,
     };
     use std::fmt::Write as _;
 
@@ -610,6 +632,10 @@ mod tests {
         assert_ne!(canvas.pixel(1, 0), canvas.pixel(7, 0));
         assert_eq!(text_width("AžB", 2), 34);
         assert_eq!(fit_text_scale("ABCDE", 29, 3, 1), 1);
+        assert!(glyph_pixel(b'A', 1, 0));
+        assert!(!glyph_pixel(b'A', 0, 0));
+        assert!(!glyph_pixel(b'A', 5, 0));
+        assert!(!glyph_pixel(b'A', 0, 7));
     }
 
     #[test]
