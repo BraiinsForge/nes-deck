@@ -47,7 +47,6 @@
         ./src/joypad_input.cpp
         ./src/libretro_deck.cpp
       ];
-      nesSources = sourceTree libretroSources;
       gbSources = sourceTree libretroSources;
       zxSources = sourceTree (libretroSources ++ [ ./src/zx_keyboard.h ]);
       chiptuneSources = sourceTree (runtimeSources ++ [
@@ -115,6 +114,9 @@
         ./vendor/emulators/c-octo/LICENSE.txt
         ./vendor/emulators/c-octo/upstream/octo_emulator.h
       ];
+      libretroRustSources = rustWorkspaceSources [
+        ./protocol/deck-widget-v1.xml
+      ];
       uploaderPackage = {
         pname = "rom-uploader";
         version = "0.1.0";
@@ -133,70 +135,86 @@
       packages.${system} = {
         runtime-licenses = runtimeLicenses;
 
-        nes-deck = pkgsCross.stdenv.mkDerivation {
+        nes-deck = pkgsCross.rustPlatform.buildRustPackage {
           pname = "nes-deck";
-          version = "0.1.0-20260714-deck";
+          version = "0.2.0";
 
-          src = fceumm-src;
-          nativeBuildInputs =
-            [ pkgs.gnumake pkgs.nukeReferences ] ++ waylandNativeInputs;
+          src = libretroRustSources;
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [
+            "-p"
+            "retro-deck-emulator"
+            "--bin"
+            "libretro-deck"
+            "--no-default-features"
+            "--features"
+            "libretro-linked"
+          ];
+          doCheck = false;
+
+          env.RUSTFLAGS = "-C target-feature=+crt-static";
+          nativeBuildInputs = [ pkgs.gnumake pkgs.gnupatch pkgs.nukeReferences ];
           buildInputs = [
             pkgsCross.glibc.static
             staticCross.zlib
-          ] ++ waylandStaticInputs;
+          ];
           allowedReferences = [ ];
 
-          NIX_CFLAGS_COMPILE = "-static -O3";
-          NIX_LDFLAGS = "-static";
-
-          postPatch = ''
+          preBuild = ''
+            core=$TMPDIR/fceumm-core
+            cp -R ${fceumm-src} "$core"
+            chmod -R u+w "$core"
+            patch_root=${./vendor/emulators/fceumm/patches}
+            while IFS= read -r local_patch || [ -n "$local_patch" ]; do
+              case "$local_patch" in
+                ""|\#*) continue ;;
+              esac
+              patch -d "$core" -p1 < "$patch_root/$local_patch"
+            done < "$patch_root/series"
             # A standalone static frontend needs the core's vendored libretro
             # utility implementations instead of symbols from RetroArch.
-            substituteInPlace Makefile.common \
+            substituteInPlace "$core/Makefile.common" \
               --replace-fail \
                 'ifneq ($(STATIC_LINKING), 1)' \
                 'ifeq ($(STATIC_LINKING), 1)'
-          '';
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
-            make -j$NIX_BUILD_CORES \
+            make -C "$core" -j$NIX_BUILD_CORES \
               platform=rpi2 \
               STATIC_LINKING=1 \
               TARGET=fceumm_libretro.a \
               EXTERNAL_ZLIB=1 \
               CC=$CC \
               AR=${pkgsCross.stdenv.cc.targetPrefix}ar
-            $CXX -std=c++11 -O3 -fomit-frame-pointer \
-              -marm -march=armv7-a -mtune=cortex-a7 \
-              -mfpu=neon-vfpv4 -mfloat-abi=hard \
-              -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_NES=1 -DRETRO_DECK_WAYLAND=1 \
-              -I. -Isrc/drivers/libretro/libretro-common/include -I${nesSources} \
-              ${nesSources}/libretro_deck.cpp \
-              ${nesSources}/deck_runtime.cpp \
-              ${nesSources}/deck_wayland.cpp \
-              ${nesSources}/joypad_input.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              fceumm_libretro.a \
-              -static -Wl,-s -pthread -lm -lz -lwayland-client -lffi \
-              -o nes-deck
-            runHook postBuild
+            export RUSTFLAGS="$RUSTFLAGS \
+              -C link-arg=-Wl,--start-group \
+              -C link-arg=$core/fceumm_libretro.a \
+              -C link-arg=-lstdc++ \
+              -C link-arg=-lz \
+              -C link-arg=-lm \
+              -C link-arg=-lutil \
+              -C link-arg=-lrt \
+              -C link-arg=-lpthread \
+              -C link-arg=-ldl \
+              -C link-arg=-lc \
+              -C link-arg=-lgcc_eh \
+              -C link-arg=-lgcc \
+              -C link-arg=-Wl,--end-group"
           '';
 
-          installPhase = ''
-            runHook preInstall
+          postInstall = ''
             mkdir -p $out/bin $out/share/licenses/nes-deck
-            install -m755 nes-deck $out/bin/nes-deck
-            install -m644 Copying $out/share/licenses/nes-deck/FCEUmm-COPYING
+            mv $out/bin/libretro-deck $out/bin/nes-deck
+            install -m644 ${fceumm-src}/Copying \
+              $out/share/licenses/nes-deck/FCEUmm-COPYING
+          '';
+
+          postFixup = ''
+            ${pkgsCross.stdenv.cc.bintools.bintools}/bin/${pkgsCross.stdenv.cc.targetPrefix}strip \
+              --strip-all $out/bin/nes-deck
             nuke-refs $out/bin/nes-deck
-            runHook postInstall
           '';
 
           meta = {
-            description = "FCEUmm NES core with Deck-native framebuffer frontend";
+            description = "Rust Deck host with the pinned FCEUmm NES core";
             homepage = "https://github.com/libretro/libretro-fceumm";
             license = pkgs.lib.licenses.gpl2Only;
             platforms = [ "armv7l-linux" ];

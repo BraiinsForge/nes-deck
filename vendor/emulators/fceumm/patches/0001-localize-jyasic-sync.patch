@@ -1,0 +1,11 @@
+--- a/src/boards/jyasic.c
++++ b/src/boards/jyasic.c
+@@ -23,7 +23,7 @@
+ #include "mapinc.h"
+ #include "mmc3.h"
+ 
+-void 	(*sync)(void);
++static void 	(*sync)(void);
+ static uint8_t	allowExtendedMirroring;
+ 
+ static uint8_t	mode[4];
