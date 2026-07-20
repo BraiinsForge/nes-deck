@@ -1585,6 +1585,7 @@ dependencies = [
  "bmc-widget",
  "glow",
  "retro-deck-config",
+ "retro-deck-policy",
  "rustix 1.1.4",
  "serde",
  "serde_json",

@@ -2,7 +2,11 @@
 
 use std::{collections::HashSet, fmt, path::Path};
 
+#[cfg(feature = "bmc-native")]
+use retro_deck_config::CatalogError;
 use retro_deck_config::{Catalog, CatalogEntry, CatalogSystem, MAXIMUM_GAMES, System};
+#[cfg(feature = "bmc-native")]
+use retro_deck_policy::Value;
 
 const SYSTEM_ORDER: [CatalogSystem; 6] = [
     CatalogSystem::Rom(System::Nes),
@@ -13,53 +17,10 @@ const SYSTEM_ORDER: [CatalogSystem; 6] = [
     CatalogSystem::Deck,
 ];
 
-const STANDARD_APPS: [(&str, &str, &str, &str); 7] = [
-    (
-        "lua-repl",
-        "LUA REPL",
-        "/mnt/data/nes-deck/games/lua-repl",
-        "#5F87FF",
-    ),
-    (
-        "lisp-repl",
-        "LISP REPL",
-        "/mnt/data/nes-deck/games/lisp-repl",
-        "#AFD75F",
-    ),
-    (
-        "python-repl",
-        "PYTHON REPL",
-        "/mnt/data/nes-deck/games/python-repl",
-        "#FFD700",
-    ),
-    (
-        "scheme-repl",
-        "SCHEME REPL",
-        "/mnt/data/nes-deck/games/scheme-repl",
-        "#87D787",
-    ),
-    (
-        "chiptunes",
-        "CHIPTUNES",
-        "/mnt/data/nes-deck/games/chiptunes",
-        "#FF8700",
-    ),
-    (
-        "terminal",
-        "TERMINAL",
-        "/mnt/data/nes-deck/games/terminal",
-        "#5F87AF",
-    ),
-    (
-        "reboot",
-        "REBOOT",
-        "/mnt/data/nes-deck/games/reboot",
-        "#D75F5F",
-    ),
-];
+const MAXIMUM_POLICY_APPLICATIONS: usize = 7;
 
-/// Maximum shared catalog entries plus the fixed native applications.
-pub const MAXIMUM_DASHBOARD_ENTRIES: usize = MAXIMUM_GAMES + STANDARD_APPS.len();
+/// Maximum shared catalog entries plus the closed native application set.
+pub const MAXIMUM_DASHBOARD_ENTRIES: usize = MAXIMUM_GAMES + MAXIMUM_POLICY_APPLICATIONS;
 
 /// One nonempty dashboard category and its entries in catalog order.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -127,27 +88,6 @@ impl DashboardCatalog {
     /// or contains an identifier or path conflict.
     pub fn from_catalog(catalog: &Catalog) -> Result<Self, DashboardCatalogError> {
         Self::from_entries(catalog.entries().iter().cloned())
-    }
-
-    /// Add the fixed native REPL, player, terminal, and reboot applications.
-    ///
-    /// Each application has a unique data identity below
-    /// `/mnt/data/nes-deck/games/`. Executable selection remains a separate
-    /// typed launch concern and is never inferred from this catalog path.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DashboardCatalogError`] when a compiled application entry is
-    /// invalid or conflicts with a supplied catalog entry.
-    pub fn with_standard_apps(catalog: &Catalog) -> Result<Self, DashboardCatalogError> {
-        let mut apps = Vec::new();
-        for (identifier, title, path, color) in STANDARD_APPS {
-            apps.push(
-                CatalogEntry::new(identifier, title, CatalogSystem::Deck, path, color)
-                    .map_err(|_| DashboardCatalogError::InvalidStandardEntry)?,
-            );
-        }
-        Self::from_entries(catalog.entries().iter().cloned().chain(apps))
     }
 
     /// Build a view from base, uploaded, and generated native entries.
@@ -253,8 +193,6 @@ pub enum DashboardCatalogError {
     DuplicateIdentifier,
     /// Two sources refer to the same launch path.
     DuplicatePath,
-    /// A compiled standard application violates the shared catalog schema.
-    InvalidStandardEntry,
 }
 
 impl fmt::Display for DashboardCatalogError {
@@ -271,21 +209,134 @@ impl fmt::Display for DashboardCatalogError {
                 formatter.write_str("dashboard catalog repeats an identifier")
             }
             Self::DuplicatePath => formatter.write_str("dashboard catalog repeats a launch path"),
-            Self::InvalidStandardEntry => {
-                formatter.write_str("a standard dashboard application is invalid")
-            }
         }
     }
 }
 
 impl std::error::Error for DashboardCatalogError {}
 
+/// Decode the ordered startup application rows returned by Common Lisp.
+///
+/// Lisp controls presence, order, title, and color. Rust maps each closed kind
+/// to a stable identity and validates the resulting catalog entry; policy can
+/// never supply an executable or arbitrary application path.
+///
+/// # Errors
+///
+/// Returns [`DashboardApplicationPolicyError`] for malformed, excessive,
+/// duplicate, unknown, or schema-invalid rows.
+#[cfg(feature = "bmc-native")]
+pub fn applications_from_policy(
+    value: &Value,
+) -> Result<Vec<CatalogEntry>, DashboardApplicationPolicyError> {
+    let Value::List(rows) = value else {
+        return Err(DashboardApplicationPolicyError::InvalidShape);
+    };
+    if rows.len() > MAXIMUM_POLICY_APPLICATIONS {
+        return Err(DashboardApplicationPolicyError::TooManyApplications);
+    }
+    let mut kinds = HashSet::new();
+    let mut applications = Vec::new();
+    applications
+        .try_reserve_exact(rows.len())
+        .map_err(|_| DashboardApplicationPolicyError::Allocation)?;
+    for row in rows {
+        let Value::List(fields) = row else {
+            return Err(DashboardApplicationPolicyError::InvalidShape);
+        };
+        let [
+            Value::Keyword(kind),
+            Value::String(title),
+            Value::String(color),
+        ] = fields.as_slice()
+        else {
+            return Err(DashboardApplicationPolicyError::InvalidShape);
+        };
+        if !kinds.insert(kind.as_str()) {
+            return Err(DashboardApplicationPolicyError::DuplicateApplication);
+        }
+        let (identifier, path) = application_identity(kind)
+            .ok_or_else(|| DashboardApplicationPolicyError::UnknownApplication(kind.clone()))?;
+        applications.push(
+            CatalogEntry::new(identifier, title, CatalogSystem::Deck, path, color)
+                .map_err(DashboardApplicationPolicyError::InvalidEntry)?,
+        );
+    }
+    Ok(applications)
+}
+
+#[cfg(feature = "bmc-native")]
+fn application_identity(kind: &str) -> Option<(&'static str, &'static str)> {
+    match kind {
+        "lua" => Some(("lua-repl", "/mnt/data/nes-deck/games/lua-repl")),
+        "lisp" => Some(("lisp-repl", "/mnt/data/nes-deck/games/lisp-repl")),
+        "python" => Some(("python-repl", "/mnt/data/nes-deck/games/python-repl")),
+        "scheme" => Some(("scheme-repl", "/mnt/data/nes-deck/games/scheme-repl")),
+        "chiptunes" => Some(("chiptunes", "/mnt/data/nes-deck/games/chiptunes")),
+        "terminal" => Some(("terminal", "/mnt/data/nes-deck/games/terminal")),
+        "reboot" => Some(("reboot", "/mnt/data/nes-deck/games/reboot")),
+        _ => None,
+    }
+}
+
+/// A Common Lisp dashboard application result violated its closed schema.
+#[cfg(feature = "bmc-native")]
+#[derive(Debug)]
+pub enum DashboardApplicationPolicyError {
+    /// The outer value or one row had the wrong positional shape or types.
+    InvalidShape,
+    /// More rows were returned than the closed application set contains.
+    TooManyApplications,
+    /// One application kind occurred more than once.
+    DuplicateApplication,
+    /// Policy named a kind outside the closed Rust launch set.
+    UnknownApplication(String),
+    /// Reserving the small validated result failed.
+    Allocation,
+    /// A title or color violated the shared catalog schema.
+    InvalidEntry(CatalogError),
+}
+
+#[cfg(feature = "bmc-native")]
+impl fmt::Display for DashboardApplicationPolicyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidShape => {
+                formatter.write_str("dashboard applications must be (kind title color) rows")
+            }
+            Self::TooManyApplications => formatter.write_str("too many dashboard applications"),
+            Self::DuplicateApplication => {
+                formatter.write_str("dashboard application kind is repeated")
+            }
+            Self::UnknownApplication(kind) => {
+                write!(formatter, "unknown dashboard application kind :{kind}")
+            }
+            Self::Allocation => formatter.write_str("cannot allocate dashboard applications"),
+            Self::InvalidEntry(source) => {
+                write!(formatter, "invalid dashboard application: {source}")
+            }
+        }
+    }
+}
+
+#[cfg(feature = "bmc-native")]
+impl std::error::Error for DashboardApplicationPolicyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidEntry(source) => Some(source),
+            Self::InvalidShape
+            | Self::TooManyApplications
+            | Self::DuplicateApplication
+            | Self::UnknownApplication(_)
+            | Self::Allocation => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-    use super::{DashboardCatalog, DashboardCatalogError, MAXIMUM_DASHBOARD_ENTRIES};
-    use retro_deck_config::{Catalog, CatalogEntry, CatalogSystem, MAXIMUM_GAMES};
+    use super::{DashboardCatalog, DashboardCatalogError};
+    use retro_deck_config::{Catalog, CatalogEntry, CatalogSystem};
 
     const DEPLOYED_CATALOG: &[u8] = include_bytes!("../../../deploy/menu/games.tsv");
 
@@ -363,70 +414,6 @@ mod tests {
     }
 
     #[test]
-    fn standard_apps_have_unique_data_identity_and_stable_order() {
-        let Some(catalog) = deployed() else {
-            return;
-        };
-        let dashboard = DashboardCatalog::with_standard_apps(&catalog);
-        assert!(dashboard.is_ok());
-        let Some(dashboard) = dashboard.ok() else {
-            return;
-        };
-        let Some(deck) = dashboard.categories().last() else {
-            return;
-        };
-        assert_eq!(
-            deck.entry_indices()
-                .iter()
-                .filter_map(|index| dashboard.entry(*index))
-                .map(|entry| (entry.identifier(), entry.rom()))
-                .collect::<Vec<_>>(),
-            [
-                (
-                    "ten-seconds",
-                    Path::new("/mnt/data/nes-deck/games/ten-seconds")
-                ),
-                ("lua-repl", Path::new("/mnt/data/nes-deck/games/lua-repl")),
-                ("lisp-repl", Path::new("/mnt/data/nes-deck/games/lisp-repl")),
-                (
-                    "python-repl",
-                    Path::new("/mnt/data/nes-deck/games/python-repl")
-                ),
-                (
-                    "scheme-repl",
-                    Path::new("/mnt/data/nes-deck/games/scheme-repl")
-                ),
-                ("chiptunes", Path::new("/mnt/data/nes-deck/games/chiptunes")),
-                ("terminal", Path::new("/mnt/data/nes-deck/games/terminal")),
-                ("reboot", Path::new("/mnt/data/nes-deck/games/reboot")),
-            ]
-        );
-    }
-
-    #[test]
-    fn shared_catalog_capacity_leaves_room_for_every_standard_app() {
-        let mut source = String::new();
-        for index in 0..MAXIMUM_GAMES {
-            use std::fmt::Write as _;
-            assert!(
-                writeln!(
-                    source,
-                    "owner-{index}\tOWNER {index}\tdeck\t/mnt/data/nes-deck/games/owner-{index}\t#5F87D7"
-                )
-                .is_ok()
-            );
-        }
-        let Some(catalog) = Catalog::parse(source.as_bytes()).ok() else {
-            return;
-        };
-        let dashboard = DashboardCatalog::with_standard_apps(&catalog);
-        assert!(matches!(
-            dashboard,
-            Ok(ref dashboard) if dashboard.entries().len() == MAXIMUM_DASHBOARD_ENTRIES
-        ));
-    }
-
-    #[test]
     fn source_combination_rechecks_global_identity_and_path_bounds() {
         let Some(first) = native("terminal", "/mnt/data/nes-deck/games/terminal") else {
             return;
@@ -446,5 +433,57 @@ mod tests {
             DashboardCatalog::from_entries(Vec::<CatalogEntry>::new()),
             Err(DashboardCatalogError::Empty)
         );
+    }
+
+    #[cfg(feature = "bmc-native")]
+    #[test]
+    fn lisp_policy_controls_only_order_title_and_color() {
+        use super::{DashboardApplicationPolicyError, applications_from_policy};
+        use retro_deck_policy::Value;
+
+        let row = |kind: &str, title: &str, color: &str| {
+            Value::List(vec![
+                Value::Keyword(kind.to_owned()),
+                Value::String(title.to_owned()),
+                Value::String(color.to_owned()),
+            ])
+        };
+        let value = Value::List(vec![
+            row("terminal", "MY SHELL", "#5F87AF"),
+            row("lisp", "PATCHABLE LISP", "#AFD75F"),
+        ]);
+        let applications = applications_from_policy(&value);
+        let Some(applications) = applications.ok() else {
+            return;
+        };
+        assert_eq!(
+            applications
+                .iter()
+                .map(|entry| (entry.identifier(), entry.title(), entry.rom()))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "terminal",
+                    "MY SHELL",
+                    std::path::Path::new("/mnt/data/nes-deck/games/terminal")
+                ),
+                (
+                    "lisp-repl",
+                    "PATCHABLE LISP",
+                    std::path::Path::new("/mnt/data/nes-deck/games/lisp-repl")
+                ),
+            ]
+        );
+        assert!(matches!(
+            applications_from_policy(&Value::List(vec![row("unknown", "UNKNOWN", "#5F87AF")])),
+            Err(DashboardApplicationPolicyError::UnknownApplication(_))
+        ));
+        assert!(matches!(
+            applications_from_policy(&Value::List(vec![
+                row("terminal", "ONE", "#5F87AF"),
+                row("terminal", "TWO", "#5F87AF"),
+            ])),
+            Err(DashboardApplicationPolicyError::DuplicateApplication)
+        ));
     }
 }

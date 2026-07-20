@@ -18,6 +18,8 @@ pub use application::{
 #[cfg(feature = "bmc-native")]
 pub use bmc_ui::{BmcScreen, BmcUiAction, bmc_action_for_touch, build_bmc_tree};
 pub use catalog::{Category, DashboardCatalog, DashboardCatalogError, MAXIMUM_DASHBOARD_ENTRIES};
+#[cfg(feature = "bmc-native")]
+pub use catalog::{DashboardApplicationPolicyError, applications_from_policy};
 pub use launch::{
     ExitPolicy, LaunchPlan, LaunchPlanError, LaunchTarget, LaunchTargetError, TerminalMode,
 };

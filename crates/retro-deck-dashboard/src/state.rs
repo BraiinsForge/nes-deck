@@ -912,9 +912,19 @@ mod tests {
         Some(DashboardModel::new(catalog, volume, brightness, Keymap::Us))
     }
 
-    fn model_with_standard_apps() -> Option<DashboardModel> {
+    fn model_with_reboot() -> Option<DashboardModel> {
         let catalog = Catalog::parse(DEPLOYED_CATALOG).ok()?;
-        let catalog = DashboardCatalog::with_standard_apps(&catalog).ok()?;
+        let reboot = retro_deck_config::CatalogEntry::new(
+            "reboot",
+            "REBOOT",
+            retro_deck_config::CatalogSystem::Deck,
+            "/mnt/data/nes-deck/games/reboot",
+            "#D75F5F",
+        )
+        .ok()?;
+        let catalog =
+            DashboardCatalog::from_entries(catalog.entries().iter().cloned().chain([reboot]))
+                .ok()?;
         let volume = VolumeState::new(42, 42).ok()?;
         let brightness = Brightness::new(60).ok()?;
         Some(DashboardModel::new(catalog, volume, brightness, Keymap::Us))
@@ -990,7 +1000,7 @@ mod tests {
 
     #[test]
     fn reboot_requires_two_matching_activations_before_monotonic_deadline() {
-        let Some(mut model) = model_with_standard_apps() else {
+        let Some(mut model) = model_with_reboot() else {
             return;
         };
         let Some(deck_category) = model

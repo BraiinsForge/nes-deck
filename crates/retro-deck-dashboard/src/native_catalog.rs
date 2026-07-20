@@ -69,7 +69,7 @@ pub fn load_native_catalog(path: impl AsRef<Path>) -> Result<DashboardCatalog, N
     if catalog.is_empty() {
         return Err(NativeCatalogError::EmptyCatalog);
     }
-    DashboardCatalog::with_standard_apps(&catalog).map_err(NativeCatalogError::Dashboard)
+    DashboardCatalog::from_catalog(&catalog).map_err(NativeCatalogError::Dashboard)
 }
 
 /// Failure while loading the BMC-native dashboard catalog.
@@ -176,7 +176,7 @@ mod tests {
         let path = fixture_path("games.tsv");
         fs::write(&path, CATALOG).expect("catalog fixture is written");
         let catalog = load_native_catalog(&path).expect("native catalog loads");
-        assert_eq!(catalog.entries().len(), 22);
+        assert_eq!(catalog.entries().len(), 15);
         let _ignored = fs::remove_file(path);
     }
 

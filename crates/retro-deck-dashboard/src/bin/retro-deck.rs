@@ -3,7 +3,7 @@
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
 use bmc_gpu_render_lock::GpuRenderLock;
@@ -21,12 +21,23 @@ use bmc_widget::surface::{
 use glow::HasContext as _;
 use retro_deck_dashboard::{
     ApplicationRequest, BMC_APPLICATION_ID, BmcScreen, BmcUiAction, Brightness, DashboardModel,
-    Intent, Keymap, LaunchTarget, MenuCue, TerminalMode, VolumeState, bmc_action_for_touch,
-    build_bmc_tree, load_native_catalog,
+    Intent, Keymap, LaunchTarget, MenuCue, TerminalMode, VolumeState, applications_from_policy,
+    bmc_action_for_touch, build_bmc_tree, load_native_catalog,
+};
+use retro_deck_policy::{
+    PolicyClient, PolicyEvent, PolicyEventPoll, PolicyResponse, PolicySubmit, RequestId, Value,
+    WorkerCommand, WorkerConfig,
 };
 
 const MANIFEST_ENV: &str = "RETRO_DECK_MANIFEST";
 const DEFAULT_MANIFEST_PATH: &str = "/mnt/data/nes-deck/menu/games.tsv";
+const ECL_PROGRAM: &str = "/mnt/data/nes-deck/ecl/bin/ecl.bin";
+const ECL_DIRECTORY: &str = "/mnt/data/nes-deck/ecl/lib/ecl/";
+const LISP_DIRECTORY: &str = "/mnt/data/nes-deck/lisp";
+const LISP_WORKER: &str = "/mnt/data/nes-deck/lisp/run-worker.lisp";
+const LISP_SITE_DIRECTORY: &str = "/mnt/data/nes-deck/lisp/site.d";
+const APPLICATION_POLICY_HOOK: &str = "dashboard/applications";
+const POLICY_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 fn main() -> ExitCode {
     bmc_log::init_console();
@@ -50,7 +61,8 @@ fn run() -> Result<()> {
     );
     let (surface, initial) =
         DeckWidgetSurfaceClient::connect().context("connect Retro Deck scene")?;
-    let runtime = NativeRuntime::new(surface, model, (initial.width, initial.height));
+    let policy = spawn_dashboard_policy();
+    let runtime = NativeRuntime::new(surface, model, (initial.width, initial.height), policy);
     runtime.run()
 }
 
@@ -68,12 +80,19 @@ struct NativeRuntime {
     lifecycle: Option<LifecycleState>,
     pending_render: bool,
     active_touch: Option<i32>,
+    policy: Option<PolicyClient>,
+    policy_request: Option<RequestId>,
     started_at: Instant,
     last_frame_at: Option<Instant>,
 }
 
 impl NativeRuntime {
-    fn new(surface: DeckWidgetSurfaceClient, model: DashboardModel, size: (u32, u32)) -> Self {
+    fn new(
+        surface: DeckWidgetSurfaceClient,
+        model: DashboardModel,
+        size: (u32, u32),
+        policy: Option<PolicyClient>,
+    ) -> Self {
         Self {
             graphics: None,
             surface,
@@ -84,6 +103,8 @@ impl NativeRuntime {
             lifecycle: None,
             pending_render: true,
             active_touch: None,
+            policy,
+            policy_request: None,
             started_at: Instant::now(),
             last_frame_at: None,
         }
@@ -102,15 +123,106 @@ impl NativeRuntime {
     fn event_loop(&mut self) -> Result<()> {
         while self.surface.running() {
             self.drain_surface_events();
+            self.drain_policy_events();
             self.release_dormant_buffers();
             self.render_if_ready()?;
 
-            let timeout_ms = if self.can_render_now() { 0 } else { -1 };
+            let timeout_ms = if self.can_render_now() {
+                0
+            } else if self.policy.is_some() {
+                i32::try_from(POLICY_POLL_INTERVAL.as_millis()).unwrap_or(25)
+            } else {
+                -1
+            };
             self.surface
                 .poll_dispatch(timeout_ms)
                 .context("dispatch Retro Deck Wayland events")?;
         }
         Ok(())
+    }
+
+    fn drain_policy_events(&mut self) {
+        loop {
+            let Some(policy) = self.policy.as_ref() else {
+                return;
+            };
+            match policy.try_event() {
+                PolicyEventPoll::Empty => return,
+                PolicyEventPoll::Disconnected => {
+                    tracing::warn!("Common Lisp dashboard policy disconnected");
+                    self.policy.take();
+                    return;
+                }
+                PolicyEventPoll::Event(PolicyEvent::Ready) => {
+                    let submission = policy.try_submit(APPLICATION_POLICY_HOOK, Value::Nil);
+                    match submission {
+                        Ok(PolicySubmit::Queued(identifier)) => {
+                            self.policy_request = Some(identifier);
+                        }
+                        Ok(PolicySubmit::DroppedFull | PolicySubmit::Unavailable) => {
+                            tracing::warn!("Common Lisp dashboard policy rejected startup work");
+                            self.policy.take();
+                            return;
+                        }
+                        Err(error) => {
+                            tracing::warn!(?error, "cannot encode dashboard startup policy");
+                            self.policy.take();
+                            return;
+                        }
+                    }
+                }
+                PolicyEventPoll::Event(PolicyEvent::Response(response)) => {
+                    self.apply_policy_response(response);
+                    self.policy.take();
+                    return;
+                }
+                PolicyEventPoll::Event(PolicyEvent::Unavailable(failure)) => {
+                    tracing::warn!(?failure, "Common Lisp dashboard policy unavailable");
+                    self.policy.take();
+                    return;
+                }
+            }
+        }
+    }
+
+    fn apply_policy_response(&mut self, response: PolicyResponse) {
+        let PolicyResponse::Ok { id, value } = response else {
+            tracing::warn!(?response, "Common Lisp dashboard policy rejected startup");
+            return;
+        };
+        if self.policy_request != Some(id) {
+            tracing::warn!(?id, "ignored stale Common Lisp dashboard policy response");
+            return;
+        }
+        let applications = match applications_from_policy(&value) {
+            Ok(applications) => applications,
+            Err(error) => {
+                tracing::warn!(?error, "invalid Common Lisp dashboard applications");
+                return;
+            }
+        };
+        let catalog = match retro_deck_dashboard::DashboardCatalog::from_entries(
+            self.model
+                .catalog()
+                .entries()
+                .iter()
+                .cloned()
+                .chain(applications),
+        ) {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                tracing::warn!(?error, "Common Lisp dashboard applications conflict");
+                return;
+            }
+        };
+        self.model = DashboardModel::new(
+            catalog,
+            self.model.volume(),
+            self.model.brightness(),
+            self.model.keymap(),
+        );
+        self.pending_render = true;
+        tracing::info!("loaded dashboard applications from Common Lisp");
     }
 
     fn drain_surface_events(&mut self) {
@@ -320,6 +432,23 @@ impl NativeRuntime {
         let released = graphics.destroy_released_buffers();
         if !released.is_empty() {
             self.surface.invalidate_cached_buffer_slots(&released);
+        }
+    }
+}
+
+fn spawn_dashboard_policy() -> Option<PolicyClient> {
+    let command = WorkerCommand::new(ECL_PROGRAM)
+        .arg("--norc")
+        .arg("--shell")
+        .arg(LISP_WORKER)
+        .env("ECLDIR", ECL_DIRECTORY)
+        .env("RETRO_DECK_LISP_SITE_DIR", LISP_SITE_DIRECTORY)
+        .current_dir(LISP_DIRECTORY);
+    match PolicyClient::spawn(WorkerConfig::new(command)) {
+        Ok(policy) => Some(policy),
+        Err(error) => {
+            tracing::warn!(?error, "cannot start Common Lisp dashboard supervisor");
+            None
         }
     }
 }

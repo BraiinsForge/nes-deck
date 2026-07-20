@@ -300,51 +300,37 @@ mod tests {
     use std::ffi::OsStr;
     use std::path::Path;
 
-    use retro_deck_config::{Catalog, CatalogEntry, CatalogSystem, System};
+    use retro_deck_config::{CatalogEntry, CatalogSystem, System};
 
     use super::{
         ExitPolicy, LaunchPlan, LaunchPlanError, LaunchTarget, LaunchTargetError, TerminalMode,
     };
-    use crate::{DashboardCatalog, Keymap, VolumeState};
-
-    const DEPLOYED_CATALOG: &[u8] = include_bytes!("../../../deploy/menu/games.tsv");
+    use crate::{Keymap, VolumeState};
 
     #[test]
-    fn every_standard_entry_has_one_closed_launch_meaning() {
-        let Some(catalog) = Catalog::parse(DEPLOYED_CATALOG).ok() else {
-            return;
-        };
-        let Some(dashboard) = DashboardCatalog::with_standard_apps(&catalog).ok() else {
-            return;
-        };
-        let targets = dashboard
-            .entries()
-            .iter()
-            .map(LaunchTarget::from_entry)
-            .collect::<Result<Vec<_>, _>>();
-        assert!(targets.is_ok());
-        let Some(targets) = targets.ok() else {
-            return;
-        };
-        assert!(matches!(
-            targets.first(),
-            Some(LaunchTarget::Emulator {
-                system: System::Nes,
-                content,
-            }) if content.ends_with("super-mario-bros.nes")
-        ));
-        assert_eq!(
-            targets.iter().copied().skip(15).collect::<Vec<_>>(),
-            [
-                LaunchTarget::Terminal(TerminalMode::Lua),
-                LaunchTarget::Terminal(TerminalMode::Lisp),
-                LaunchTarget::Terminal(TerminalMode::Python),
-                LaunchTarget::Terminal(TerminalMode::Scheme),
-                LaunchTarget::Chiptunes,
-                LaunchTarget::Terminal(TerminalMode::Shell),
-                LaunchTarget::Reboot,
-            ]
-        );
+    fn every_closed_application_identifier_has_one_launch_meaning() {
+        for (identifier, expected) in [
+            ("lua-repl", LaunchTarget::Terminal(TerminalMode::Lua)),
+            ("lisp-repl", LaunchTarget::Terminal(TerminalMode::Lisp)),
+            ("python-repl", LaunchTarget::Terminal(TerminalMode::Python)),
+            ("scheme-repl", LaunchTarget::Terminal(TerminalMode::Scheme)),
+            ("chiptunes", LaunchTarget::Chiptunes),
+            ("terminal", LaunchTarget::Terminal(TerminalMode::Shell)),
+            ("reboot", LaunchTarget::Reboot),
+        ] {
+            let path = format!("/mnt/data/nes-deck/games/{identifier}");
+            let entry = CatalogEntry::new(
+                identifier,
+                "APPLICATION",
+                CatalogSystem::Deck,
+                &path,
+                "#5F87D7",
+            );
+            let Some(entry) = entry.ok() else {
+                return;
+            };
+            assert_eq!(LaunchTarget::from_entry(&entry), Ok(expected));
+        }
     }
 
     #[test]

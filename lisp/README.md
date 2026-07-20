@@ -28,6 +28,30 @@ Local files use the same package and replace behavior by registering a hook:
 The site directory is persistent local state. It is excluded from Git,
 preserved by deployment, and never exposed through the ROM uploader.
 
+The native dashboard requests `:dashboard/applications` once after the worker
+becomes ready, then terminates the worker. The hook returns ordered
+`(kind title color)` rows. A local file can hide, reorder, retitle, or recolor
+the closed application set without gaining executable or path authority:
+
+```lisp
+(in-package #:retro-deck)
+
+(register-policy-hook
+ :dashboard/applications
+ (lambda (arguments)
+   (unless (null arguments)
+     (error "unexpected dashboard arguments"))
+   '((:lisp "LISP" "#AFD75F")
+     (:terminal "SHELL" "#5F87AF")
+     (:reboot "REBOOT" "#D75F5F"))))
+```
+
+Accepted kinds are `:lua`, `:lisp`, `:python`, `:scheme`, `:chiptunes`,
+`:terminal`, and `:reboot`, at most once each. Rust validates the title and
+xterm-256 color and supplies each stable identity itself. If the worker or a
+local override fails, the dashboard keeps its base ROM catalog instead of
+failing startup.
+
 ## Wire protocol
 
 Standard input and output carry one bounded S-expression per UTF-8 line. The
