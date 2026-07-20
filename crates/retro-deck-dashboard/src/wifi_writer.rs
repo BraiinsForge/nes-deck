@@ -550,7 +550,9 @@ mod tests {
 
     #[test]
     fn failed_and_timed_out_helpers_are_reported_without_credentials() {
-        let failed = Fixture::new("#!/bin/sh\nexit 9\n");
+        let failed = Fixture::new(
+            "#!/bin/sh\nIFS= read -r ssid || exit 10\nIFS= read -r password || exit 11\nexit 9\n",
+        );
         let writer =
             WifiProfileWriter::spawn(&failed.helper).expect("failing Wi-Fi writer fixture starts");
         submit_fixture_request(&writer);
@@ -566,7 +568,9 @@ mod tests {
         assert!(!diagnostics.contains("secret!9"));
         assert_eq!(writer.shutdown().failed, 1);
 
-        let hanging = Fixture::new("#!/bin/sh\nsleep 30\n");
+        let hanging = Fixture::new(
+            "#!/bin/sh\nIFS= read -r ssid || exit 10\nIFS= read -r password || exit 11\nsleep 30\n",
+        );
         let writer = WifiProfileWriter::spawn_with_timing(
             hanging.helper.clone(),
             WriterTiming {
