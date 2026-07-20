@@ -9,11 +9,13 @@
 mod cue;
 mod format;
 mod pcm;
+mod resample;
 mod tone;
 
 pub use cue::{CueEnqueue, CueReceive, CueReceiver, CueSender, cue_channel};
 pub use format::{SampleRate, Volume};
 pub use pcm::{MonoPcmQueue, PcmPushReport, apply_volume};
+pub use resample::{LinearResampler, ResampleReport};
 pub use tone::{SquareTone, ToneError, ToneNote};
 
 use std::time::Duration;
