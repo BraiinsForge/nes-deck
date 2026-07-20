@@ -36,8 +36,15 @@ pass.
 8. Every upstream emulator has a pinned revision, license record, build
    adapter, and ordered patch series. Generated sources and build outputs are
    not mixed with first-party source.
-9. No migration commit knowingly weakens the existing uploader security,
-   save-game persistence, controller ordering, rendering, or recovery path.
+9. Emulator and frontend compatibility is not a migration requirement. The
+   replacement does not need to read retired save encodings, configuration
+   formats, command lines, or reproduce accidental implementation behavior.
+10. Owner-supplied ROMs and current persistent data remain outside executable
+    replacement paths and are never deleted as part of a migration.
+11. Network configuration is a separate safety-critical boundary. Emulator
+    migration work does not alter live Wi-Fi, WireGuard, routing, or network
+    deployment behavior. Any network change requires explicit scope,
+    validation, preserved recovery access, and a rollback path.
 
 ## Target source layout
 
@@ -123,8 +130,8 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   PCM path preserves the measured 32,768-to-32,000 Hz and
   48,000-to-47,328 Hz Deck corrections, stream-ring priming, bounded latency,
   and nonblocking callback contract.
-- Port save persistence and the remaining host wiring onto those shared
-  adapters.
+- Implement simple atomic save persistence and the remaining host wiring on
+  those shared adapters without carrying retired frontend formats forward.
 - Port the libretro host without changing pinned emulator implementations.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
