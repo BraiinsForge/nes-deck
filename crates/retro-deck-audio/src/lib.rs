@@ -8,10 +8,12 @@
 
 mod cue;
 mod format;
+mod pcm;
 mod tone;
 
 pub use cue::{CueEnqueue, CueReceive, CueReceiver, CueSender, cue_channel};
 pub use format::{SampleRate, Volume};
+pub use pcm::{MonoPcmQueue, PcmPushReport, apply_volume};
 pub use tone::{SquareTone, ToneError, ToneNote};
 
 use std::time::Duration;
