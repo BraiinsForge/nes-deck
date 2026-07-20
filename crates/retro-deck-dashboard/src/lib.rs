@@ -2,13 +2,15 @@
 
 mod catalog;
 mod render;
+mod settings;
 mod state;
 
 pub use catalog::{Category, DashboardCatalog, DashboardCatalogError};
 pub use render::{
     ArtworkProvider, CANVAS_HEIGHT, CANVAS_WIDTH, Cover, CoverError, DashboardFrame, EntryButton,
-    MenuLayout, NoArtwork, RenderError,
+    MenuLayout, NoArtwork, RenderError, RenderedScreen,
 };
+pub use settings::{NetworkView, SettingsLayout, SettingsView};
 pub use state::{
     Action, Brightness, BrightnessError, DashboardModel, Intent, Keymap, MenuCue, Screen,
     SettingChange, SettingsTarget, Status, Transition, VolumeError, VolumeState,

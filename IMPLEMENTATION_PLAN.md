@@ -162,6 +162,10 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   and hit targets that return semantic model actions. Its canonical NES frame
   is pixel-identical to the current C++ renderer, and a host PPM capture uses
   the production Rust pixel path.
+- The Rust settings screen is also pixel-identical to its C++ reference. It
+  renders case-sensitive SSID, WLAN, WireGuard, selector, login-shell, volume,
+  brightness, and keymap values from a bounded read-only view. Its hit targets
+  return typed actions only; no network or device mutation occurs in rendering.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
 

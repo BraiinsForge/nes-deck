@@ -5,6 +5,7 @@ use std::{fmt, fmt::Write as _};
 use retro_deck_config::{CatalogEntry, CatalogSystem, Palette, PaletteRole, Rgb};
 use retro_deck_ui::{Canvas, Rect, TextBuffer, fit_text_scale, rgb888_to_rgb565};
 
+use crate::settings::{SettingsLayout, SettingsView, draw_settings};
 use crate::{Action, DashboardModel, Keymap, Status};
 
 /// Logical dashboard width presented to the platform layer.
@@ -244,10 +245,20 @@ impl MenuLayout {
     }
 }
 
-/// Fixed-size catalog frame plus exact hit-test geometry.
+/// Screen represented by the current frame pixels and hit geometry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RenderedScreen {
+    /// Console tabs and game cards.
+    Menu,
+    /// Device and application settings controls.
+    Settings,
+}
+
+/// Fixed-size dashboard frame plus exact hit-test geometry.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DashboardFrame {
     pixels: Vec<u16>,
+    screen: RenderedScreen,
     menu_layout: MenuLayout,
 }
 
@@ -271,14 +282,23 @@ impl DashboardFrame {
         palette: &Palette,
         artwork: &P,
     ) -> Result<Self, RenderError> {
-        let mut pixels = Vec::new();
-        pixels.try_reserve_exact(PIXELS).map_err(|_| RenderError)?;
-        pixels.resize(PIXELS, palette_pixel(palette, PaletteRole::Background));
-        let mut frame = Self {
-            pixels,
-            menu_layout: MenuLayout::empty(),
-        };
+        let mut frame = Self::allocate(palette)?;
         frame.redraw_menu_with_artwork(model, palette, artwork);
+        Ok(frame)
+    }
+
+    /// Allocate and render device settings from read-only status.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] if the fixed frame allocation fails.
+    pub fn render_settings(
+        model: &DashboardModel,
+        palette: &Palette,
+        view: SettingsView<'_>,
+    ) -> Result<Self, RenderError> {
+        let mut frame = Self::allocate(palette)?;
+        frame.redraw_settings(model, palette, view);
         Ok(frame)
     }
 
@@ -298,6 +318,21 @@ impl DashboardFrame {
             return;
         };
         self.menu_layout = draw_menu(&mut canvas, model, palette, artwork);
+        self.screen = RenderedScreen::Menu;
+    }
+
+    /// Redraw settings in the existing allocation from a read-only view.
+    pub fn redraw_settings(
+        &mut self,
+        model: &DashboardModel,
+        palette: &Palette,
+        view: SettingsView<'_>,
+    ) {
+        let Some(mut canvas) = Canvas::new(&mut self.pixels, CANVAS_WIDTH, CANVAS_HEIGHT) else {
+            return;
+        };
+        let _ = draw_settings(&mut canvas, model, palette, view);
+        self.screen = RenderedScreen::Settings;
     }
 
     /// Borrow tightly packed native-endian RGB565 pixels.
@@ -316,10 +351,28 @@ impl DashboardFrame {
         CANVAS_WIDTH * size_of::<u16>()
     }
 
-    /// Exact geometry used to draw and hit-test this frame.
+    /// Screen currently represented by the pixel allocation.
     #[must_use]
-    pub const fn menu_layout(&self) -> &MenuLayout {
-        &self.menu_layout
+    pub const fn rendered_screen(&self) -> RenderedScreen {
+        self.screen
+    }
+
+    /// Menu geometry when the current frame contains the catalog screen.
+    #[must_use]
+    pub const fn menu_layout(&self) -> Option<&MenuLayout> {
+        match self.screen {
+            RenderedScreen::Menu => Some(&self.menu_layout),
+            RenderedScreen::Settings => None,
+        }
+    }
+
+    /// Settings geometry when the current frame contains settings.
+    #[must_use]
+    pub const fn settings_layout(&self) -> Option<SettingsLayout> {
+        match self.screen {
+            RenderedScreen::Settings => Some(SettingsLayout::fixed()),
+            RenderedScreen::Menu => None,
+        }
     }
 
     /// Read one pixel for screenshots and regression tests.
@@ -331,6 +384,17 @@ impl DashboardFrame {
         self.pixels
             .get(y.checked_mul(CANVAS_WIDTH)?.checked_add(x)?)
             .copied()
+    }
+
+    fn allocate(palette: &Palette) -> Result<Self, RenderError> {
+        let mut pixels = Vec::new();
+        pixels.try_reserve_exact(PIXELS).map_err(|_| RenderError)?;
+        pixels.resize(PIXELS, palette_pixel(palette, PaletteRole::Background));
+        Ok(Self {
+            pixels,
+            screen: RenderedScreen::Menu,
+            menu_layout: MenuLayout::empty(),
+        })
     }
 }
 
@@ -823,7 +887,7 @@ fn draw_position_indicators(
     }
 }
 
-fn draw_status(canvas: &mut Canvas<'_>, status: Status, palette: &Palette) {
+pub(crate) fn draw_status(canvas: &mut Canvas<'_>, status: Status, palette: &Palette) {
     let mut text = TextBuffer::<96>::new();
     match status {
         Status::Clear => return,
@@ -946,7 +1010,7 @@ fn draw_settings_gear(canvas: &mut Canvas<'_>, bounds: Rect) {
     }
 }
 
-fn palette_pixel(palette: &Palette, role: PaletteRole) -> u16 {
+pub(crate) fn palette_pixel(palette: &Palette, role: PaletteRole) -> u16 {
     rgb_pixel(palette.color(role))
 }
 
@@ -967,7 +1031,7 @@ fn components_pixel(components: [u8; 3]) -> u16 {
 mod tests {
     use super::{
         ArtworkProvider, CANVAS_HEIGHT, CANVAS_WIDTH, Cover, CoverError, DashboardFrame,
-        EntryButton, PIXELS, draw_cover_square, palette_pixel,
+        EntryButton, MenuLayout, PIXELS, draw_cover_square, palette_pixel,
     };
     use crate::{Action, Brightness, DashboardCatalog, DashboardModel, Keymap, VolumeState};
     use retro_deck_config::{Catalog, Palette, PaletteRole};
@@ -1004,33 +1068,27 @@ mod tests {
         let Some(frame) = DashboardFrame::render_menu(&model, &palette).ok() else {
             return;
         };
+        let Some(layout) = frame.menu_layout() else {
+            return;
+        };
         assert_eq!(frame.pixels().len(), PIXELS);
         assert_eq!(DashboardFrame::stride_bytes(), CANVAS_WIDTH * 2);
         assert_eq!(frame.pixel(CANVAS_WIDTH, 0), None);
         assert_eq!(frame.pixel(0, CANVAS_HEIGHT), None);
+        assert_eq!(layout.action_at(20, 420), Some(Action::ShowCredits));
+        assert_eq!(layout.action_at(1_220, 420), Some(Action::ToggleSettings));
+        assert_eq!(layout.action_at(60, 80), Some(Action::SelectCategory(0)));
+        assert_eq!(layout.selected_entry_index(), Some(0));
         assert_eq!(
-            frame.menu_layout().action_at(20, 420),
-            Some(Action::ShowCredits)
-        );
-        assert_eq!(
-            frame.menu_layout().action_at(1_220, 420),
-            Some(Action::ToggleSettings)
-        );
-        assert_eq!(
-            frame.menu_layout().action_at(60, 80),
-            Some(Action::SelectCategory(0))
-        );
-        assert_eq!(frame.menu_layout().selected_entry_index(), Some(0));
-        assert_eq!(
-            frame.menu_layout().entry_buttons()[0].map(EntryButton::entry_index),
+            layout.entry_buttons()[0].map(EntryButton::entry_index),
             Some(0)
         );
         assert_eq!(
             frame.pixel(344, 410),
             Some(palette_pixel(&palette, PaletteRole::Active))
         );
-        assert!(frame.menu_layout().previous_button().is_some());
-        assert!(frame.menu_layout().next_button().is_some());
+        assert!(layout.previous_button().is_some());
+        assert!(layout.next_button().is_some());
     }
 
     #[test]
@@ -1053,7 +1111,43 @@ mod tests {
         assert_eq!(frame.pixels.as_ptr(), allocation);
         assert_eq!(frame.pixels.capacity(), capacity);
         assert_ne!(hash(&frame), before);
-        assert_eq!(frame.menu_layout().selected_entry_index(), Some(1));
+        assert_eq!(
+            frame
+                .menu_layout()
+                .and_then(MenuLayout::selected_entry_index),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn switching_screens_reuses_one_complete_frame_allocation() {
+        use crate::{NetworkView, RenderedScreen, SettingsView};
+
+        let Some(mut model) = model() else {
+            return;
+        };
+        let palette = Palette::default();
+        let Some(mut frame) = DashboardFrame::render_menu(&model, &palette).ok() else {
+            return;
+        };
+        let allocation = frame.pixels.as_ptr();
+        let capacity = frame.pixels.capacity();
+        let _ = model.apply(Action::ToggleSettings);
+        frame.redraw_settings(
+            &model,
+            &palette,
+            SettingsView::new(NetworkView::unavailable(), "/bin/ash"),
+        );
+        assert_eq!(frame.rendered_screen(), RenderedScreen::Settings);
+        assert_eq!(frame.pixels.as_ptr(), allocation);
+        assert_eq!(frame.pixels.capacity(), capacity);
+
+        let _ = model.apply(Action::Back);
+        frame.redraw_menu(&model, &palette);
+        assert_eq!(frame.rendered_screen(), RenderedScreen::Menu);
+        assert_eq!(frame.pixels.as_ptr(), allocation);
+        assert_eq!(frame.pixels.capacity(), capacity);
+        assert_eq!(hash(&frame), 9_026_554_421_741_662_983);
     }
 
     #[test]

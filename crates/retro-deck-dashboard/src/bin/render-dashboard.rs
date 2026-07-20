@@ -10,8 +10,8 @@ use std::process::ExitCode;
 
 use retro_deck_config::{Catalog, Palette};
 use retro_deck_dashboard::{
-    Brightness, CANVAS_HEIGHT, CANVAS_WIDTH, DashboardCatalog, DashboardFrame, DashboardModel,
-    Keymap, VolumeState,
+    Action, Brightness, CANVAS_HEIGHT, CANVAS_WIDTH, DashboardCatalog, DashboardFrame,
+    DashboardModel, Keymap, NetworkView, SettingsView, VolumeState,
 };
 
 const APPLICATION: &str = "render-dashboard";
@@ -23,16 +23,26 @@ fn main() -> ExitCode {
     let program = arguments
         .next()
         .unwrap_or_else(|| OsString::from(APPLICATION));
-    let Some(output) = arguments.next() else {
-        eprintln!("Usage: {} OUTPUT.ppm", Path::new(&program).display());
+    let Some(first) = arguments.next() else {
+        print_usage(Path::new(&program));
         return ExitCode::from(2);
     };
+    let second = arguments.next();
     if arguments.next().is_some() {
-        eprintln!("Usage: {} OUTPUT.ppm", Path::new(&program).display());
+        print_usage(Path::new(&program));
         return ExitCode::from(2);
     }
+    let (screen, output) = match second {
+        None => (PreviewScreen::Menu, first),
+        Some(output) if first == "menu" => (PreviewScreen::Menu, output),
+        Some(output) if first == "settings" => (PreviewScreen::Settings, output),
+        Some(_) => {
+            print_usage(Path::new(&program));
+            return ExitCode::from(2);
+        }
+    };
 
-    match render_preview(Path::new(&output)) {
+    match render_preview(Path::new(&output), screen) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{APPLICATION}: {error}");
@@ -41,16 +51,40 @@ fn main() -> ExitCode {
     }
 }
 
-fn render_preview(output: &Path) -> Result<(), Box<dyn Error>> {
+fn print_usage(program: &Path) {
+    eprintln!("Usage: {} [menu|settings] OUTPUT.ppm", program.display());
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PreviewScreen {
+    Menu,
+    Settings,
+}
+
+fn render_preview(output: &Path, screen: PreviewScreen) -> Result<(), Box<dyn Error>> {
     let catalog = Catalog::parse(CATALOG)?;
     let catalog = DashboardCatalog::from_catalog(&catalog)?;
-    let model = DashboardModel::new(
+    let mut model = DashboardModel::new(
         catalog,
         VolumeState::new(42, 42)?,
         Brightness::new(60)?,
         Keymap::Us,
     );
-    let frame = DashboardFrame::render_menu(&model, &Palette::parse_tsv(PALETTE)?)?;
+    let palette = Palette::parse_tsv(PALETTE)?;
+    let frame = match screen {
+        PreviewScreen::Menu => DashboardFrame::render_menu(&model, &palette)?,
+        PreviewScreen::Settings => {
+            let _ = model.apply(Action::ToggleSettings);
+            DashboardFrame::render_settings(
+                &model,
+                &palette,
+                SettingsView::new(
+                    NetworkView::new("STUDIO", "192.0.2.20", "198.51.100.10", "CONNECTED"),
+                    "/BIN/ASH",
+                ),
+            )?
+        }
+    };
     write_ppm(output, frame.pixels())?;
     Ok(())
 }
