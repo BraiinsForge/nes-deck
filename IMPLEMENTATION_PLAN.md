@@ -54,6 +54,7 @@ Cargo.lock                    pinned Rust dependency graph
 crates/
   retro-deck-platform/        display, input, audio, time, and process APIs
   retro-deck-policy/          supervised Lisp worker and S-expression protocol
+  retro-deck-config/          side-effect-free catalog and console schemas
   retro-deck-dashboard/       dashboard model, renderer, and launcher
   retro-deck-emulator/        libretro and c-octo hosts
   retro-deck-apps/            timer and chiptune applications
@@ -139,6 +140,9 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 - NES, GB/GBC, and ZX build as separate static ARMv7 outputs from the same
   Rust host and pinned upstream archives. The superseded C++ host and its
   direct-include tests have been removed.
+- Console identity and the bounded dashboard catalog schema are shared Rust
+  configuration types. Uploader-specific file access and ROM intake policy
+  remain outside that side-effect-free model.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
 

@@ -563,7 +563,7 @@ mod tests {
 
     use crate::{
         auth::LoginOutcome,
-        catalog::Catalog,
+        catalog::load,
         http::{
             FORBIDDEN, METHOD_NOT_ALLOWED, MISDIRECTED_REQUEST, OK, SEE_OTHER, UNAUTHORIZED,
             UNPROCESSABLE_CONTENT, read_request_body, read_request_head,
@@ -892,7 +892,7 @@ mod tests {
             fs::read(fixture.directory.path().join("roms/chip8/space-racer.ch8")).ok(),
             Some(b"\x00\xe0".to_vec())
         );
-        let catalog = Catalog::load(&fixture.directory.path().join("uploads.tsv"));
+        let catalog = load(&fixture.directory.path().join("uploads.tsv"));
         assert!(matches!(catalog, Ok(catalog) if catalog.len() == 1));
 
         let duplicate = request("POST", "/upload", HOST, &headers, &body)

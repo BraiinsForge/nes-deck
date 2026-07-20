@@ -7,7 +7,10 @@ use std::{
 };
 
 use crate::{
-    catalog::{Catalog, CatalogEntry, CatalogError, MAXIMUM_GAMES},
+    catalog::{
+        Catalog, CatalogEntry, CatalogError, CatalogLoadError, MAXIMUM_GAMES, load,
+        load_if_present, uploaded_entry,
+    },
     file::{FileError, atomic_write, install_exclusive, remove_file},
     rom::{GameTitle, System, TitleError, UploadError, decode_upload},
 };
@@ -65,7 +68,7 @@ impl RomStore {
     /// read and validated.
     pub fn entries(&self) -> Result<Catalog, StoreError> {
         let _guard = self.lock.lock().map_err(|_| StoreError::LockPoisoned)?;
-        Catalog::load_if_present(&self.upload_catalog).map_err(StoreError::UploadCatalog)
+        load_if_present(&self.upload_catalog).map_err(StoreError::UploadCatalog)
     }
 
     /// Validate and install one raw or ZIP-wrapped ROM without replacement.
@@ -89,9 +92,9 @@ impl RomStore {
         let title = GameTitle::new(title)?;
         let rom = decode_upload(system, filename, input)?;
         let _guard = self.lock.lock().map_err(|_| StoreError::LockPoisoned)?;
-        let base = Catalog::load(&self.base_catalog).map_err(StoreError::BaseCatalog)?;
+        let base = load(&self.base_catalog).map_err(StoreError::BaseCatalog)?;
         let mut uploads =
-            Catalog::load_if_present(&self.upload_catalog).map_err(StoreError::UploadCatalog)?;
+            load_if_present(&self.upload_catalog).map_err(StoreError::UploadCatalog)?;
         if base.len().saturating_add(uploads.len()) >= MAXIMUM_GAMES {
             return Err(StoreError::Full);
         }
@@ -101,8 +104,8 @@ impl RomStore {
             title.slug(),
             system.extension()
         ));
-        let entry = CatalogEntry::uploaded(&title, system, &destination)
-            .map_err(StoreError::CatalogEntry)?;
+        let entry =
+            uploaded_entry(&title, system, &destination).map_err(StoreError::CatalogEntry)?;
         if base.contains_identifier(entry.identifier())
             || uploads.contains_identifier(entry.identifier())
             || base.contains_rom(entry.rom())
@@ -199,9 +202,9 @@ pub enum StoreError {
     /// Raw or ZIP upload validation failed.
     Upload(UploadError),
     /// The checked-in base catalog cannot be trusted.
-    BaseCatalog(CatalogError),
+    BaseCatalog(CatalogLoadError),
     /// The supplemental upload catalog cannot be trusted.
-    UploadCatalog(CatalogError),
+    UploadCatalog(CatalogLoadError),
     /// A generated catalog row violates an invariant.
     CatalogEntry(CatalogError),
     /// The combined catalog already has 64 entries.
@@ -258,9 +261,8 @@ impl std::error::Error for StoreError {
         match self {
             Self::Title(error) => Some(error),
             Self::Upload(error) => Some(error),
-            Self::BaseCatalog(error) | Self::UploadCatalog(error) | Self::CatalogEntry(error) => {
-                Some(error)
-            }
+            Self::BaseCatalog(error) | Self::UploadCatalog(error) => Some(error),
+            Self::CatalogEntry(error) => Some(error),
             Self::Storage(error) => Some(error),
             Self::SaveRolledBack { save, .. } => Some(save),
             Self::InvalidConfiguration
