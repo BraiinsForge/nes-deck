@@ -1,12 +1,14 @@
 //! Native Retro Deck dashboard model, renderer, and runtime seams.
 
 mod catalog;
+mod controls;
 mod credits;
 mod render;
 mod settings;
 mod state;
 
 pub use catalog::{Category, DashboardCatalog, DashboardCatalogError};
+pub use controls::{TouchCommitter, controller_action};
 pub use credits::{CreditsCrawl, CreditsLayout};
 pub use render::{
     ArtworkProvider, CANVAS_HEIGHT, CANVAS_WIDTH, Cover, CoverError, DashboardFrame, EntryButton,

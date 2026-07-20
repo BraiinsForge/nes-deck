@@ -418,6 +418,16 @@ impl DashboardFrame {
         }
     }
 
+    /// Map one coordinate on the represented complete frame to an action.
+    #[must_use]
+    pub fn action_at(&self, x: usize, y: usize) -> Option<Action> {
+        match self.screen {
+            RenderedScreen::Menu => self.menu_layout.action_at(x, y),
+            RenderedScreen::Settings => SettingsLayout::fixed().action_at(x, y),
+            RenderedScreen::Credits => CreditsLayout::fixed().action_at(x, y),
+        }
+    }
+
     /// Read one pixel for screenshots and regression tests.
     #[must_use]
     pub fn pixel(&self, x: usize, y: usize) -> Option<u16> {
@@ -1122,6 +1132,7 @@ mod tests {
         assert_eq!(frame.pixel(CANVAS_WIDTH, 0), None);
         assert_eq!(frame.pixel(0, CANVAS_HEIGHT), None);
         assert_eq!(layout.action_at(20, 420), Some(Action::ShowCredits));
+        assert_eq!(frame.action_at(20, 420), Some(Action::ShowCredits));
         assert_eq!(layout.action_at(1_220, 420), Some(Action::ToggleSettings));
         assert_eq!(layout.action_at(60, 80), Some(Action::SelectCategory(0)));
         assert_eq!(layout.selected_entry_index(), Some(0));
