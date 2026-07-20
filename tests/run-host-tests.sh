@@ -11,8 +11,7 @@ cd "$repo_root"
 "$script_dir/vendor_emulators_test.sh"
 
 cxx=${CXX:-g++}
-cc=${CC:-cc}
-for command in "$cxx" "$cc" cargo montage nix pkg-config; do
+for command in "$cxx" cargo montage nix pkg-config; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -22,11 +21,6 @@ pkg-config --exists libpng || {
   echo "Missing development package: libpng" >&2
   exit 1
 }
-pkg-config --exists wayland-client || {
-  echo "Missing development package: wayland-client" >&2
-  exit 1
-}
-
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
@@ -93,36 +87,4 @@ tests/deck_keyboard_quirks_test.sh
 tests/retro_terminal_test.sh
 tests/nes_deck_swap_test.sh
 
-compile_cpp_test tests/deck_runtime_test.cpp deck-runtime-test \
-  src/deck_runtime.cpp -pthread
-
-wayland_scanner=${WAYLAND_SCANNER:-wayland-scanner}
-command -v "$wayland_scanner" >/dev/null 2>&1 || {
-  echo "Missing required command: $wayland_scanner" >&2
-  exit 1
-}
-"$wayland_scanner" client-header protocol/deck-widget-v1.xml \
-  "$work/deck-widget-v1-client-protocol.h"
-"$wayland_scanner" private-code protocol/deck-widget-v1.xml \
-  "$work/deck-widget-v1-protocol.c"
-"$wayland_scanner" client-header protocol/wlr-layer-shell-unstable-v1.xml \
-  "$work/wlr-layer-shell-unstable-v1-client-protocol.h"
-"$wayland_scanner" private-code protocol/wlr-layer-shell-unstable-v1.xml \
-  "$work/wlr-layer-shell-unstable-v1-protocol.c"
-wayland_flags=$(pkg-config --cflags --libs wayland-client)
-"$cc" -std=c99 -O2 -Wall -Wextra -Werror -I"$work" \
-  -c "$work/deck-widget-v1-protocol.c" \
-  -o "$work/deck-widget-v1-protocol.o"
-"$cc" -std=c99 -O2 -Wall -Wextra -Werror -I"$work" \
-  -c "$work/wlr-layer-shell-unstable-v1-protocol.c" \
-  -o "$work/wlr-layer-shell-unstable-v1-protocol.o"
-# pkg-config output is intentionally split into compiler arguments.
-# shellcheck disable=SC2086
-"$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-  -DRETRO_DECK_WAYLAND=1 -Isrc -I"$work" \
-  tests/deck_runtime_test.cpp src/deck_runtime.cpp src/deck_wayland.cpp \
-  "$work/deck-widget-v1-protocol.o" \
-  "$work/wlr-layer-shell-unstable-v1-protocol.o" \
-  $wayland_flags -pthread -o "$work/deck-runtime-wayland-test"
-"$work/deck-runtime-wayland-test"
 echo "All host tests passed."

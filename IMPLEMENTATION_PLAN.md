@@ -10,7 +10,7 @@ gates. Third-party emulator implementations remain pinned upstream
 dependencies with their provenance and local patches organized in one
 predictable hierarchy.
 
-The Rust uploader and current C++ programs form the deployable baseline during
+The Rust runtimes and current C++ dashboard form the deployable baseline during
 the remaining migration. A replacement becomes the default only after its own
 tests, the complete host suite, the ARMv7 closure audit, and a live Deck check
 pass.
@@ -122,7 +122,10 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   state, crisp fixed-geometry presentation, 60 Hz pacing, and lazy audio. The
   superseded first-party C/C++ host and external source input have been
   removed.
-- Port chiptunes and implement explicit pause, mute, and idle audio release.
+- The chiptune catalog, controls, renderer, Ogg decoder, GME ownership wrapper,
+  60 Hz runtime, diagnostics, and atomic volume persistence are in Rust. Audio
+  opens lazily off the input path and releases on pause, mute, hide, or exit.
+  Its superseded first-party C++ player and shared runtime have been removed.
 
 ### Phase 4: emulator host and dashboard
 

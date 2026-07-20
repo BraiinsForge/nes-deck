@@ -18,14 +18,14 @@ details for development.
 ## Prerequisites
 
 Install Nix with flakes enabled. Host tests also require Rust 1.86 or newer
-with Cargo, rustfmt, and Clippy; a C and C++ compiler; `pkg-config`; libpng and
-Wayland development headers; `wayland-scanner`; and ImageMagick.
+with Cargo, rustfmt, and Clippy; a C++ compiler; `pkg-config`; libpng; and
+ImageMagick.
 
 On Debian or Ubuntu:
 
 ```sh
 sudo apt-get install \
-  build-essential imagemagick libpng-dev libwayland-dev pkg-config
+  build-essential imagemagick libpng-dev pkg-config
 ```
 
 Then clone the private repository:
@@ -116,8 +116,8 @@ tests/run-host-tests.sh
 
 It covers libretro lifecycle and persistence, controller and keyboard input,
 PCM queuing and resampling, dashboard geometry and behavior, ROM catalog,
-cover cache, Wi-Fi profile helper, rlwrap-backed terminal lifecycle, shared
-display/audio runtime, timer configuration, and the CHIP-8 core.
+cover cache, Wi-Fi profile helper, rlwrap-backed terminal lifecycle, Rust
+display/audio runtime, timer and chiptune behavior, and the CHIP-8 core.
 
 The suite runs the strict Rust formatter, lints, and tests. Uploader coverage
 includes authentication, bounded HTTP and form parsing, ROM validation,
@@ -233,7 +233,9 @@ across callback boundaries and resets after a reported gap. The worker opens
 OSS only after PCM arrives, preserves the validated stream-ring priming
 sequence, drains and closes after 100 ms without source data, and resets
 immediately on mute, pause, hide, or shutdown. NES, GB/GBC, and ZX all use
-this Rust audio path through the shared libretro host.
+this Rust audio path through the shared libretro host. The chiptune runtime
+uses the same worker at 44.1 kHz and releases it immediately when playback is
+paused, muted, hidden, or stopped.
 
 The Rust libretro host keeps three persistent Wayland SHM frame slots and
 drops a new presentation when all slots remain compositor-owned. It never
@@ -279,9 +281,7 @@ retrodeck/
 │   ├── menu_state.cpp          atomic volume, brightness, and keymap state
 │   ├── menu_text.cpp           path and display-text validation
 │   ├── menu_ui.cpp             shared dashboard drawing primitives
-│   ├── deck_runtime.cpp        video selection, audio, and frame clock
-│   ├── deck_wayland.cpp        legacy dashboard and chiptune Wayland path
-│   └── chiptune_deck.cpp       GME and Ogg native music player
+│   └── deck_wayland.cpp        legacy dashboard Wayland presentation path
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
 ├── vendor/emulators/           pinned emulator source and provenance

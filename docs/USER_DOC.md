@@ -14,9 +14,9 @@ kept in the following documents:
   authenticated ROM and appearance interface and password rotation.
 
 The Rust and Common Lisp migration is in progress. Rust is authoritative for
-the ROM uploader, CHIP-8, 10 Seconds, and the shared NES, GB/GBC, and ZX
-libretro host. The dashboard and chiptune player remain on their documented
-C++ implementations until their replacements pass the gates in
+the ROM uploader, CHIP-8, 10 Seconds, chiptune player, and the shared NES,
+GB/GBC, and ZX libretro host. The dashboard remains on its documented C++
+implementation until its replacement passes the gates in
 [`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md). Device-local Lisp
 overrides are not yet an available release feature.
 

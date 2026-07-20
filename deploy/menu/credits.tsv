@@ -6,8 +6,8 @@ libspectrum	ZX Spectrum media support	GPL-2.0-or-later
 bzip2	ZX Spectrum compression support	bzip2-1.0.6
 c-octo	CHIP-8, SCHIP, and XO-CHIP emulation	MIT
 Game Music Emu	Chiptune decoding	LGPL-2.1-or-later
-libogg	Ogg container support	BSD-3-Clause
-libvorbis	Ogg Vorbis decoding	BSD-3-Clause
+ogg	Rust Ogg container support	BSD-3-Clause
+Lewton	Rust Ogg Vorbis decoding	MIT OR Apache-2.0
 Lua	Lua REPL	MIT
 MicroPython	Python REPL	MIT
 ECL	Common Lisp REPL	LGPL-2.1-or-later

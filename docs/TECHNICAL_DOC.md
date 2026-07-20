@@ -4,12 +4,12 @@
 
 The current deployable system consists of static ARMv7 executables running on
 the Deck's OpenWrt userspace. Rust implements the CHIP-8 host, 10 Seconds game,
-authenticated ROM intake, the shared libretro host, Common Lisp policy
-boundary, and shared Wayland, input, timing, and lazy OSS audio layers. C++
-remains in the dashboard, its legacy shared runtime, and the chiptune player
-while those pieces are migrated. ECL provides the interactive Lisp program,
-runs the catalog compiler during activation, and loads bounded device-local
-behavior policy.
+chiptune player, authenticated ROM intake, the shared libretro host, Common
+Lisp policy boundary, and shared Wayland, input, timing, and lazy OSS audio
+layers. C++ remains in the dashboard and its Wayland presentation helper while
+those pieces are migrated. ECL provides the interactive Lisp program, runs the
+catalog compiler during activation, and loads bounded device-local behavior
+policy.
 
 The Rust audio foundation includes fixed-capacity PCM buffering, direct
 stereo-to-mono downmixing, callback-stable linear resampling, worker-side gain,
@@ -17,6 +17,12 @@ and a lazy OSS stream worker. NES, GB/GBC, and ZX now use this worker through
 one Rust libretro host linked separately to each pinned upstream core. Audio
 callbacks only attempt a bounded queue operation; opening, priming, writing,
 and closing `/dev/dsp` stay on the worker thread.
+
+The Rust chiptune player discovers a bounded symlink-free catalog, decodes Ogg
+Vorbis in pure Rust, owns Game Music Emu through a narrow audited C interface,
+and publishes exact 60 Hz RGB565 frames through the same Rust platform layer.
+Its input loop only changes state or submits bounded PCM; the audio worker
+releases the OSS device whenever playback is paused, muted, hidden, or closed.
 
 The BMC installation presents the dashboard as a scene widget. Games use a
 black fullscreen layer surface and a centered gameplay layer surface. The
