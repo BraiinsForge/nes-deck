@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod display;
+pub mod file;
 pub mod input;
 pub mod shutdown;
 pub mod time;
