@@ -15,12 +15,13 @@ use std::slice;
 use std::time::Duration;
 
 use retro_deck_audio::SampleRate;
-use retro_deck_platform::display::Dimensions;
+use retro_deck_platform::{display::Dimensions, input::KeyboardState};
 
 use super::abi;
 use super::callbacks::{CallbackBinding, CallbackBindingError};
 use super::{
-    Content, ControllerDevice, LibretroCore, MAXIMUM_SAVE_BYTES, MemoryKind, SaveError, SaveStore,
+    AudioBatchError, Content, ControllerDevice, JoypadState, LibretroCore, MAXIMUM_SAVE_BYTES,
+    MemoryKind, SaveError, SaveStore, VideoCallbackError,
 };
 
 const MAXIMUM_FRAMES_PER_SECOND: f64 = 1_000.0;
@@ -258,6 +259,53 @@ impl CoreSession {
     #[must_use]
     pub fn save_persistent_memory(&self) -> Vec<PersistenceIssue> {
         self.persistence.save(self.core(), &self.lifecycle)
+    }
+
+    /// Replace the complete input snapshot observed by the next core frame.
+    pub fn set_input(
+        &mut self,
+        player_one: JoypadState,
+        player_two: JoypadState,
+        keyboard: KeyboardState,
+    ) {
+        self.callbacks.set_input(player_one, player_two, keyboard);
+    }
+
+    /// Run exactly one synchronous core frame and collect callback failures.
+    #[must_use]
+    pub fn run_frame(&mut self) -> CoreFrameReport {
+        self.lifecycle.run();
+        CoreFrameReport {
+            audio_error: self.callbacks.take_audio_batch_error(),
+            video_error: self.callbacks.take_video_error(),
+        }
+    }
+}
+
+/// Nonblocking callback diagnostics produced by one core frame.
+#[derive(Debug, Default)]
+pub struct CoreFrameReport {
+    audio_error: Option<AudioBatchError>,
+    video_error: Option<VideoCallbackError>,
+}
+
+impl CoreFrameReport {
+    /// First malformed PCM callback observed during the frame.
+    #[must_use]
+    pub const fn audio_error(&self) -> Option<AudioBatchError> {
+        self.audio_error
+    }
+
+    /// First invalid or unpresentable video callback during the frame.
+    #[must_use]
+    pub const fn video_error(&self) -> Option<&VideoCallbackError> {
+        self.video_error.as_ref()
+    }
+
+    /// Whether every callback completed without a retained diagnostic.
+    #[must_use]
+    pub const fn clean(&self) -> bool {
+        self.audio_error.is_none() && self.video_error.is_none()
     }
 }
 
@@ -625,6 +673,12 @@ impl CoreLifecycle {
         info
     }
 
+    fn run(&mut self) {
+        // SAFETY: Content is loaded, callbacks remain bound, and the mutable
+        // lifecycle borrow prevents overlapping core execution or persistence.
+        unsafe { (self.api.run)() };
+    }
+
     fn memory_mut(&mut self, kind: MemoryKind) -> Result<Option<&mut [u8]>, CoreMemoryError> {
         let Some((pointer, bytes)) = self.memory_region(kind)? else {
             return Ok(None);
@@ -733,6 +787,7 @@ fn rounded_sample_rate(rate: f64) -> Option<SampleRate> {
 mod tests {
     use super::super::callbacks::serialize_test_sessions;
     use super::*;
+    use retro_deck_platform::input::{Button, ButtonSet};
     use std::fs;
     use std::os::unix::ffi::OsStringExt as _;
     use std::slice;
@@ -741,6 +796,7 @@ mod tests {
     static FAKE_CORE: LazyLock<Mutex<FakeCore>> = LazyLock::new(|| Mutex::new(FakeCore::default()));
     static LIBRARY_NAME: &[u8] = b"Test Core\0";
     static LIBRARY_VERSION: &[u8] = b"1.2.3\0";
+    static VIDEO_PIXEL: u32 = 0;
 
     #[derive(Debug)]
     struct FakeCore {
@@ -755,6 +811,10 @@ mod tests {
         rtc: Vec<u8>,
         null_memory: Option<MemoryKind>,
         reported_memory_size: Option<(MemoryKind, usize)>,
+        audio_batch_callback: Option<abi::AudioSampleBatchCallback>,
+        video_refresh_callback: Option<abi::VideoRefreshCallback>,
+        input_state_callback: Option<abi::InputStateCallback>,
+        emit_callback_errors: bool,
     }
 
     impl Default for FakeCore {
@@ -771,6 +831,10 @@ mod tests {
                 rtc: Vec::new(),
                 null_memory: None,
                 reported_memory_size: None,
+                audio_batch_callback: None,
+                video_refresh_callback: None,
+                input_state_callback: None,
+                emit_callback_errors: false,
             }
         }
     }
@@ -1052,28 +1116,68 @@ mod tests {
         assert!(!fake().events.contains(&"unload"));
     }
 
+    #[test]
+    fn one_frame_observes_input_and_returns_callback_diagnostics() {
+        let _session = serialize_test_sessions();
+        reset_fake();
+        let (_directory, content) = content_fixture(LibretroCore::Fceumm);
+        let mut session = CoreSession::open_with_api(LibretroCore::Fceumm, content, test_api())
+            .expect("valid session");
+        let player_one = JoypadState::from_buttons(ButtonSet::empty().with(Button::A, true));
+        session.set_input(player_one, JoypadState::default(), KeyboardState::default());
+        let input_state = fake()
+            .input_state_callback
+            .expect("registered input callback");
+        // SAFETY: The registered callback remains bound to this live session.
+        assert_eq!(
+            unsafe { input_state(0, abi::DEVICE_JOYPAD, 0, super::super::JoypadButton::A.id(),) },
+            1
+        );
+
+        fake().emit_callback_errors = true;
+        let report = session.run_frame();
+        assert_eq!(report.audio_error(), Some(AudioBatchError::NullData));
+        assert!(matches!(
+            report.video_error(),
+            Some(VideoCallbackError::Frame(
+                super::super::VideoFrameError::InvalidDimensions
+            ))
+        ));
+        assert!(!report.clean());
+
+        fake().emit_callback_errors = false;
+        assert!(session.run_frame().clean());
+        assert!(fake().events.ends_with(&["run", "run"]));
+    }
+
     unsafe extern "C" fn fake_set_environment(_: abi::EnvironmentCallback) {
         fake().events.push("set environment");
     }
 
-    unsafe extern "C" fn fake_set_video_refresh(_: abi::VideoRefreshCallback) {
-        fake().events.push("set video");
+    unsafe extern "C" fn fake_set_video_refresh(callback: abi::VideoRefreshCallback) {
+        let mut state = fake();
+        state.events.push("set video");
+        state.video_refresh_callback = Some(callback);
     }
 
     unsafe extern "C" fn fake_set_audio_sample(_: abi::AudioSampleCallback) {
         fake().events.push("set audio sample");
     }
 
-    unsafe extern "C" fn fake_set_audio_sample_batch(_: abi::AudioSampleBatchCallback) {
-        fake().events.push("set audio batch");
+    unsafe extern "C" fn fake_set_audio_sample_batch(callback: abi::AudioSampleBatchCallback) {
+        let mut state = fake();
+        state.events.push("set audio batch");
+        state.audio_batch_callback = Some(callback);
     }
 
     unsafe extern "C" fn fake_set_input_poll(_: abi::InputPollCallback) {
         fake().events.push("set input poll");
     }
 
-    unsafe extern "C" fn fake_set_input_state(_: abi::InputStateCallback) {
-        fake().events.push("set input state");
+    unsafe extern "C" fn fake_set_input_state(callback: abi::InputStateCallback) {
+        let mut state = fake();
+        state.events.push("set input state");
+        state.input_state_callback = Some(callback);
     }
 
     unsafe extern "C" fn fake_init() {
@@ -1142,7 +1246,30 @@ mod tests {
         fake().events.push("unload");
     }
 
-    const unsafe extern "C" fn fake_run() {}
+    unsafe extern "C" fn fake_run() {
+        let (emit, audio_batch, video_refresh) = {
+            let mut state = fake();
+            state.events.push("run");
+            (
+                state.emit_callback_errors,
+                state.audio_batch_callback,
+                state.video_refresh_callback,
+            )
+        };
+        if !emit {
+            return;
+        }
+        if let Some(callback) = audio_batch {
+            // SAFETY: The intentional null batch exercises validation before
+            // the callback forms a source slice.
+            let _ = unsafe { callback(ptr::null(), 1) };
+        }
+        if let Some(callback) = video_refresh {
+            // SAFETY: Invalid zero width is rejected before the readable
+            // static pixel pointer can be used to form a frame slice.
+            unsafe { callback(ptr::from_ref(&VIDEO_PIXEL).cast(), 0, 1, size_of::<u32>()) };
+        }
+    }
 
     unsafe extern "C" fn fake_get_memory_data(identifier: c_uint) -> *mut c_void {
         let mut state = fake();

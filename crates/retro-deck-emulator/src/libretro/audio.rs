@@ -1,10 +1,5 @@
 //! Checked borrowing for interleaved libretro PCM callbacks.
 
-#![allow(
-    dead_code,
-    reason = "validated PCM borrowing is consumed by the next callback migration slice"
-)]
-
 use std::error::Error;
 use std::fmt;
 use std::slice;
@@ -43,7 +38,7 @@ pub(super) unsafe fn stereo_frames<'samples>(
 
 /// Invalid libretro PCM callback size or backing pointer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum AudioBatchError {
+pub enum AudioBatchError {
     /// A nonempty callback has no PCM pointer.
     NullData,
     /// PCM memory is not naturally aligned for signed 16-bit samples.

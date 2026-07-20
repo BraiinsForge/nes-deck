@@ -1,10 +1,5 @@
 //! Checked frame geometry before borrowing core-owned pixel memory.
 
-#![allow(
-    dead_code,
-    reason = "validated frame layouts are consumed by the next callback migration slice"
-)]
-
 use std::error::Error;
 use std::ffi::c_void;
 use std::fmt;
@@ -112,7 +107,7 @@ impl VideoFrameLayout {
 
 /// Invalid libretro frame metadata or backing pointer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum VideoFrameError {
+pub enum VideoFrameError {
     /// Width or height is zero or exceeds the platform frame bound.
     InvalidDimensions,
     /// Pitch is not a whole pixel row or is narrower than visible width.
@@ -155,7 +150,7 @@ impl Error for VideoFrameError {
 
 /// Failure while validating or presenting one core video callback.
 #[derive(Debug)]
-pub(super) enum VideoCallbackError {
+pub enum VideoCallbackError {
     /// Core-owned frame metadata or memory was invalid.
     Frame(VideoFrameError),
     /// The fixed Wayland presentation path failed.
