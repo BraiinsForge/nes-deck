@@ -9,6 +9,7 @@ mod keyboard;
 mod options;
 mod profile;
 mod save;
+mod video;
 
 pub use content::{Content, ContentError};
 pub use environment::PixelFormat;
