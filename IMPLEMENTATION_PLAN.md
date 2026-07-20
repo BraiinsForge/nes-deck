@@ -148,6 +148,10 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 - The Rust dashboard crate now combines base, uploaded, and generated native
   entries behind one duplicate-checked category view with fixed NES, GB, GBC,
   ZX, CHIP-8, and Deck ordering.
+- Its pure state machine owns per-category carousel position, modal and
+  settings navigation, mute restoration, bounded volume and brightness,
+  keymap selection, and typed launch or persistence effects. Input handling
+  performs no filesystem, audio-device, process, or network operation.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
 
