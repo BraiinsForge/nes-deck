@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 use retro_deck_audio::{SampleRate, Volume};
 use retro_deck_config::{Catalog, MAXIMUM_CATALOG_BYTES, MAXIMUM_PALETTE_BYTES, Palette};
 use retro_deck_dashboard::{
-    Action, ArtworkStore, AssetPathError, Brightness, ControllerGuard, CreditsCrawl,
-    DashboardAssetPaths, DashboardAssets, DashboardAssetsError, DashboardFrame, DashboardModel,
-    Intent, Keymap, MenuCue, NetworkView, RenderError, Screen, SettingChange, SettingsView,
-    TouchCommitter, VolumeState, controller_action, menu_notes,
+    Action, ArtworkStore, AssetPathError, ControllerGuard, CreditsCrawl, DashboardAssetPaths,
+    DashboardAssets, DashboardAssetsError, DashboardFrame, DashboardModel, Intent, MenuCue,
+    NetworkView, PreferenceLoad, PreferencePathError, PreferencePaths, RenderError, Screen,
+    SettingChange, SettingsView, TouchCommitter, controller_action, menu_notes,
 };
 use retro_deck_platform::audio::{AudioGate, ToneCueWorker, ToneWorkerReport};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
@@ -33,6 +33,9 @@ const CREDITS_FRAME: Duration = Duration::from_millis(40);
 const CONTROLLER_SCAN: Duration = Duration::from_secs(1);
 const CUE_SAMPLE_RATE: u32 = 44_100;
 const COVER_DIRECTORY: &str = "/mnt/data/nes-deck/covers";
+const VOLUME_STATE: &str = "/mnt/data/nes-deck/state/menu-volume.state";
+const BRIGHTNESS_STATE: &str = "/mnt/data/nes-deck/state/menu-brightness.state";
+const KEYMAP_STATE: &str = "/mnt/data/nes-deck/state/terminal-keymap.state";
 
 fn main() -> ExitCode {
     let command = match parse_arguments(env::args_os().skip(1)) {
@@ -232,11 +235,17 @@ impl DashboardRuntime {
         if let Some(error) = assets.palette_fallback() {
             eprintln!("{APPLICATION}: {error}; using compiled dashboard colors");
         }
+        let preference_paths = standard_preference_paths()?;
+        let preference_load = PreferenceLoad::load(&preference_paths);
+        for issue in preference_load.issues() {
+            eprintln!("{APPLICATION}: {issue}");
+        }
+        let preferences = preference_load.preferences();
         let model = DashboardModel::new(
             assets.catalog().clone(),
-            VolumeState::new(42, 42).map_err(|_| RuntimeError::InvalidDefaults)?,
-            Brightness::new(60).map_err(|_| RuntimeError::InvalidDefaults)?,
-            Keymap::Us,
+            preferences.volume(),
+            preferences.brightness(),
+            preferences.keymap(),
         );
         let artwork = load_artwork(assets.catalog().entries());
         let palette = *assets.palette();
@@ -528,6 +537,11 @@ impl DashboardRuntime {
     }
 }
 
+fn standard_preference_paths() -> Result<PreferencePaths, RuntimeError> {
+    PreferencePaths::new(VOLUME_STATE, BRIGHTNESS_STATE, KEYMAP_STATE)
+        .map_err(RuntimeError::PreferencePaths)
+}
+
 fn load_artwork(entries: &[retro_deck_config::CatalogEntry]) -> ArtworkStore {
     let store = match ArtworkStore::load(COVER_DIRECTORY, entries) {
         Ok(store) => store,
@@ -620,6 +634,7 @@ fn report_unpersisted_setting(setting: SettingChange) {
 enum RuntimeError {
     Signals(io::Error),
     Assets(DashboardAssetsError),
+    PreferencePaths(PreferencePathError),
     InvalidDefaults,
     InvalidDimensions,
     Presentation(WaylandPresentationError),
@@ -639,6 +654,7 @@ impl fmt::Display for RuntimeError {
         match self {
             Self::Signals(error) => write!(formatter, "cannot install shutdown handlers: {error}"),
             Self::Assets(error) => error.fmt(formatter),
+            Self::PreferencePaths(error) => error.fmt(formatter),
             Self::InvalidDefaults => formatter.write_str("compiled dashboard defaults are invalid"),
             Self::InvalidDimensions => {
                 formatter.write_str("dashboard canvas dimensions are invalid")
@@ -668,6 +684,7 @@ impl Error for RuntimeError {
         match self {
             Self::Signals(error) => Some(error),
             Self::Assets(error) => Some(error),
+            Self::PreferencePaths(error) => Some(error),
             Self::Presentation(error) => Some(error),
             Self::Input(error) => Some(error),
             Self::Render(error) => Some(error),
