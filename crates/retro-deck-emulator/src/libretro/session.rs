@@ -169,6 +169,17 @@ pub struct CoreSession {
 }
 
 impl CoreSession {
+    /// Initialize the statically linked core and load validated content.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreSessionError`] for a profile mismatch, callback setup,
+    /// incompatible core API, rejected content, or invalid AV information.
+    #[cfg(feature = "libretro-linked")]
+    pub fn open(core: LibretroCore, content: Content) -> Result<Self, CoreSessionError> {
+        Self::open_with_api(core, content, CoreApi::linked())
+    }
+
     fn open_with_api(
         core: LibretroCore,
         content: Content,
@@ -762,6 +773,31 @@ impl CoreLifecycle {
             Err(CoreMemoryError::NullPointer { kind, bytes })
         } else {
             Ok(Some((pointer, bytes)))
+        }
+    }
+}
+
+#[cfg(feature = "libretro-linked")]
+impl CoreApi {
+    const fn linked() -> Self {
+        Self {
+            set_environment: abi::retro_set_environment,
+            set_video_refresh: abi::retro_set_video_refresh,
+            set_audio_sample: abi::retro_set_audio_sample,
+            set_audio_sample_batch: abi::retro_set_audio_sample_batch,
+            set_input_poll: abi::retro_set_input_poll,
+            set_input_state: abi::retro_set_input_state,
+            init: abi::retro_init,
+            deinit: abi::retro_deinit,
+            api_version: abi::retro_api_version,
+            get_system_info: abi::retro_get_system_info,
+            get_system_av_info: abi::retro_get_system_av_info,
+            set_controller_port_device: abi::retro_set_controller_port_device,
+            load_game: abi::retro_load_game,
+            unload_game: abi::retro_unload_game,
+            run: abi::retro_run,
+            get_memory_data: abi::retro_get_memory_data,
+            get_memory_size: abi::retro_get_memory_size,
         }
     }
 }

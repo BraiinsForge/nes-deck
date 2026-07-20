@@ -147,7 +147,7 @@ impl Environment {
 
 /// Invalid path data while preparing stable libretro strings.
 #[derive(Debug)]
-pub(super) struct EnvironmentError {
+pub struct EnvironmentError {
     path: PathBuf,
     failure: EnvironmentFailure,
 }

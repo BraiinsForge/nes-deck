@@ -246,7 +246,7 @@ impl Drop for CallbackBinding {
 
 /// Failure to claim or initialize the single libretro callback session.
 #[derive(Debug)]
-pub(super) enum CallbackBindingError {
+pub enum CallbackBindingError {
     /// Another core session still owns process-global libretro symbols.
     AlreadyActive,
     /// Stable environment strings could not be prepared.
