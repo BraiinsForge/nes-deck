@@ -94,6 +94,9 @@
       timerRustSources = rustWorkspaceSources [
         ./protocol/deck-widget-v1.xml
       ];
+      dashboardRustSources = rustWorkspaceSources [
+        ./protocol/deck-widget-v1.xml
+      ];
       chiptuneRustSources = rustWorkspaceSources [
         ./protocol/deck-widget-v1.xml
       ];
@@ -298,6 +301,36 @@
 
           meta = {
             description = "Touch-first game launcher for the Braiins Forge Deck";
+            platforms = [ "armv7l-linux" ];
+          };
+        };
+
+        deck-dashboard = pkgsCross.rustPlatform.buildRustPackage {
+          pname = "deck-dashboard";
+          version = "0.1.0";
+          src = dashboardRustSources;
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [
+            "-p"
+            "retro-deck-dashboard"
+            "--bin"
+            "deck-dashboard"
+          ];
+          doCheck = false;
+
+          env.RUSTFLAGS = "-C target-feature=+crt-static";
+          nativeBuildInputs = [ pkgs.nukeReferences ];
+          buildInputs = [ pkgsCross.glibc.static ];
+          allowedReferences = [ ];
+
+          postFixup = ''
+            ${pkgsCross.stdenv.cc.bintools.bintools}/bin/${pkgsCross.stdenv.cc.targetPrefix}strip \
+              --strip-all $out/bin/deck-dashboard
+            nuke-refs $out/bin/deck-dashboard
+          '';
+
+          meta = {
+            description = "Staged Rust dashboard for the Braiins Forge Deck";
             platforms = [ "armv7l-linux" ];
           };
         };

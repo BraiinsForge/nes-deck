@@ -69,6 +69,7 @@ verify_package gb-deck bin/gb-deck
 verify_package zx-deck bin/zx-deck
 verify_package chip8-deck bin/chip8-deck
 verify_package ten-seconds-deck bin/ten-seconds-deck
+verify_package deck-dashboard bin/deck-dashboard
 verify_package deck-menu bin/deck-menu
 verify_package fbterm-deck bin/fbterm bin/loadkeys
 verify_package rlwrap-deck bin/rlwrap
