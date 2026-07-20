@@ -47,6 +47,27 @@ pub enum Button {
     R,
 }
 
+/// Navigation key normalized from one dashboard keyboard report.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum KeyboardKey {
+    /// Main or keypad Enter.
+    Enter,
+    /// Escape.
+    Escape,
+    /// Direction up.
+    Up,
+    /// Direction down.
+    Down,
+    /// Direction left.
+    Left,
+    /// Direction right.
+    Right,
+    /// Tab without Shift.
+    Tab,
+    /// Tab while either Shift key is held.
+    BackTab,
+}
+
 impl Button {
     const ALL: [Self; 10] = [
         Self::A,

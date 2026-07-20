@@ -26,7 +26,10 @@ pub use assets::{
 };
 pub use audio::menu_notes;
 pub use catalog::{Category, DashboardCatalog, DashboardCatalogError, MAXIMUM_DASHBOARD_ENTRIES};
-pub use controls::{ControllerGuard, ExitHold, ExitHoldEvent, TouchCommitter, controller_action};
+pub use controls::{
+    ControllerGuard, ExitHold, ExitHoldEvent, TouchCommitter, controller_action, keyboard_action,
+    wifi_keyboard_action,
+};
 pub use credits::{CreditsCrawl, CreditsLayout};
 pub use launch::{
     ExitPolicy, LaunchPlan, LaunchPlanError, LaunchTarget, LaunchTargetError, TerminalMode,

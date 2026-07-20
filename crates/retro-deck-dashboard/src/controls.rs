@@ -1,8 +1,8 @@
 //! Deterministic dashboard input routing without device or audio work.
 
-use retro_deck_platform::input::{Button, ButtonEdge};
+use retro_deck_platform::input::{Button, ButtonEdge, KeyboardKey};
 
-use crate::{Action, Screen};
+use crate::{Action, Screen, WifiAction};
 
 const BURST_LIMIT: usize = 12;
 const BURST_WINDOW_MS: u64 = 1_000;
@@ -46,6 +46,56 @@ const fn directional_action(screen: Screen, action: Action) -> Option<Action> {
     match screen {
         Screen::Dashboard | Screen::Settings => Some(action),
         Screen::Credits => None,
+    }
+}
+
+/// Convert one keyboard press or permitted repeat to a dashboard action.
+#[must_use]
+pub const fn keyboard_action(screen: Screen, key: KeyboardKey) -> Option<Action> {
+    match key {
+        KeyboardKey::Enter => match screen {
+            Screen::Dashboard | Screen::Settings => Some(Action::Confirm),
+            Screen::Credits => None,
+        },
+        KeyboardKey::Escape => match screen {
+            Screen::Dashboard => None,
+            Screen::Settings | Screen::Credits => Some(Action::Back),
+        },
+        KeyboardKey::Up => match screen {
+            Screen::Dashboard => Some(Action::CategoryPrevious),
+            Screen::Settings => Some(Action::Previous),
+            Screen::Credits => None,
+        },
+        KeyboardKey::Down => match screen {
+            Screen::Dashboard => Some(Action::CategoryNext),
+            Screen::Settings => Some(Action::Next),
+            Screen::Credits => None,
+        },
+        KeyboardKey::Left => directional_action(screen, Action::Previous),
+        KeyboardKey::Right => directional_action(screen, Action::Next),
+        KeyboardKey::Tab => match screen {
+            Screen::Dashboard => Some(Action::CategoryNext),
+            Screen::Settings | Screen::Credits => None,
+        },
+        KeyboardKey::BackTab => match screen {
+            Screen::Dashboard => Some(Action::CategoryPrevious),
+            Screen::Settings | Screen::Credits => None,
+        },
+    }
+}
+
+/// Modal keyboard behavior while the touch-oriented Wi-Fi editor is open.
+#[must_use]
+pub const fn wifi_keyboard_action(key: KeyboardKey) -> Option<WifiAction> {
+    match key {
+        KeyboardKey::Escape => Some(WifiAction::Close),
+        KeyboardKey::Enter
+        | KeyboardKey::Up
+        | KeyboardKey::Down
+        | KeyboardKey::Left
+        | KeyboardKey::Right
+        | KeyboardKey::Tab
+        | KeyboardKey::BackTab => None,
     }
 }
 
@@ -266,10 +316,13 @@ impl<Target> Default for TouchCommitter<Target> {
 
 #[cfg(test)]
 mod tests {
-    use retro_deck_platform::input::{Button, ButtonEdge};
+    use retro_deck_platform::input::{Button, ButtonEdge, KeyboardKey};
 
-    use super::{ControllerGuard, ExitHold, ExitHoldEvent, TouchCommitter, controller_action};
-    use crate::{Action, Screen};
+    use super::{
+        ControllerGuard, ExitHold, ExitHoldEvent, TouchCommitter, controller_action,
+        keyboard_action, wifi_keyboard_action,
+    };
+    use crate::{Action, Screen, WifiAction};
 
     #[test]
     fn controller_mapping_separates_categories_carousel_and_volume() {
@@ -293,6 +346,32 @@ mod tests {
             controller_action(Screen::Dashboard, Button::A, ButtonEdge::Released),
             None
         );
+    }
+
+    #[test]
+    fn keyboard_navigation_is_screen_specific_and_modal_safe() {
+        assert_eq!(
+            keyboard_action(Screen::Dashboard, KeyboardKey::Tab),
+            Some(Action::CategoryNext)
+        );
+        assert_eq!(
+            keyboard_action(Screen::Dashboard, KeyboardKey::BackTab),
+            Some(Action::CategoryPrevious)
+        );
+        assert_eq!(
+            keyboard_action(Screen::Settings, KeyboardKey::Down),
+            Some(Action::Next)
+        );
+        assert_eq!(
+            keyboard_action(Screen::Credits, KeyboardKey::Escape),
+            Some(Action::Back)
+        );
+        assert_eq!(keyboard_action(Screen::Credits, KeyboardKey::Enter), None);
+        assert_eq!(
+            wifi_keyboard_action(KeyboardKey::Escape),
+            Some(WifiAction::Close)
+        );
+        assert_eq!(wifi_keyboard_action(KeyboardKey::Enter), None);
     }
 
     #[test]
