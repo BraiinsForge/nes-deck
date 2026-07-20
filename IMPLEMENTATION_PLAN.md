@@ -169,7 +169,7 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 - A device-independent RGB565 canvas now owns clipped drawing, panels, lines,
   text fitting, fixed-capacity labels, and the complete case-sensitive 5x7
   font. The Rust timer uses it without changing any reference pixel snapshot,
-  and future Wi-Fi labels can render capitalization unambiguously.
+  and Wi-Fi fields render capitalization unambiguously.
 - The Rust catalog screen now renders into one fixed 1280x480 allocation with
   bounded tabs, cards, indicators, cover-art borrowing, approved cog fallback,
   and hit targets that return semantic model actions. Its canonical NES frame
@@ -179,6 +179,16 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   renders case-sensitive SSID, WLAN, WireGuard, selector, login-shell, volume,
   brightness, and keymap values from a bounded read-only view. Its hit targets
   return typed actions only; no network or device mutation occurs in rendering.
+- The pixel-identical Rust Wi-Fi editor keeps SSID and passphrase data in fixed
+  printable-ASCII buffers, freezes input during an explicit save, erases a
+  successful or closed passphrase, and correlates asynchronous completions so
+  an old request cannot update a reopened editor. The managed helper receives
+  credentials over standard input and may only store a profile; it does not
+  scan, reload, roam, or alter the active connection.
+- Read-only network snapshots query fixed `wlan0` and `wg0` identities plus the
+  credential-free selector status every two seconds off the input path. A
+  collection failure preserves the last good view, and unavailable status or
+  worker startup cannot prevent the dashboard from starting.
 - The bounded Rust credits schema rejects malformed, duplicate, empty, or
   excessive manifests. Its intro, perspective crawl, and reduced-motion views
   are pixel-identical to the C++ references while sampling the shared font
@@ -195,10 +205,11 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 - Fixed launch plans now hand audio ownership to managed child process groups,
   keep the Wayland connection serviced, supervise emulator exit through a
   touchscreen-only hold, contain failed children, discard stale menu input,
-  and adopt validated child volume state. Wi-Fi mutation remains deliberately
-  isolated from this runtime.
-- Keep the staged dashboard unpackaged and undeployed until its complete host
-  gates, ARMv7 closure audit, and live Deck checks pass.
+  and adopt validated child volume state.
+- The staged binary is packaged separately as `deck-dashboard` and is included
+  in the full static ARMv7 closure audit. The deployed launcher still selects
+  the current dashboard; do not select or deploy the Rust candidate until its
+  controlled live Deck touch, controller, sound, launch, and Wi-Fi checks pass.
 - Generate screenshots from the same Rust renderer used on the Deck.
 
 ### Phase 5: dependency organization and removal
@@ -222,7 +233,7 @@ tests/run-host-tests.sh
 tests/verify-arm-builds.sh
 ```
 
-The Lisp command becomes mandatory when the tracked Lisp runtime is added.
+The Lisp command is mandatory for the tracked Lisp runtime.
 The final gate is a read-only health report followed by manual touch,
 controller, sound, swipe, upload, and save-game checks on a BMC Deck.
 
