@@ -91,7 +91,6 @@ zx=$(build_flake .#zx-deck)
 chip8=$(build_flake .#chip8-deck)
 timer=$(build_flake .#ten-seconds-deck)
 menu=$(build_flake .#deck-menu)
-dashboard=$(build_flake .#deck-dashboard)
 fbterm=$(build_flake .#fbterm-deck)
 rlwrap=$(build_flake .#rlwrap-deck)
 lua=$(build_flake .#lua-deck)
@@ -130,8 +129,6 @@ cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
 cp "$chip8/bin/chip8-deck" "$payload/nes-deck/chip8-deck"
 cp "$timer/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
 cp "$menu/bin/deck-menu" "$payload/nes-deck/menu/deck-menu"
-cp "$dashboard/bin/deck-dashboard" \
-  "$payload/nes-deck/menu/deck-dashboard.candidate"
 cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
 cp "$uploader/bin/rom-uploader" \
   "$payload/nes-deck/uploader/rom-uploader"
@@ -221,7 +218,6 @@ find "$payload/nes-deck" -type f \( \
   -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o \
   -name 'chip8-deck' -o -name 'ten-seconds-deck' -o \
   -name 'chiptune-deck' -o -name 'deck-menu' -o \
-  -name 'deck-dashboard.candidate' -o \
   -name 'deck-menu-launcher' -o -name 'fetch-covers' -o \
   -name 'retro-terminal' -o -name 'fbterm' -o -name 'loadkeys' -o \
   -name 'rlwrap' -o \

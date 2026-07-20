@@ -66,8 +66,7 @@ for executable in \
   }
 done
 for executable in \
-  menu/deck-menu menu/deck-dashboard.candidate \
-  menu/deck-menu-launcher menu/fetch-covers \
+  menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
   terminal/fbterm terminal/loadkeys terminal/retro-terminal terminal/rlwrap \
   langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin \
   uploader/rom-uploader; do
@@ -151,11 +150,6 @@ scheme_result=$(
 }
 "$stage/nes-deck/menu/deck-menu" --help >/dev/null
 "$stage/nes-deck/menu/deck-menu" --validate-palette \
-  "$stage/nes-deck/menu/palette.tsv"
-"$stage/nes-deck/menu/deck-dashboard.candidate" --help >/dev/null 2>&1
-"$stage/nes-deck/menu/deck-dashboard.candidate" --validate-manifest \
-  "$stage/nes-deck/menu/games.tsv"
-"$stage/nes-deck/menu/deck-dashboard.candidate" --validate-palette \
   "$stage/nes-deck/menu/palette.tsv"
 uploader_deploy_config=$stage/nes-deck/uploader/password.conf
 uploader_address_config=$stage/nes-deck/uploader/address.conf
