@@ -8,7 +8,7 @@ use std::io;
 use std::os::fd::AsFd as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use retro_deck_audio::{SampleRate, Volume};
 use retro_deck_emulator::chip8::{
@@ -32,6 +32,7 @@ const AUDIO_SAMPLE_RATE: u32 = 44_100;
 const AUDIO_FREQUENCY_HZ: u32 = 440;
 const EMULATED_FRAMES_PER_SECOND: u32 = 60;
 const DIAGNOSTIC_FRAME_INTERVAL: u64 = 60;
+const CONTROLLER_SCAN_INTERVAL: Duration = Duration::from_secs(1);
 
 const BUTTON_MAP: [(Button, ControllerButton); 10] = [
     (Button::A, ControllerButton::A),
@@ -81,6 +82,7 @@ struct Chip8Runtime {
     normalized_frame: NormalizedFrame,
     audio: Option<SquareStreamWorker>,
     clock: FrameClock,
+    next_controller_scan: Instant,
     diagnostics: Option<RuntimeDiagnostics>,
 }
 
@@ -120,6 +122,7 @@ impl Chip8Runtime {
             normalized_frame: NormalizedFrame::new(),
             audio: start_audio(volume),
             clock: FrameClock::start(frame_rate),
+            next_controller_scan: Instant::now() + CONTROLLER_SCAN_INTERVAL,
             diagnostics: env::var_os("RETRO_DECK_RUNTIME_DIAGNOSTICS")
                 .is_some()
                 .then(RuntimeDiagnostics::start),
@@ -142,6 +145,7 @@ impl Chip8Runtime {
             && !self.presentation.shutdown_requested()
             && !self.core.halted()
         {
+            self.rescan_controllers();
             self.controllers
                 .wait_readable_with(self.presentation.as_fd(), self.clock.wait_duration())
                 .map_err(RuntimeError::Input)?;
@@ -166,21 +170,39 @@ impl Chip8Runtime {
 
     fn drain_controllers(&mut self) {
         self.input_events.clear();
-        match self.controllers.drain_into(&mut self.input_events) {
-            Ok(stats) => {
-                if stats.dropped() != 0 {
-                    eprintln!(
-                        "{APPLICATION}: discarded {} controller edge(s); complete state remains synchronized",
-                        stats.dropped()
-                    );
-                }
-            }
-            Err(error) => {
-                eprintln!("{APPLICATION}: {error}; rediscovering controllers");
-                self.controllers = discover_controllers();
+        let stats = self.controllers.drain_into(&mut self.input_events);
+        if stats.dropped() != 0 {
+            eprintln!(
+                "{APPLICATION}: discarded {} controller edge(s); complete state remains synchronized",
+                stats.dropped()
+            );
+        }
+        for player in [Player::One, Player::Two] {
+            if stats.disconnected(player) {
+                eprintln!("{APPLICATION}: controller {player:?} disconnected");
             }
         }
+        if stats.disconnected_count() != 0 {
+            self.next_controller_scan = Instant::now();
+        }
         self.controller_state = controller_state(&self.controllers);
+    }
+
+    fn rescan_controllers(&mut self) {
+        let now = Instant::now();
+        if now < self.next_controller_scan {
+            return;
+        }
+        self.next_controller_scan = now + CONTROLLER_SCAN_INTERVAL;
+        match self.controllers.rescan() {
+            Ok(stats) if stats.attached() != 0 => eprintln!(
+                "{APPLICATION}: attached {} controller(s); {} ready",
+                stats.attached(),
+                stats.connected()
+            ),
+            Ok(_) => {}
+            Err(error) => eprintln!("{APPLICATION}: controller rescan failed: {error}"),
+        }
     }
 
     fn run_frame(&mut self) -> Result<LoopControl, RuntimeError> {

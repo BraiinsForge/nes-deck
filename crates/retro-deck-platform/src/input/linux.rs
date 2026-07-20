@@ -23,12 +23,14 @@ const THE_GAMEPAD_VENDOR: u16 = 0x1c59;
 const THE_GAMEPAD_PRODUCT: u16 = 0x0026;
 const MAXIMUM_CONTROLLERS: usize = 2;
 const MAXIMUM_EVENTS_PER_DRAIN: usize = 64;
+const PLAYERS: [Player; MAXIMUM_CONTROLLERS] = [Player::One, Player::Two];
 
 /// Result of one nonblocking drain across every discovered input device.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DrainStats {
     emitted: usize,
     dropped: usize,
+    disconnected_players: u8,
 }
 
 impl DrainStats {
@@ -42,6 +44,39 @@ impl DrainStats {
     #[must_use]
     pub const fn dropped(self) -> usize {
         self.dropped
+    }
+
+    /// Whether one stable controller slot disconnected during this drain.
+    #[must_use]
+    pub const fn disconnected(self, player: Player) -> bool {
+        self.disconnected_players & player_mask(player) != 0
+    }
+
+    /// Number of stable controller slots disconnected during this drain.
+    #[must_use]
+    pub const fn disconnected_count(self) -> u32 {
+        self.disconnected_players.count_ones()
+    }
+}
+
+/// Result of one explicit controller hotplug scan.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ControllerScanStats {
+    attached: usize,
+    connected: usize,
+}
+
+impl ControllerScanStats {
+    /// Controllers newly attached to stable player slots.
+    #[must_use]
+    pub const fn attached(self) -> usize {
+        self.attached
+    }
+
+    /// Controllers connected after the scan.
+    #[must_use]
+    pub const fn connected(self) -> usize {
+        self.connected
     }
 }
 
@@ -123,6 +158,7 @@ struct ControllerCandidate {
 #[derive(Debug)]
 struct ControllerDevice {
     device: Device,
+    path: PathBuf,
     player: Player,
     tracker: ControllerTracker,
 }
@@ -138,9 +174,11 @@ pub struct InputDevices {
 ///
 /// Gameplay processes use this device set so the dashboard supervisor keeps
 /// receiving touchscreen reports for its hold-to-exit gesture.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ControllerDevices {
+    input_directory: PathBuf,
     controllers: Vec<ControllerDevice>,
+    remembered_paths: [Option<String>; MAXIMUM_CONTROLLERS],
 }
 
 impl InputDevices {
@@ -276,21 +314,14 @@ impl ControllerDevices {
     }
 
     fn discover_in(input_directory: &Path) -> Result<Self, InputError> {
-        let paths = event_paths(input_directory)?;
-        let mut candidates = Vec::new();
-        for path in paths {
-            let Ok(device) = Device::open(&path) else {
-                continue;
-            };
-            if is_the_gamepad(&device) {
-                if let Some(candidate) = configure_controller(device, path) {
-                    candidates.push(candidate);
-                }
-            }
-        }
-        Ok(Self {
-            controllers: order_controllers(candidates),
-        })
+        let mut devices = Self {
+            input_directory: input_directory.to_owned(),
+            controllers: Vec::new(),
+            remembered_paths: [None, None],
+        };
+        let candidates = devices.scan_candidates()?;
+        let _attached = devices.attach_candidates(candidates);
+        Ok(devices)
     }
 
     /// Number of supported controllers ready at discovery time.
@@ -306,6 +337,25 @@ impl ControllerDevices {
             .iter()
             .find(|controller| controller.player == player)
             .map_or_else(ButtonSet::empty, |controller| controller.tracker.state())
+    }
+
+    /// Scan for newly connected controllers and preserve remembered slots.
+    ///
+    /// Connected descriptors remain open and are never replaced by a scan.
+    /// Reconnected physical USB paths reclaim their previous player before a
+    /// new controller may fill an unused or disconnected slot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputError::Scan`] without disturbing connected controllers
+    /// when the input directory cannot be enumerated.
+    pub fn rescan(&mut self) -> Result<ControllerScanStats, InputError> {
+        let candidates = self.scan_candidates()?;
+        let attached = self.attach_candidates(candidates);
+        Ok(ControllerScanStats {
+            attached,
+            connected: self.controllers.len(),
+        })
     }
 
     /// Wait for controller or Wayland readiness until the runtime deadline.
@@ -331,37 +381,220 @@ impl ControllerDevices {
     /// Drain all currently available controller reports without waiting.
     ///
     /// At most 64 normalized events are appended per call. Device state is
-    /// consumed after that bound so stale edges cannot be replayed later.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`InputError::Controller`] if a discovered controller can no
-    /// longer be read.
-    pub fn drain_into(&mut self, output: &mut Vec<InputEvent>) -> Result<DrainStats, InputError> {
+    /// consumed after that bound so stale edges cannot be replayed later. An
+    /// unreadable controller is closed, its complete state becomes empty, and
+    /// its stable player slot is reported through [`DrainStats::disconnected`].
+    pub fn drain_into(&mut self, output: &mut Vec<InputEvent>) -> DrainStats {
         let mut collector = EventCollector::new(output);
-        for controller in &mut self.controllers {
-            drain_controller(controller, &mut |event| collector.emit(event))?;
+        let mut index = 0;
+        while index < self.controllers.len() {
+            let drained = self
+                .controllers
+                .get_mut(index)
+                .map_or(Ok(()), |controller| {
+                    drain_controller(controller, &mut |event| collector.emit(event))
+                });
+            if drained.is_ok() {
+                index += 1;
+            } else {
+                let controller = self.controllers.remove(index);
+                collector.disconnect(controller.player);
+            }
         }
-        Ok(collector.stats())
+        collector.stats()
+    }
+
+    fn scan_candidates(&self) -> Result<Vec<ControllerCandidate>, InputError> {
+        let paths = event_paths(&self.input_directory)?;
+        let mut candidates = Vec::new();
+        for path in paths {
+            if self
+                .controllers
+                .iter()
+                .any(|controller| controller.path == path)
+            {
+                continue;
+            }
+            let Ok(device) = Device::open(&path) else {
+                continue;
+            };
+            if !is_the_gamepad(&device) {
+                continue;
+            }
+            let Some(candidate) = configure_controller(device, path) else {
+                continue;
+            };
+            if self.connected_physical_path(&candidate.physical_path) {
+                continue;
+            }
+            candidates.push(candidate);
+        }
+        sort_candidates(&mut candidates);
+        Ok(candidates)
+    }
+
+    fn connected_physical_path(&self, physical_path: &str) -> bool {
+        self.controllers.iter().any(|controller| {
+            remembered_path(&self.remembered_paths, controller.player) == Some(physical_path)
+        })
+    }
+
+    fn attach_candidates(&mut self, candidates: Vec<ControllerCandidate>) -> usize {
+        let connected = PLAYERS.map(|player| {
+            self.controllers
+                .iter()
+                .any(|controller| controller.player == player)
+        });
+        let remembered = PLAYERS.map(|player| remembered_path(&self.remembered_paths, player));
+        let physical_paths = candidates
+            .iter()
+            .map(|candidate| candidate.physical_path.as_str())
+            .collect::<Vec<_>>();
+        let assignments = plan_controller_slots(connected, remembered, &physical_paths);
+        let mut candidates = candidates.into_iter().map(Some).collect::<Vec<_>>();
+        let mut attached = 0;
+
+        for (slot, candidate_index) in assignments.into_iter().enumerate() {
+            let Some(candidate_index) = candidate_index else {
+                continue;
+            };
+            let Some(candidate) = candidates.get_mut(candidate_index).and_then(Option::take) else {
+                continue;
+            };
+            let Some(player) = PLAYERS.get(slot).copied() else {
+                continue;
+            };
+            if let Some(memory) = self.remembered_paths.get_mut(slot) {
+                *memory = Some(candidate.physical_path.clone());
+            }
+            self.controllers
+                .push(assigned_controller(candidate, player));
+            attached += 1;
+        }
+        self.controllers
+            .sort_by_key(|controller| player_index(controller.player));
+        attached
+    }
+}
+
+impl Default for ControllerDevices {
+    fn default() -> Self {
+        Self {
+            input_directory: PathBuf::from(INPUT_DIRECTORY),
+            controllers: Vec::new(),
+            remembered_paths: [None, None],
+        }
     }
 }
 
 fn order_controllers(mut candidates: Vec<ControllerCandidate>) -> Vec<ControllerDevice> {
+    sort_candidates(&mut candidates);
+    candidates
+        .into_iter()
+        .take(MAXIMUM_CONTROLLERS)
+        .enumerate()
+        .filter_map(|(index, candidate)| {
+            PLAYERS
+                .get(index)
+                .copied()
+                .map(|player| assigned_controller(candidate, player))
+        })
+        .collect()
+}
+
+fn sort_candidates(candidates: &mut Vec<ControllerCandidate>) {
     candidates.sort_by(|left, right| {
         left.physical_path
             .cmp(&right.physical_path)
             .then_with(|| left.path.cmp(&right.path))
     });
-    candidates
-        .into_iter()
-        .take(MAXIMUM_CONTROLLERS)
+    candidates.dedup_by(|left, right| left.physical_path == right.physical_path);
+}
+
+fn assigned_controller(candidate: ControllerCandidate, player: Player) -> ControllerDevice {
+    ControllerDevice {
+        device: candidate.device,
+        path: candidate.path,
+        player,
+        tracker: candidate.tracker,
+    }
+}
+
+fn plan_controller_slots(
+    connected: [bool; MAXIMUM_CONTROLLERS],
+    remembered: [Option<&str>; MAXIMUM_CONTROLLERS],
+    candidates: &[&str],
+) -> [Option<usize>; MAXIMUM_CONTROLLERS] {
+    let mut used = vec![false; candidates.len()];
+    let mut assignments = [None; MAXIMUM_CONTROLLERS];
+
+    for (slot, physical_path) in remembered.iter().copied().enumerate() {
+        if connected.get(slot).copied().unwrap_or(true) {
+            continue;
+        }
+        let Some(physical_path) = physical_path else {
+            continue;
+        };
+        if let Some(assignment) = assignments.get_mut(slot) {
+            *assignment = claim_candidate(&mut used, candidates, |candidate| {
+                candidate == physical_path
+            });
+        }
+    }
+    for (slot, physical_path) in remembered.iter().enumerate() {
+        if connected.get(slot).copied().unwrap_or(true) || physical_path.is_some() {
+            continue;
+        }
+        if let Some(assignment) = assignments.get_mut(slot) {
+            *assignment = claim_candidate(&mut used, candidates, |_| true);
+        }
+    }
+    for slot in 0..MAXIMUM_CONTROLLERS {
+        let already_filled = assignments.get(slot).copied().flatten().is_some();
+        if connected.get(slot).copied().unwrap_or(true) || already_filled {
+            continue;
+        }
+        if let Some(assignment) = assignments.get_mut(slot) {
+            *assignment = claim_candidate(&mut used, candidates, |_| true);
+        }
+    }
+    assignments
+}
+
+fn claim_candidate(
+    used: &mut [bool],
+    candidates: &[&str],
+    mut matches: impl FnMut(&str) -> bool,
+) -> Option<usize> {
+    let index = candidates
+        .iter()
         .enumerate()
-        .map(|(index, candidate)| ControllerDevice {
-            device: candidate.device,
-            player: if index == 0 { Player::One } else { Player::Two },
-            tracker: candidate.tracker,
-        })
-        .collect()
+        .find_map(|(index, candidate)| {
+            (!used.get(index).copied().unwrap_or(true) && matches(candidate)).then_some(index)
+        })?;
+    let claimed = used.get_mut(index)?;
+    *claimed = true;
+    Some(index)
+}
+
+const fn player_index(player: Player) -> usize {
+    match player {
+        Player::One => 0,
+        Player::Two => 1,
+    }
+}
+
+const fn player_mask(player: Player) -> u8 {
+    1 << player_index(player)
+}
+
+fn remembered_path(
+    remembered_paths: &[Option<String>; MAXIMUM_CONTROLLERS],
+    player: Player,
+) -> Option<&str> {
+    remembered_paths
+        .get(player_index(player))
+        .and_then(Option::as_deref)
 }
 
 fn wait_on<const COUNT: usize>(
@@ -380,6 +613,7 @@ struct EventCollector<'output> {
     output: &'output mut Vec<InputEvent>,
     emitted: usize,
     dropped: usize,
+    disconnected_players: u8,
 }
 
 impl<'output> EventCollector<'output> {
@@ -388,6 +622,7 @@ impl<'output> EventCollector<'output> {
             output,
             emitted: 0,
             dropped: 0,
+            disconnected_players: 0,
         }
     }
 
@@ -400,10 +635,15 @@ impl<'output> EventCollector<'output> {
         }
     }
 
+    const fn disconnect(&mut self, player: Player) {
+        self.disconnected_players |= player_mask(player);
+    }
+
     const fn stats(&self) -> DrainStats {
         DrainStats {
             emitted: self.emitted,
             dropped: self.dropped,
+            disconnected_players: self.disconnected_players,
         }
     }
 }
@@ -527,7 +767,10 @@ fn configure_controller(device: Device, path: PathBuf) -> Option<ControllerCandi
         y.value(),
         pressed.map(|(_, button)| button),
     );
-    let physical_path = device.physical_path().unwrap_or_default().to_owned();
+    let physical_path = device
+        .physical_path()
+        .filter(|physical_path| !physical_path.is_empty())
+        .map_or_else(|| path.to_string_lossy().into_owned(), str::to_owned);
     Some(ControllerCandidate {
         device,
         path,
@@ -612,6 +855,7 @@ fn drain_controller(
         device,
         player,
         tracker,
+        ..
     } = controller;
     loop {
         let events = match device.fetch_events() {
@@ -714,6 +958,7 @@ mod tests {
             DrainStats {
                 emitted: MAXIMUM_EVENTS_PER_DRAIN,
                 dropped: 3,
+                disconnected_players: 0,
             }
         );
         assert_eq!(output.len(), MAXIMUM_EVENTS_PER_DRAIN + 1);
@@ -726,10 +971,58 @@ mod tests {
         assert_eq!(controllers.buttons(Player::One), ButtonSet::empty());
         assert_eq!(controllers.buttons(Player::Two), ButtonSet::empty());
         let mut events = Vec::new();
-        assert!(matches!(
-            controllers.drain_into(&mut events),
-            Ok(stats) if stats == DrainStats::default()
-        ));
+        assert_eq!(controllers.drain_into(&mut events), DrainStats::default());
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn initial_controllers_fill_player_slots_in_candidate_order() {
+        assert_eq!(
+            plan_controller_slots([false, false], [None, None], &["usb-a", "usb-b", "usb-c"]),
+            [Some(0), Some(1)]
+        );
+    }
+
+    #[test]
+    fn remembered_physical_paths_reclaim_their_player_slots() {
+        assert_eq!(
+            plan_controller_slots(
+                [false, false],
+                [Some("usb-a"), Some("usb-b")],
+                &["usb-b", "usb-a"]
+            ),
+            [Some(1), Some(0)]
+        );
+        assert_eq!(
+            plan_controller_slots([true, false], [Some("usb-a"), Some("usb-b")], &["usb-b"]),
+            [None, Some(0)]
+        );
+    }
+
+    #[test]
+    fn a_different_controller_can_replace_a_missing_remembered_path() {
+        assert_eq!(
+            plan_controller_slots(
+                [false, true],
+                [Some("missing"), Some("connected")],
+                &["replacement"]
+            ),
+            [Some(0), None]
+        );
+        assert_eq!(
+            plan_controller_slots([false, false], [Some("missing"), Some("usb-b")], &["usb-b"]),
+            [None, Some(0)]
+        );
+    }
+
+    #[test]
+    fn drain_stats_identify_each_disconnected_player() {
+        let stats = DrainStats {
+            disconnected_players: player_mask(Player::One) | player_mask(Player::Two),
+            ..DrainStats::default()
+        };
+        assert!(stats.disconnected(Player::One));
+        assert!(stats.disconnected(Player::Two));
+        assert_eq!(stats.disconnected_count(), 2);
     }
 }

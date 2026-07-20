@@ -3,7 +3,7 @@
 mod linux;
 mod tty;
 
-pub use linux::{ControllerDevices, DrainStats, InputDevices, InputError};
+pub use linux::{ControllerDevices, ControllerScanStats, DrainStats, InputDevices, InputError};
 pub use tty::{MediumRawKeyboard, MediumRawKeyboardError};
 
 /// Logical width reported by the Deck touchscreen.
