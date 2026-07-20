@@ -10,7 +10,7 @@ use super::linux::event_paths;
 use super::{InputError, KeyboardKey};
 
 const INPUT_DIRECTORY: &str = "/dev/input";
-const MAXIMUM_KEYBOARDS: usize = 4;
+pub(super) const MAXIMUM_KEYBOARDS: usize = 4;
 const MAXIMUM_EVENTS_PER_DRAIN: usize = 64;
 
 /// Result of one explicit dashboard-keyboard hotplug scan.

@@ -15,6 +15,7 @@ use super::{
     AxisRange, ButtonSet, ControllerTracker, InputEvent, LOGICAL_HEIGHT, LOGICAL_WIDTH,
     PhysicalButton, Player, TouchState, TouchTracker,
 };
+use super::{KeyboardDevices, keyboard::MAXIMUM_KEYBOARDS};
 use crate::time::duration_timespec;
 
 const INPUT_DIRECTORY: &str = "/dev/input";
@@ -23,6 +24,7 @@ const THE_GAMEPAD_VENDOR: u16 = 0x1c59;
 const THE_GAMEPAD_PRODUCT: u16 = 0x0026;
 const MAXIMUM_CONTROLLERS: usize = 2;
 const MAXIMUM_EVENTS_PER_DRAIN: usize = 64;
+const MAXIMUM_DASHBOARD_DESCRIPTORS: usize = MAXIMUM_CONTROLLERS + MAXIMUM_KEYBOARDS + 1;
 const PLAYERS: [Player; MAXIMUM_CONTROLLERS] = [Player::One, Player::Two];
 
 /// Result of one nonblocking drain across every discovered input device.
@@ -345,6 +347,13 @@ impl ControllerDevices {
             .map_or_else(ButtonSet::empty, |controller| controller.tracker.state())
     }
 
+    /// Borrow connected controller descriptors for aggregate polling.
+    pub fn file_descriptors(&self) -> impl Iterator<Item = BorrowedFd<'_>> + '_ {
+        self.controllers
+            .iter()
+            .map(|controller| controller.device.as_fd())
+    }
+
     /// Scan for newly connected controllers and preserve remembered slots.
     ///
     /// Connected descriptors remain open and are never replaced by a scan.
@@ -382,6 +391,29 @@ impl ControllerDevices {
                 timeout,
             ),
         }
+    }
+
+    /// Wait for controllers, dashboard keyboards, or a display descriptor.
+    ///
+    /// The fixed stack poll contains at most two controllers, four keyboards,
+    /// and the additional descriptor. It allocates no memory in the event
+    /// loop and a timeout is successful.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputError::Poll`] for an operating-system polling failure.
+    pub fn wait_readable_with_keyboards<'poll>(
+        &'poll self,
+        keyboards: &'poll KeyboardDevices,
+        additional: BorrowedFd<'poll>,
+        timeout: Duration,
+    ) -> Result<(), InputError> {
+        wait_on_dashboard(
+            self.file_descriptors()
+                .chain(keyboards.file_descriptors())
+                .chain(std::iter::once(additional)),
+            timeout,
+        )
     }
 
     /// Drain all currently available controller reports without waiting.
@@ -664,6 +696,38 @@ fn wait_on<const COUNT: usize>(
     let flags = PollFlags::IN | PollFlags::ERR | PollFlags::HUP;
     let mut descriptors = descriptors.map(|descriptor| PollFd::from_borrowed_fd(descriptor, flags));
     match poll(&mut descriptors, Some(&duration_timespec(timeout))) {
+        Ok(_) | Err(rustix::io::Errno::INTR) => Ok(()),
+        Err(source) => Err(InputError::Poll(source)),
+    }
+}
+
+fn wait_on_dashboard<'descriptor>(
+    descriptors: impl IntoIterator<Item = BorrowedFd<'descriptor>>,
+    timeout: Duration,
+) -> Result<(), InputError> {
+    let flags = PollFlags::IN | PollFlags::ERR | PollFlags::HUP;
+    let mut descriptors = descriptors.into_iter();
+    let Some(first) = descriptors.next() else {
+        return Ok(());
+    };
+    let mut poll_descriptors: [PollFd<'descriptor>; MAXIMUM_DASHBOARD_DESCRIPTORS] =
+        std::array::from_fn(|_| PollFd::from_borrowed_fd(first, PollFlags::empty()));
+    let Some(first_slot) = poll_descriptors.first_mut() else {
+        return Ok(());
+    };
+    *first_slot = PollFd::from_borrowed_fd(first, flags);
+    let mut count = 1;
+    for descriptor in descriptors {
+        let Some(slot) = poll_descriptors.get_mut(count) else {
+            return Err(InputError::Poll(rustix::io::Errno::INVAL));
+        };
+        *slot = PollFd::from_borrowed_fd(descriptor, flags);
+        count += 1;
+    }
+    let Some(active) = poll_descriptors.get_mut(..count) else {
+        return Err(InputError::Poll(rustix::io::Errno::INVAL));
+    };
+    match poll(active, Some(&duration_timespec(timeout))) {
         Ok(_) | Err(rustix::io::Errno::INTR) => Ok(()),
         Err(source) => Err(InputError::Poll(source)),
     }
