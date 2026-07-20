@@ -182,6 +182,10 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   excessive manifests. Its intro, perspective crawl, and reduced-motion views
   are pixel-identical to the C++ references while sampling the shared font
   directly instead of retaining per-line raster masks.
+- Startup reads the required catalog and optional credits and palette through
+  bounded regular-file descriptors that reject final symlinks. Catalog failure
+  stops before display setup; credits and palette failures remain observable
+  while selecting safe unavailable and compiled-color fallbacks.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
 
