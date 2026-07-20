@@ -4,6 +4,10 @@ use retro_deck_platform::input::{Button, ButtonEdge};
 
 use crate::{Action, Screen};
 
+const BURST_LIMIT: usize = 12;
+const BURST_WINDOW_MS: u64 = 1_000;
+const QUIET_RESET_MS: u64 = 1_000;
+
 /// Convert one committed controller edge to a pure dashboard action.
 ///
 /// Both connected controllers use the same menu controls. Shoulder buttons
@@ -48,6 +52,86 @@ pub struct TouchCommitter {
     pressed: Option<Action>,
 }
 
+/// Fixed-capacity guard against a malfunctioning controller event flood.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ControllerGuard {
+    accepted_at: [u64; BURST_LIMIT],
+    accepted: usize,
+    last_edge_at: Option<u64>,
+    suspended: bool,
+}
+
+impl ControllerGuard {
+    /// Empty, immediately accepting guard.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            accepted_at: [0; BURST_LIMIT],
+            accepted: 0,
+            last_edge_at: None,
+            suspended: false,
+        }
+    }
+
+    /// Accept at most twelve mapped press edges in any one-second window.
+    ///
+    /// Every edge observed while suspended restarts the quiet interval. Caller
+    /// timestamps are monotonic milliseconds; a backwards value fails safely
+    /// by retaining prior events in the active window.
+    #[must_use]
+    pub fn accept(&mut self, now_ms: u64) -> bool {
+        self.last_edge_at = Some(now_ms);
+        if self.suspended {
+            return false;
+        }
+        let retained_from = self
+            .accepted_at
+            .get(..self.accepted)
+            .unwrap_or_default()
+            .iter()
+            .position(|accepted| now_ms.saturating_sub(*accepted) < BURST_WINDOW_MS)
+            .unwrap_or(self.accepted);
+        if retained_from > 0 {
+            self.accepted_at
+                .copy_within(retained_from..self.accepted, 0);
+            self.accepted = self.accepted.saturating_sub(retained_from);
+        }
+        let Some(slot) = self.accepted_at.get_mut(self.accepted) else {
+            self.suspended = true;
+            return false;
+        };
+        *slot = now_ms;
+        self.accepted = self.accepted.saturating_add(1);
+        true
+    }
+
+    /// Resume after one full second without another mapped press edge.
+    #[must_use]
+    pub fn recover_if_quiet(&mut self, now_ms: u64) -> bool {
+        if !self.suspended
+            || self
+                .last_edge_at
+                .is_none_or(|last| now_ms.saturating_sub(last) < QUIET_RESET_MS)
+        {
+            return false;
+        }
+        *self = Self::new();
+        true
+    }
+
+    /// Whether mapped controller actions are currently discarded.
+    #[must_use]
+    pub const fn suspended(self) -> bool {
+        self.suspended
+    }
+}
+
+impl Default for ControllerGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TouchCommitter {
     /// Start or finish a touch report over the currently hit action.
     ///
@@ -83,7 +167,7 @@ impl TouchCommitter {
 mod tests {
     use retro_deck_platform::input::{Button, ButtonEdge};
 
-    use super::{TouchCommitter, controller_action};
+    use super::{ControllerGuard, TouchCommitter, controller_action};
     use crate::{Action, Screen};
 
     #[test]
@@ -149,5 +233,30 @@ mod tests {
         assert_eq!(touch.update(true, false, Some(Action::ShowCredits)), None);
         touch.cancel();
         assert_eq!(touch.update(false, true, Some(Action::ShowCredits)), None);
+    }
+
+    #[test]
+    fn controller_burst_suspends_and_requires_a_quiet_second() {
+        let mut guard = ControllerGuard::new();
+        for now in 0..12 {
+            assert!(guard.accept(now));
+        }
+        assert!(!guard.accept(12));
+        assert!(guard.suspended());
+        assert!(!guard.recover_if_quiet(1_011));
+        assert!(guard.recover_if_quiet(1_012));
+        assert!(!guard.suspended());
+        assert!(guard.accept(1_012));
+    }
+
+    #[test]
+    fn old_edges_expire_without_allocating_or_reordering() {
+        let mut guard = ControllerGuard::new();
+        for now in 0..12 {
+            assert!(guard.accept(now));
+        }
+        assert!(guard.accept(1_000));
+        assert!(guard.accept(1_001));
+        assert!(!guard.suspended());
     }
 }

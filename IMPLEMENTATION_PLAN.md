@@ -164,7 +164,8 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 - Controller routing consumes committed press edges only. D-pad axes keep
   category and carousel movement separate, L/R change volume, and touch
   activation requires matching press and release targets. Audio feedback is
-  downstream from these actions and cannot quarantine or delay input.
+  downstream from these actions and cannot quarantine or delay input. A fixed
+  twelve-edge window suspends a flooding controller until one quiet second.
 - A device-independent RGB565 canvas now owns clipped drawing, panels, lines,
   text fitting, fixed-capacity labels, and the complete case-sensitive 5x7
   font. The Rust timer uses it without changing any reference pixel snapshot,
