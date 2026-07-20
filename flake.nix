@@ -43,11 +43,6 @@
         ./src/deck_wayland.cpp
         ./src/deck_wayland.h
       ];
-      libretroSources = runtimeSources ++ [
-        ./src/joypad_input.cpp
-        ./src/libretro_deck.cpp
-      ];
-      zxSources = sourceTree (libretroSources ++ [ ./src/zx_keyboard.h ]);
       chiptuneSources = sourceTree (runtimeSources ++ [
         ./src/chiptune_deck.cpp
       ]);
@@ -456,80 +451,50 @@
           license = pkgs.lib.licenses.gpl2Only;
         };
 
-        zx-deck = pkgsCross.stdenv.mkDerivation {
+        zx-deck = mkLibretroHost {
           pname = "zx-deck";
-          version = "1.6.0-20260420-deck";
-
-          src = fuse-src;
-          nativeBuildInputs =
-            [ pkgs.gnumake pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
-          allowedReferences = [ ];
-
-          NIX_CFLAGS_COMPILE = "-static -O3";
-          NIX_LDFLAGS = "-static";
-
-          postPatch = ''
+          version = "0.2.0";
+          coreBuild = ''
+            core=$TMPDIR/fuse-core
+            cp -R ${fuse-src} "$core"
+            chmod -R u+w "$core"
+            patch_root=${./vendor/emulators/fuse/patches}
+            while IFS= read -r local_patch || [ -n "$local_patch" ]; do
+              case "$local_patch" in
+                ""|\#*) continue ;;
+              esac
+              patch -d "$core" -p1 < "$patch_root/$local_patch"
+            done < "$patch_root/series"
             # The Nix source has no Git metadata. Generate the version source
             # once from the pinned revision instead of invoking git.
-            substituteInPlace Makefile.libretro \
+            substituteInPlace "$core/Makefile.libretro" \
               --replace-fail \
                 '$(CORE_DIR)/src/version.c: FORCE' \
                 '$(CORE_DIR)/src/version.c:'
-          '';
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
             sed 's/HASH/bce196fb774835fe65b3e5b821887a4ccf657167/' \
-              etc/version.c.templ > src/version.c
-            make -f Makefile.libretro -j$NIX_BUILD_CORES \
+              "$core/etc/version.c.templ" > "$core/src/version.c"
+            make -C "$core" -f Makefile.libretro -j$NIX_BUILD_CORES \
               platform=rpi2 \
               STATIC_LINKING=1 \
               TARGET=fuse_libretro.a \
               CC=$CC \
               CXX=$CXX \
-              AR=$CC-ar
-            cp ${zxSources}/libretro_deck.cpp deck_libretro_deck.cpp
-            cp ${zxSources}/deck_runtime.cpp deck_runtime.cpp
-            cp ${zxSources}/deck_wayland.cpp deck_wayland.cpp
-            cp ${zxSources}/joypad_input.cpp deck_joypad_input.cpp
-            $CXX -std=c++11 -O3 -fomit-frame-pointer \
-              -marm -march=armv7-a -mtune=cortex-a7 \
-              -mfpu=neon-vfpv4 -mfloat-abi=hard \
-              -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_ZX=1 -DRETRO_DECK_WAYLAND=1 \
-              -I. -Isrc -I${zxSources} \
-              deck_libretro_deck.cpp \
-              deck_runtime.cpp \
-              deck_wayland.cpp \
-              deck_joypad_input.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              fuse_libretro.a \
-              -static -pthread -lm -lwayland-client -lffi -o zx-deck
-            runHook postBuild
+              AR=${pkgsCross.stdenv.cc.targetPrefix}ar
           '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin $out/share/licenses/zx-deck
-            install -m755 zx-deck $out/bin/zx-deck
-            install -m644 LICENSE $out/share/licenses/zx-deck/Fuse-LICENSE
-            install -m644 libspectrum/COPYING \
+          coreArchive = "$core/fuse_libretro.a";
+          nativeLibraries = [ "-lstdc++" ];
+          extraNativeBuildInputs = [ pkgs.gnupatch ];
+          installLicenses = ''
+            install -m644 ${fuse-src}/LICENSE \
+              $out/share/licenses/zx-deck/Fuse-LICENSE
+            install -m644 ${fuse-src}/libspectrum/COPYING \
               $out/share/licenses/zx-deck/libspectrum-COPYING
-            install -m644 bzip2/LICENSE \
+            install -m644 ${fuse-src}/bzip2/LICENSE \
               $out/share/licenses/zx-deck/bzip2-LICENSE
-            nuke-refs $out/bin/zx-deck
-            runHook postInstall
           '';
-
-          meta = {
-            description = "Fuse ZX Spectrum core with Deck-native framebuffer frontend";
-            homepage = "https://github.com/libretro/fuse-libretro";
-            license = pkgs.lib.licenses.gpl3Only;
-            platforms = [ "armv7l-linux" ];
-          };
+          description = "Rust Deck host with the pinned Fuse ZX Spectrum core";
+          homepage = "https://github.com/libretro/fuse-libretro";
+          license = pkgs.lib.licenses.gpl3Only;
         };
 
         chip8-deck = pkgsCross.rustPlatform.buildRustPackage {
