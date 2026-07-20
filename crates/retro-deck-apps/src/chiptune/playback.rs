@@ -53,7 +53,27 @@ impl ChiptunePlayer {
     /// Returns [`ChiptunePlayerError`] if the catalog is empty, every decoder
     /// rejects its payload, or the fixed output block cannot be allocated.
     pub fn open(catalog: ChiptuneCatalog, random_seed: u32) -> Result<Self, ChiptunePlayerError> {
-        let files = catalog.into_files();
+        Self::open_files(catalog.into_files(), random_seed)
+    }
+
+    /// Open exactly one caller-selected music file.
+    ///
+    /// This is intended for bounded diagnostics and preview generation. The
+    /// normal device player should use [`Self::open`] with a discovered
+    /// catalog.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChiptunePlayerError`] when the decoder rejects the file or
+    /// the fixed output block cannot be allocated.
+    pub fn open_file(
+        path: impl AsRef<Path>,
+        random_seed: u32,
+    ) -> Result<Self, ChiptunePlayerError> {
+        Self::open_files(Box::new([path.as_ref().to_path_buf()]), random_seed)
+    }
+
+    fn open_files(files: Box<[PathBuf]>, random_seed: u32) -> Result<Self, ChiptunePlayerError> {
         if files.is_empty() {
             return Err(ChiptunePlayerError::NoFiles);
         }
@@ -609,6 +629,25 @@ mod tests {
         assert_eq!(
             filename_title(Path::new("/music/opening-theme.ogg")),
             "opening theme"
+        );
+    }
+
+    #[test]
+    fn one_explicit_file_opens_without_catalog_discovery() {
+        let catalog = catalog();
+        let Some(path) = catalog.files().first() else {
+            return;
+        };
+        let mut player =
+            ChiptunePlayer::open_file(path, 7).expect("one tracked chiptune opens directly");
+        assert_eq!(player.file_count(), 1);
+        assert_eq!(player.file_index(), 0);
+        assert_eq!(
+            player
+                .decode_block()
+                .expect("direct chiptune decodes")
+                .frames(),
+            FRAMES_PER_BLOCK
         );
     }
 
