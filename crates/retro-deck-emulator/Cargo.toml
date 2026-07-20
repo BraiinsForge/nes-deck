@@ -1,6 +1,6 @@
 [package]
 name = "retro-deck-emulator"
-description = "Safe emulator hosts and compatibility models for Retro Deck"
+description = "Safe emulator hosts and runtime models for Retro Deck"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
