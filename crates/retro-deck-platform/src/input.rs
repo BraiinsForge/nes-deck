@@ -1,8 +1,10 @@
 //! Device-independent input state and Linux evdev integration.
 
 mod linux;
+mod tty;
 
 pub use linux::{ControllerDevices, DrainStats, InputDevices, InputError};
+pub use tty::{MediumRawKeyboard, MediumRawKeyboardError};
 
 /// Logical width reported by the Deck touchscreen.
 pub const LOGICAL_WIDTH: u16 = crate::DECK_LOGICAL_WIDTH;
