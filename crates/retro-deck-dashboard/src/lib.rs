@@ -7,6 +7,7 @@ mod catalog;
 mod controls;
 mod credits;
 mod launch;
+mod network_worker;
 mod preference_io;
 mod preference_worker;
 mod preferences;
@@ -28,6 +29,10 @@ pub use controls::{ControllerGuard, ExitHold, ExitHoldEvent, TouchCommitter, con
 pub use credits::{CreditsCrawl, CreditsLayout};
 pub use launch::{
     ExitPolicy, LaunchPlan, LaunchPlanError, LaunchTarget, LaunchTargetError, TerminalMode,
+};
+pub use network_worker::{
+    NetworkStatus, NetworkStatusConfig, NetworkStatusConfigError, NetworkStatusError,
+    NetworkStatusPoll, NetworkStatusWorker, NetworkStatusWorkerReport,
 };
 pub use preference_io::{
     PreferenceLoad, PreferenceLoadError, PreferenceLoadIssue, PreferencePathError, PreferencePaths,
