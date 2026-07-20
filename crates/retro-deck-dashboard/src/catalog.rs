@@ -58,6 +58,9 @@ const STANDARD_APPS: [(&str, &str, &str, &str); 7] = [
     ),
 ];
 
+/// Maximum shared catalog entries plus the fixed native applications.
+pub const MAXIMUM_DASHBOARD_ENTRIES: usize = MAXIMUM_GAMES + STANDARD_APPS.len();
+
 /// One nonempty dashboard category and its entries in catalog order.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Category {
@@ -163,7 +166,7 @@ impl DashboardCatalog {
         let mut identifiers = HashSet::new();
         let mut paths = HashSet::new();
         for entry in entries {
-            if collected.len() >= MAXIMUM_GAMES {
+            if collected.len() >= MAXIMUM_DASHBOARD_ENTRIES {
                 return Err(DashboardCatalogError::TooManyEntries);
             }
             if !identifiers.insert(entry.identifier().to_owned()) {
@@ -261,7 +264,7 @@ impl fmt::Display for DashboardCatalogError {
             Self::TooManyEntries => {
                 write!(
                     formatter,
-                    "dashboard catalog exceeds {MAXIMUM_GAMES} entries"
+                    "dashboard catalog exceeds {MAXIMUM_DASHBOARD_ENTRIES} entries"
                 )
             }
             Self::DuplicateIdentifier => {
@@ -281,8 +284,8 @@ impl std::error::Error for DashboardCatalogError {}
 mod tests {
     use std::path::Path;
 
-    use super::{DashboardCatalog, DashboardCatalogError};
-    use retro_deck_config::{Catalog, CatalogEntry, CatalogSystem};
+    use super::{DashboardCatalog, DashboardCatalogError, MAXIMUM_DASHBOARD_ENTRIES};
+    use retro_deck_config::{Catalog, CatalogEntry, CatalogSystem, MAXIMUM_GAMES};
 
     const DEPLOYED_CATALOG: &[u8] = include_bytes!("../../../deploy/menu/games.tsv");
 
@@ -398,6 +401,29 @@ mod tests {
                 ("reboot", Path::new("/mnt/data/nes-deck/games/reboot")),
             ]
         );
+    }
+
+    #[test]
+    fn shared_catalog_capacity_leaves_room_for_every_standard_app() {
+        let mut source = String::new();
+        for index in 0..MAXIMUM_GAMES {
+            use std::fmt::Write as _;
+            assert!(
+                writeln!(
+                    source,
+                    "owner-{index}\tOWNER {index}\tdeck\t/mnt/data/nes-deck/games/owner-{index}\t#5F87D7"
+                )
+                .is_ok()
+            );
+        }
+        let Some(catalog) = Catalog::parse(source.as_bytes()).ok() else {
+            return;
+        };
+        let dashboard = DashboardCatalog::with_standard_apps(&catalog);
+        assert!(matches!(
+            dashboard,
+            Ok(ref dashboard) if dashboard.entries().len() == MAXIMUM_DASHBOARD_ENTRIES
+        ));
     }
 
     #[test]

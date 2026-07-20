@@ -8,7 +8,7 @@ mod render;
 mod settings;
 mod state;
 
-pub use catalog::{Category, DashboardCatalog, DashboardCatalogError};
+pub use catalog::{Category, DashboardCatalog, DashboardCatalogError, MAXIMUM_DASHBOARD_ENTRIES};
 pub use controls::{TouchCommitter, controller_action};
 pub use credits::{CreditsCrawl, CreditsLayout};
 pub use launch::{LaunchTarget, LaunchTargetError, TerminalMode};

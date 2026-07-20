@@ -148,7 +148,8 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   fallback so a missing or malformed optional palette cannot block startup.
 - The Rust dashboard crate now combines base, uploaded, and generated native
   entries behind one duplicate-checked category view with fixed NES, GB, GBC,
-  ZX, CHIP-8, and Deck ordering.
+  ZX, CHIP-8, and Deck ordering. Its capacity reserves seven native slots
+  beyond the shared 64-entry owner and upload catalog limit.
 - Standard native applications have unique catalog identities below
   `/mnt/data/nes-deck/games/`. Their executable commands and REPL modes are a
   separate launch contract, so shared launchers no longer masquerade as ROM or
