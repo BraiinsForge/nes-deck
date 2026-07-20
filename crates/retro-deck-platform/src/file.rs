@@ -8,7 +8,9 @@ use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use rustix::fs::{AtFlags, Mode, OFlags, fchmod, fsync, open, openat, renameat, unlinkat};
+use rustix::fs::{
+    AtFlags, Mode, OFlags, fchmod, fsync, ftruncate, open, openat, renameat, unlinkat,
+};
 
 const PRIVATE_MODE: Mode = Mode::from_raw_mode(0o600);
 const TEMPORARY_ATTEMPTS: u64 = 8;
@@ -180,6 +182,143 @@ pub fn write_private_atomic(
     })
 }
 
+/// Read a bounded nonempty regular device attribute without trusting its
+/// reported length or following its final symlink.
+///
+/// Sysfs attributes commonly report a synthetic page-sized length regardless
+/// of their small textual value. This reader bounds the descriptor stream
+/// itself instead of rejecting metadata length.
+///
+/// # Errors
+///
+/// Returns [`DeviceFileError`] for an unsafe path, invalid limit, non-regular
+/// descriptor, allocation failure, read failure, empty value, or overflow.
+pub fn read_device_bounded(
+    path: impl AsRef<Path>,
+    maximum_bytes: usize,
+) -> Result<Vec<u8>, DeviceFileError> {
+    let path = path.as_ref();
+    validate_device_request(path, maximum_bytes, 0)?;
+    let read_limit = maximum_bytes
+        .checked_add(1)
+        .ok_or_else(|| DeviceFileError::UnsafePath(path.to_path_buf()))?;
+    let descriptor = open(
+        path,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|source| device_io_error(path, "open for bounded read", source.into()))?;
+    let file = File::from(descriptor);
+    require_regular_device(path, &file)?;
+
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(read_limit)
+        .map_err(DeviceFileError::Allocate)?;
+    file.take(
+        u64::try_from(read_limit).map_err(|_| DeviceFileError::UnsafePath(path.to_path_buf()))?,
+    )
+    .read_to_end(&mut bytes)
+    .map_err(|source| device_io_error(path, "read bounded value", source))?;
+    if bytes.is_empty() {
+        return Err(DeviceFileError::Empty(path.to_path_buf()));
+    }
+    if bytes.len() > maximum_bytes {
+        return Err(DeviceFileError::Oversized {
+            path: path.to_path_buf(),
+            maximum: maximum_bytes,
+        });
+    }
+    Ok(bytes)
+}
+
+/// Write one complete bounded value to a regular device attribute without
+/// following its final symlink.
+///
+/// Ordinary regular-file fixtures are truncated first. Virtual attributes may
+/// reject truncation with `EINVAL` or `EPERM`; those responses are expected and
+/// writing proceeds from offset zero. This function does not call `fsync`
+/// because virtual device attributes are not durable storage.
+///
+/// # Errors
+///
+/// Returns [`DeviceFileError`] for an unsafe path, empty or oversized value,
+/// non-regular descriptor, unexpected truncation failure, or write failure.
+pub fn write_device_bounded(
+    path: impl AsRef<Path>,
+    contents: &[u8],
+    maximum_bytes: usize,
+) -> Result<(), DeviceFileError> {
+    let path = path.as_ref();
+    validate_device_request(path, maximum_bytes, contents.len())?;
+    if contents.is_empty() {
+        return Err(DeviceFileError::Empty(path.to_path_buf()));
+    }
+    let descriptor = open(
+        path,
+        OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|source| device_io_error(path, "open for bounded write", source.into()))?;
+    let mut file = File::from(descriptor);
+    let metadata = file
+        .metadata()
+        .map_err(|source| device_io_error(path, "inspect opened device", source))?;
+    if !metadata.file_type().is_file() {
+        return Err(DeviceFileError::NotRegular(path.to_path_buf()));
+    }
+    if metadata.len() > 0 {
+        match ftruncate(&file, 0) {
+            Ok(()) | Err(rustix::io::Errno::INVAL | rustix::io::Errno::PERM) => {}
+            Err(source) => {
+                return Err(device_io_error(
+                    path,
+                    "truncate regular device value",
+                    source.into(),
+                ));
+            }
+        }
+    }
+    file.write_all(contents)
+        .map_err(|source| device_io_error(path, "write bounded value", source))
+}
+
+fn validate_device_request(
+    path: &Path,
+    maximum_bytes: usize,
+    content_bytes: usize,
+) -> Result<(), DeviceFileError> {
+    if !path.is_absolute() || maximum_bytes == 0 {
+        return Err(DeviceFileError::UnsafePath(path.to_path_buf()));
+    }
+    if content_bytes > maximum_bytes {
+        return Err(DeviceFileError::Oversized {
+            path: path.to_path_buf(),
+            maximum: maximum_bytes,
+        });
+    }
+    Ok(())
+}
+
+fn require_regular_device(path: &Path, file: &File) -> Result<(), DeviceFileError> {
+    let metadata = file
+        .metadata()
+        .map_err(|source| device_io_error(path, "inspect opened device", source))?;
+    if metadata.file_type().is_file() {
+        Ok(())
+    } else {
+        Err(DeviceFileError::NotRegular(path.to_path_buf()))
+    }
+}
+
+fn device_io_error(path: &Path, operation: &'static str, source: io::Error) -> DeviceFileError {
+    DeviceFileError::Io {
+        path: path.to_path_buf(),
+        operation,
+        source,
+    }
+}
+
 /// Failure while securely reading one bounded regular file.
 #[derive(Debug)]
 pub enum BoundedReadError {
@@ -288,6 +427,76 @@ impl Error for AtomicWriteError {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::UnsafePath(_) | Self::Oversized { .. } => None,
+        }
+    }
+}
+
+/// Failure while accessing one small virtual device attribute.
+#[derive(Debug)]
+pub enum DeviceFileError {
+    /// The path is relative or its byte bound is zero or unrepresentable.
+    UnsafePath(PathBuf),
+    /// The opened descriptor is not a regular or virtual regular file.
+    NotRegular(PathBuf),
+    /// A read returned no bytes or a write supplied no value.
+    Empty(PathBuf),
+    /// The observed or supplied value exceeded its explicit cap.
+    Oversized {
+        /// Device path.
+        path: PathBuf,
+        /// Accepted byte count.
+        maximum: usize,
+    },
+    /// A bounded read buffer could not be reserved.
+    Allocate(TryReserveError),
+    /// One named operating-system operation failed.
+    Io {
+        /// Device path.
+        path: PathBuf,
+        /// Failed operation.
+        operation: &'static str,
+        /// Operating-system failure.
+        source: io::Error,
+    },
+}
+
+impl fmt::Display for DeviceFileError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsafePath(path) => write!(
+                formatter,
+                "{} is not a safe bounded device path",
+                path.display()
+            ),
+            Self::NotRegular(path) => write!(
+                formatter,
+                "{} is not a regular device attribute",
+                path.display()
+            ),
+            Self::Empty(path) => write!(formatter, "{} has an empty device value", path.display()),
+            Self::Oversized { path, maximum } => write!(
+                formatter,
+                "{} exceeds the {maximum}-byte device value bound",
+                path.display()
+            ),
+            Self::Allocate(source) => write!(formatter, "cannot allocate device value: {source}"),
+            Self::Io {
+                path,
+                operation,
+                source,
+            } => write!(formatter, "cannot {operation} {}: {source}", path.display()),
+        }
+    }
+}
+
+impl Error for DeviceFileError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Allocate(source) => Some(source),
+            Self::Io { source, .. } => Some(source),
+            Self::UnsafePath(_) | Self::NotRegular(_) | Self::Empty(_) | Self::Oversized { .. } => {
+                None
+            }
         }
     }
 }
@@ -429,5 +638,39 @@ mod tests {
                 maximum: 4
             })
         ));
+    }
+
+    #[test]
+    fn bounded_device_values_replace_regular_fixtures_exactly() {
+        let fixture = Fixture::new();
+        let path = fixture.root.join("brightness");
+        fs::write(&path, b"100\n").expect("device fixture is written");
+        assert_eq!(
+            read_device_bounded(&path, 4).expect("device fixture is read"),
+            b"100\n"
+        );
+
+        write_device_bounded(&path, b"7\n", 4).expect("device fixture is replaced");
+        assert_eq!(
+            fs::read(&path).expect("device fixture remains readable"),
+            b"7\n"
+        );
+        assert!(matches!(
+            read_device_bounded(&path, 1),
+            Err(DeviceFileError::Oversized { maximum: 1, .. })
+        ));
+    }
+
+    #[test]
+    fn bounded_device_values_reject_final_symlinks() {
+        let fixture = Fixture::new();
+        let target = fixture.root.join("target");
+        let alias = fixture.root.join("alias");
+        fs::write(&target, b"42\n").expect("device target is written");
+        symlink(&target, &alias).expect("device alias is created");
+
+        assert!(read_device_bounded(&alias, 4).is_err());
+        assert!(write_device_bounded(&alias, b"0\n", 4).is_err());
+        assert_eq!(fs::read(&target).expect("target remains readable"), b"42\n");
     }
 }
