@@ -406,6 +406,9 @@ version = "0.1.0"
 [[package]]
 name = "retro-deck-config"
 version = "0.1.0"
+dependencies = [
+ "retro-deck-policy",
+]
 
 [[package]]
 name = "retro-deck-emulator"

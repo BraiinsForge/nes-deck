@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[dependencies]
+retro-deck-policy = { path = "../retro-deck-policy" }
+
 [lib]
 path = "src/lib.rs"
 
