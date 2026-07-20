@@ -12,7 +12,7 @@ const GAME_BOY_MEMORY: [MemoryFile; 2] = [
     MemoryFile::new(MemoryKind::SaveRam, ".sav"),
     MemoryFile::new(MemoryKind::Rtc, ".rtc"),
 ];
-const ZX_MEMORY: [MemoryFile; 1] = [MemoryFile::new(MemoryKind::SaveRam, ".sav")];
+const ZX_MEMORY: [MemoryFile; 0] = [];
 
 const NES_CONTROLLERS: [ControllerDevice; 2] = [ControllerDevice::Joypad, ControllerDevice::Joypad];
 const GAME_BOY_CONTROLLERS: [ControllerDevice; 1] = [ControllerDevice::Joypad];
@@ -211,10 +211,7 @@ mod tests {
                 MemoryFile::new(MemoryKind::Rtc, ".rtc")
             ]
         );
-        assert_eq!(
-            LibretroCore::Fuse.memory_files(),
-            &[MemoryFile::new(MemoryKind::SaveRam, ".sav")]
-        );
+        assert!(LibretroCore::Fuse.memory_files().is_empty());
     }
 
     #[test]
