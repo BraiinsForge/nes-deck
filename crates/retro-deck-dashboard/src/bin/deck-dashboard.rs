@@ -318,6 +318,8 @@ impl DashboardRuntime {
             self.recover_controller();
             self.handle_touch();
             self.handle_controllers();
+            let now_ms = self.monotonic_ms();
+            self.dirty |= self.model.advance_time(now_ms);
             self.schedule_credits_frame();
             if self.dirty && self.presentation.visible() && !self.present()? {
                 break;
@@ -416,7 +418,8 @@ impl DashboardRuntime {
 
     fn apply_action(&mut self, action: Action) {
         let previous_screen = self.model.screen();
-        let transition = self.model.apply(action);
+        let now_ms = self.monotonic_ms();
+        let transition = self.model.apply_at(action, now_ms);
         if previous_screen != Screen::Credits && self.model.screen() == Screen::Credits {
             let now = Instant::now();
             self.credits_started_at = now;

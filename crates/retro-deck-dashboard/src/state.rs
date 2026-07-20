@@ -2,13 +2,14 @@
 
 use std::fmt;
 
-use retro_deck_config::CatalogEntry;
+use retro_deck_config::{CatalogEntry, CatalogSystem};
 
 use crate::DashboardCatalog;
 
 const VOLUME_STEP: u8 = 5;
 const BRIGHTNESS_STEP: u8 = 10;
 const MINIMUM_BRIGHTNESS: u8 = 10;
+const REBOOT_CONFIRMATION_MILLISECONDS: u64 = 4_000;
 /// Compiled audible level used when no valid state exists.
 pub const DEFAULT_VOLUME_PERCENT: u8 = 42;
 /// Compiled display level used when no valid state exists.
@@ -357,6 +358,8 @@ pub enum Status {
     Brightness(u8),
     /// Terminal keymap changed.
     Keymap(Keymap),
+    /// Reboot is armed and needs one more activation before its deadline.
+    RebootConfirmation,
 }
 
 /// Complete result of one input action.
@@ -402,6 +405,13 @@ pub struct DashboardModel {
     brightness: Brightness,
     keymap: Keymap,
     status: Status,
+    reboot_confirmation: Option<RebootConfirmation>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RebootConfirmation {
+    entry_index: usize,
+    expires_at_ms: u64,
 }
 
 impl DashboardModel {
@@ -424,28 +434,55 @@ impl DashboardModel {
             brightness,
             keymap,
             status: Status::Clear,
+            reboot_confirmation: None,
         }
     }
 
     /// Apply one semantic input action without performing external work.
     #[must_use]
     pub fn apply(&mut self, action: Action) -> Transition {
-        match action {
+        self.apply_at(action, 0)
+    }
+
+    /// Apply one semantic action at a caller-supplied monotonic time.
+    ///
+    /// Production runtimes use this form so reboot confirmation expires even
+    /// when wall-clock time changes.
+    #[must_use]
+    pub fn apply_at(&mut self, action: Action, monotonic_ms: u64) -> Transition {
+        let mut redraw = self.expire_reboot_confirmation(monotonic_ms);
+        let reboot_target = self.reboot_target_for_action(action);
+        if self
+            .reboot_confirmation
+            .is_some_and(|confirmation| Some(confirmation.entry_index) != reboot_target)
+        {
+            redraw |= self.cancel_reboot_confirmation();
+        }
+        let mut transition = match action {
             Action::Previous => self.move_selection(Direction::Previous),
             Action::Next => self.move_selection(Direction::Next),
             Action::CategoryPrevious => self.move_category(Direction::Previous),
             Action::CategoryNext => self.move_category(Direction::Next),
-            Action::Confirm => self.confirm(),
+            Action::Confirm => self.confirm(monotonic_ms),
             Action::Back => self.back(),
             Action::ToggleSettings => self.toggle_settings(),
             Action::ShowCredits => self.show_credits(),
             Action::SelectCategory(index) => self.select_category(index),
-            Action::ActivateEntry(index) => self.activate_entry(index),
+            Action::ActivateEntry(index) => self.activate_entry(index, monotonic_ms),
             Action::ActivateSettings(target) => self.activate_settings(target),
             Action::VolumeDown => self.change_volume(Direction::Previous),
             Action::VolumeUp => self.change_volume(Direction::Next),
             Action::ToggleMute => self.toggle_mute(),
-        }
+        };
+        transition.redraw |= redraw;
+        transition
+    }
+
+    /// Expire a pending reboot confirmation at a monotonic deadline.
+    ///
+    /// Returns whether the visible status changed.
+    pub fn advance_time(&mut self, monotonic_ms: u64) -> bool {
+        self.expire_reboot_confirmation(monotonic_ms)
     }
 
     /// Immutable combined catalog used by renderer and launcher.
@@ -561,18 +598,13 @@ impl DashboardModel {
         Transition::redraw(direction.cue())
     }
 
-    fn confirm(&mut self) -> Transition {
+    fn confirm(&mut self, monotonic_ms: u64) -> Transition {
         match self.screen {
             Screen::Dashboard => {
                 let Some((index, _entry)) = self.selected_entry() else {
                     return Transition::NONE;
                 };
-                Transition {
-                    redraw: false,
-                    cue: Some(MenuCue::Confirm),
-                    intent: Some(Intent::Launch(index)),
-                    setting: None,
-                }
+                self.launch_entry(index, monotonic_ms, false)
             }
             Screen::Settings => self.activate_settings(self.settings_target),
             Screen::Credits => Transition::NONE,
@@ -622,7 +654,7 @@ impl DashboardModel {
         Transition::redraw(MenuCue::Next)
     }
 
-    fn activate_entry(&mut self, index: usize) -> Transition {
+    fn activate_entry(&mut self, index: usize, monotonic_ms: u64) -> Transition {
         if self.screen != Screen::Dashboard {
             return Transition::NONE;
         }
@@ -639,13 +671,88 @@ impl DashboardModel {
         };
         let redraw = *slot != position;
         *slot = position;
-        self.status = Status::Clear;
+        self.launch_entry(index, monotonic_ms, redraw)
+    }
+
+    fn launch_entry(&mut self, index: usize, monotonic_ms: u64, redraw: bool) -> Transition {
+        if !self.is_reboot_entry(index) {
+            self.status = Status::Clear;
+            return Transition {
+                redraw,
+                cue: Some(MenuCue::Confirm),
+                intent: Some(Intent::Launch(index)),
+                setting: None,
+            };
+        }
+        let confirmed = self.reboot_confirmation.is_some_and(|confirmation| {
+            confirmation.entry_index == index && monotonic_ms < confirmation.expires_at_ms
+        });
+        self.reboot_confirmation = if confirmed {
+            None
+        } else {
+            Some(RebootConfirmation {
+                entry_index: index,
+                expires_at_ms: monotonic_ms.saturating_add(REBOOT_CONFIRMATION_MILLISECONDS),
+            })
+        };
+        self.status = if confirmed {
+            Status::Clear
+        } else {
+            Status::RebootConfirmation
+        };
         Transition {
-            redraw,
+            redraw: true,
             cue: Some(MenuCue::Confirm),
-            intent: Some(Intent::Launch(index)),
+            intent: confirmed.then_some(Intent::Launch(index)),
             setting: None,
         }
+    }
+
+    fn reboot_target_for_action(&self, action: Action) -> Option<usize> {
+        if self.screen != Screen::Dashboard {
+            return None;
+        }
+        let index = match action {
+            Action::Confirm => self.selected_entry().map(|(index, _entry)| index)?,
+            Action::ActivateEntry(index) => {
+                let belongs_to_active_category = self
+                    .active_category()
+                    .is_some_and(|category| category.entry_indices().contains(&index));
+                if !belongs_to_active_category {
+                    return None;
+                }
+                index
+            }
+            _ => return None,
+        };
+        self.is_reboot_entry(index).then_some(index)
+    }
+
+    fn is_reboot_entry(&self, index: usize) -> bool {
+        self.catalog.entry(index).is_some_and(|entry| {
+            entry.system() == CatalogSystem::Deck && entry.identifier() == "reboot"
+        })
+    }
+
+    fn expire_reboot_confirmation(&mut self, monotonic_ms: u64) -> bool {
+        let expired = self
+            .reboot_confirmation
+            .is_some_and(|confirmation| monotonic_ms >= confirmation.expires_at_ms);
+        if expired {
+            self.cancel_reboot_confirmation()
+        } else {
+            false
+        }
+    }
+
+    fn cancel_reboot_confirmation(&mut self) -> bool {
+        if self.reboot_confirmation.take().is_none() {
+            return false;
+        }
+        if self.status == Status::RebootConfirmation {
+            self.status = Status::Clear;
+        }
+        true
     }
 
     fn activate_settings(&mut self, target: SettingsTarget) -> Transition {
@@ -787,6 +894,14 @@ mod tests {
         Some(DashboardModel::new(catalog, volume, brightness, Keymap::Us))
     }
 
+    fn model_with_standard_apps() -> Option<DashboardModel> {
+        let catalog = Catalog::parse(DEPLOYED_CATALOG).ok()?;
+        let catalog = DashboardCatalog::with_standard_apps(&catalog).ok()?;
+        let volume = VolumeState::new(42, 42).ok()?;
+        let brightness = Brightness::new(60).ok()?;
+        Some(DashboardModel::new(catalog, volume, brightness, Keymap::Us))
+    }
+
     #[test]
     fn categories_wrap_and_retain_their_own_carousel_positions() {
         let Some(mut model) = model() else {
@@ -853,6 +968,55 @@ mod tests {
             Some(Intent::Launch(2))
         );
         assert_eq!(model.selected_position(), 2);
+    }
+
+    #[test]
+    fn reboot_requires_two_matching_activations_before_monotonic_deadline() {
+        let Some(mut model) = model_with_standard_apps() else {
+            return;
+        };
+        let Some(deck_category) = model
+            .catalog()
+            .categories()
+            .iter()
+            .position(|category| category.label() == "DECK")
+        else {
+            return;
+        };
+        let Some(reboot_index) = model
+            .catalog()
+            .entries()
+            .iter()
+            .position(|entry| entry.identifier() == "reboot")
+        else {
+            return;
+        };
+        let _ = model.apply(Action::SelectCategory(deck_category));
+
+        let armed = model.apply_at(Action::ActivateEntry(reboot_index), 1_000);
+        assert!(armed.redraw);
+        assert_eq!(armed.cue, Some(MenuCue::Confirm));
+        assert_eq!(armed.intent, None);
+        assert_eq!(model.status(), Status::RebootConfirmation);
+        assert!(!model.advance_time(4_999));
+
+        let confirmed = model.apply_at(Action::ActivateEntry(reboot_index), 4_999);
+        assert_eq!(confirmed.intent, Some(Intent::Launch(reboot_index)));
+        assert_eq!(model.status(), Status::Clear);
+
+        let rearmed = model.apply_at(Action::ActivateEntry(reboot_index), 8_000);
+        assert_eq!(rearmed.intent, None);
+        assert!(model.advance_time(12_000));
+        assert_eq!(model.status(), Status::Clear);
+        let expired = model.apply_at(Action::ActivateEntry(reboot_index), 12_000);
+        assert_eq!(expired.intent, None);
+        assert_eq!(model.status(), Status::RebootConfirmation);
+
+        let cancelled = model.apply_at(Action::Previous, 12_001);
+        assert!(cancelled.redraw);
+        assert_eq!(model.status(), Status::Clear);
+        let requires_rearming = model.apply_at(Action::ActivateEntry(reboot_index), 12_002);
+        assert_eq!(requires_rearming.intent, None);
     }
 
     #[test]

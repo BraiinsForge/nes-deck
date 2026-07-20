@@ -953,6 +953,7 @@ pub(crate) fn draw_status(canvas: &mut Canvas<'_>, status: Status, palette: &Pal
         }
         Status::Keymap(Keymap::Czech) => text.push_bytes(b"TERMINAL KEYS: CZECH"),
         Status::Keymap(Keymap::Us) => text.push_bytes(b"TERMINAL KEYS: US ANSI"),
+        Status::RebootConfirmation => text.push_bytes(b"PRESS A OR TAP AGAIN TO REBOOT"),
     }
     let scale = fit_text_scale(text.as_str(), CANVAS_WIDTH.saturating_sub(220), 2, 1);
     canvas.draw_centered_text(
