@@ -559,6 +559,23 @@ impl DashboardModel {
         self.status
     }
 
+    /// Adopt a volume value already persisted by a managed child.
+    ///
+    /// Returns whether the dashboard-visible value changed. This performs no
+    /// filesystem or audio operation and emits no persistence effect.
+    pub fn adopt_volume(&mut self, volume: VolumeState) -> bool {
+        if self.volume == volume {
+            return false;
+        }
+        self.volume = volume;
+        self.status = if volume.is_muted() {
+            Status::VolumeMuted
+        } else {
+            Status::Volume(volume.percent())
+        };
+        true
+    }
+
     fn move_selection(&mut self, direction: Direction) -> Transition {
         if self.screen == Screen::Settings {
             self.settings_target = self.settings_target.adjacent(direction);
@@ -1067,6 +1084,30 @@ mod tests {
         }
         assert_eq!(model.volume().percent(), 100);
         assert_eq!(model.apply(Action::VolumeUp), Transition::NONE);
+    }
+
+    #[test]
+    fn child_volume_adoption_changes_memory_without_emitting_an_effect() {
+        let Some(mut model) = model() else {
+            return;
+        };
+        let Some(child_volume) = VolumeState::new(65, 65).ok() else {
+            return;
+        };
+        assert!(model.adopt_volume(child_volume));
+        assert_eq!(model.volume(), child_volume);
+        assert_eq!(model.status(), Status::Volume(65));
+        assert!(!model.adopt_volume(child_volume));
+
+        let Some(muted) = VolumeState::new(0, 65).ok() else {
+            return;
+        };
+        assert!(model.adopt_volume(muted));
+        assert_eq!(model.status(), Status::VolumeMuted);
+        assert_eq!(
+            model.apply(Action::VolumeUp).setting,
+            Some(SettingChange::Volume(65))
+        );
     }
 
     #[test]
