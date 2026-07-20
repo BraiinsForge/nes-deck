@@ -13,6 +13,51 @@ const SYSTEM_ORDER: [CatalogSystem; 6] = [
     CatalogSystem::Deck,
 ];
 
+const STANDARD_APPS: [(&str, &str, &str, &str); 7] = [
+    (
+        "lua-repl",
+        "LUA REPL",
+        "/mnt/data/nes-deck/games/lua-repl",
+        "#5F87FF",
+    ),
+    (
+        "lisp-repl",
+        "LISP REPL",
+        "/mnt/data/nes-deck/games/lisp-repl",
+        "#AFD75F",
+    ),
+    (
+        "python-repl",
+        "PYTHON REPL",
+        "/mnt/data/nes-deck/games/python-repl",
+        "#FFD700",
+    ),
+    (
+        "scheme-repl",
+        "SCHEME REPL",
+        "/mnt/data/nes-deck/games/scheme-repl",
+        "#87D787",
+    ),
+    (
+        "chiptunes",
+        "CHIPTUNES",
+        "/mnt/data/nes-deck/games/chiptunes",
+        "#FF8700",
+    ),
+    (
+        "terminal",
+        "TERMINAL",
+        "/mnt/data/nes-deck/games/terminal",
+        "#5F87AF",
+    ),
+    (
+        "reboot",
+        "REBOOT",
+        "/mnt/data/nes-deck/games/reboot",
+        "#D75F5F",
+    ),
+];
+
 /// One nonempty dashboard category and its entries in catalog order.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Category {
@@ -79,6 +124,27 @@ impl DashboardCatalog {
     /// or contains an identifier or path conflict.
     pub fn from_catalog(catalog: &Catalog) -> Result<Self, DashboardCatalogError> {
         Self::from_entries(catalog.entries().iter().cloned())
+    }
+
+    /// Add the fixed native REPL, player, terminal, and reboot applications.
+    ///
+    /// Each application has a unique data identity below
+    /// `/mnt/data/nes-deck/games/`. Executable selection remains a separate
+    /// typed launch concern and is never inferred from this catalog path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DashboardCatalogError`] when a compiled application entry is
+    /// invalid or conflicts with a supplied catalog entry.
+    pub fn with_standard_apps(catalog: &Catalog) -> Result<Self, DashboardCatalogError> {
+        let mut apps = Vec::new();
+        for (identifier, title, path, color) in STANDARD_APPS {
+            apps.push(
+                CatalogEntry::new(identifier, title, CatalogSystem::Deck, path, color)
+                    .map_err(|_| DashboardCatalogError::InvalidStandardEntry)?,
+            );
+        }
+        Self::from_entries(catalog.entries().iter().cloned().chain(apps))
     }
 
     /// Build a view from base, uploaded, and generated native entries.
@@ -184,6 +250,8 @@ pub enum DashboardCatalogError {
     DuplicateIdentifier,
     /// Two sources refer to the same launch path.
     DuplicatePath,
+    /// A compiled standard application violates the shared catalog schema.
+    InvalidStandardEntry,
 }
 
 impl fmt::Display for DashboardCatalogError {
@@ -200,6 +268,9 @@ impl fmt::Display for DashboardCatalogError {
                 formatter.write_str("dashboard catalog repeats an identifier")
             }
             Self::DuplicatePath => formatter.write_str("dashboard catalog repeats a launch path"),
+            Self::InvalidStandardEntry => {
+                formatter.write_str("a standard dashboard application is invalid")
+            }
         }
     }
 }
@@ -208,6 +279,8 @@ impl std::error::Error for DashboardCatalogError {}
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::{DashboardCatalog, DashboardCatalogError};
     use retro_deck_config::{Catalog, CatalogEntry, CatalogSystem};
 
@@ -283,6 +356,47 @@ mod tests {
                 .map(CatalogEntry::identifier)
                 .collect::<Vec<_>>(),
             ["ten-seconds", "terminal", "chiptunes"]
+        );
+    }
+
+    #[test]
+    fn standard_apps_have_unique_data_identity_and_stable_order() {
+        let Some(catalog) = deployed() else {
+            return;
+        };
+        let dashboard = DashboardCatalog::with_standard_apps(&catalog);
+        assert!(dashboard.is_ok());
+        let Some(dashboard) = dashboard.ok() else {
+            return;
+        };
+        let Some(deck) = dashboard.categories().last() else {
+            return;
+        };
+        assert_eq!(
+            deck.entry_indices()
+                .iter()
+                .filter_map(|index| dashboard.entry(*index))
+                .map(|entry| (entry.identifier(), entry.rom()))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "ten-seconds",
+                    Path::new("/mnt/data/nes-deck/games/ten-seconds")
+                ),
+                ("lua-repl", Path::new("/mnt/data/nes-deck/games/lua-repl")),
+                ("lisp-repl", Path::new("/mnt/data/nes-deck/games/lisp-repl")),
+                (
+                    "python-repl",
+                    Path::new("/mnt/data/nes-deck/games/python-repl")
+                ),
+                (
+                    "scheme-repl",
+                    Path::new("/mnt/data/nes-deck/games/scheme-repl")
+                ),
+                ("chiptunes", Path::new("/mnt/data/nes-deck/games/chiptunes")),
+                ("terminal", Path::new("/mnt/data/nes-deck/games/terminal")),
+                ("reboot", Path::new("/mnt/data/nes-deck/games/reboot")),
+            ]
         );
     }
 

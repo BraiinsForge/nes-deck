@@ -149,6 +149,10 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
 - The Rust dashboard crate now combines base, uploaded, and generated native
   entries behind one duplicate-checked category view with fixed NES, GB, GBC,
   ZX, CHIP-8, and Deck ordering.
+- Standard native applications have unique catalog identities below
+  `/mnt/data/nes-deck/games/`. Their executable commands and REPL modes are a
+  separate launch contract, so shared launchers no longer masquerade as ROM or
+  application-data paths.
 - Its pure state machine owns per-category carousel position, modal and
   settings navigation, mute restoration, bounded volume and brightness,
   keymap selection, and typed launch or persistence effects. Input handling
