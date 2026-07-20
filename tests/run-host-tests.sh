@@ -43,7 +43,6 @@ compile_cpp_test() {
   "$work/$output"
 }
 
-compile_cpp_test tests/nes_sram_test.cpp nes-sram-test -Isrc
 compile_cpp_test tests/joypad_input_test.cpp joypad-input-test -pthread
 compile_cpp_test tests/joypad_input_zx_test.cpp joypad-input-zx-test -pthread
 

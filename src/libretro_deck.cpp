@@ -1,7 +1,4 @@
 #include "deck_runtime.h"
-#if defined(RETRO_DECK_NES)
-#include "nes_sram.h"
-#endif
 
 #include <libretro.h>
 #if defined(RETRO_DECK_ZX)
@@ -401,23 +398,6 @@ void load_memory_file(const std::string &path, void *data, size_t size) {
     return;
   }
   if (info.st_size != static_cast<off_t>(size)) {
-#if defined(RETRO_DECK_NES)
-    if (info.st_size > 0 &&
-        static_cast<size_t>(info.st_size) <= NesSramMaximumEncodedSize(size)) {
-      std::ifstream input(path.c_str(), std::ios::in | std::ios::binary);
-      std::vector<uint8_t> encoded(static_cast<size_t>(info.st_size));
-      input.read(reinterpret_cast<char *>(encoded.data()),
-                 static_cast<std::streamsize>(encoded.size()));
-      if (input.gcount() == static_cast<std::streamsize>(encoded.size()) &&
-          !input.bad() &&
-          NesSramDecode(encoded.data(), encoded.size(),
-                        static_cast<uint8_t *>(data), size)) {
-        std::fprintf(stderr, "%s: migrated encoded InfoNES save: %s\n",
-                     kFrontendName, path.c_str());
-        return;
-      }
-    }
-#endif
     std::fprintf(stderr,
                  "%s: ignoring save with unexpected size: %s\n",
                  kFrontendName, path.c_str());

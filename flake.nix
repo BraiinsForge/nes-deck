@@ -47,7 +47,7 @@
         ./src/joypad_input.cpp
         ./src/libretro_deck.cpp
       ];
-      nesSources = sourceTree (libretroSources ++ [ ./src/nes_sram.h ]);
+      nesSources = sourceTree libretroSources;
       gbSources = sourceTree libretroSources;
       zxSources = sourceTree (libretroSources ++ [ ./src/zx_keyboard.h ]);
       chiptuneSources = sourceTree (runtimeSources ++ [
