@@ -13,7 +13,7 @@ use rustix::event::{PollFd, PollFlags, poll};
 
 use super::{
     AxisRange, ButtonSet, ControllerTracker, InputEvent, LOGICAL_HEIGHT, LOGICAL_WIDTH,
-    PhysicalButton, Player, TouchTracker,
+    PhysicalButton, Player, TouchState, TouchTracker,
 };
 use crate::time::duration_timespec;
 
@@ -179,6 +179,12 @@ pub struct ControllerDevices {
     input_directory: PathBuf,
     controllers: Vec<ControllerDevice>,
     remembered_paths: [Option<String>; MAXIMUM_CONTROLLERS],
+}
+
+/// Exclusively grabbed Deck touchscreen without controller descriptors.
+#[derive(Debug)]
+pub struct TouchscreenDevice {
+    touch: TouchDevice,
 }
 
 impl InputDevices {
@@ -474,6 +480,60 @@ impl ControllerDevices {
         self.controllers
             .sort_by_key(|controller| player_index(controller.player));
         attached
+    }
+}
+
+impl TouchscreenDevice {
+    /// Discover and exclusively grab the production Deck touchscreen.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputError`] when input discovery fails, no exact Deck
+    /// touchscreen exists, or the touchscreen cannot be configured.
+    pub fn discover() -> Result<Self, InputError> {
+        Self::discover_in(Path::new(INPUT_DIRECTORY))
+    }
+
+    fn discover_in(input_directory: &Path) -> Result<Self, InputError> {
+        for path in event_paths(input_directory)? {
+            let Ok(device) = Device::open(path) else {
+                continue;
+            };
+            if is_deck_touchscreen(&device) {
+                return configure_touchscreen(device).map(|touch| Self { touch });
+            }
+        }
+        Err(InputError::TouchscreenNotFound)
+    }
+
+    /// Wait for touchscreen or another runtime descriptor until a deadline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputError::Poll`] for an operating-system polling failure.
+    pub fn wait_readable_with(
+        &self,
+        additional: BorrowedFd<'_>,
+        timeout: Duration,
+    ) -> Result<(), InputError> {
+        wait_on([self.touch.device.as_fd(), additional], timeout)
+    }
+
+    /// Drain available reports and return the latest complete touch state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputError::Touchscreen`] when the device disconnects or a
+    /// non-recoverable read fails.
+    pub fn drain(&mut self) -> Result<TouchState, InputError> {
+        drain_touchscreen(&mut self.touch, &mut |_event| {})?;
+        Ok(self.touch.tracker.state())
+    }
+
+    /// Touch state captured during discovery or the latest drain.
+    #[must_use]
+    pub const fn state(&self) -> TouchState {
+        self.touch.tracker.state()
     }
 }
 

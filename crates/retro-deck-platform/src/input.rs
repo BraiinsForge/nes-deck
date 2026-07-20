@@ -3,7 +3,9 @@
 mod linux;
 mod tty;
 
-pub use linux::{ControllerDevices, ControllerScanStats, DrainStats, InputDevices, InputError};
+pub use linux::{
+    ControllerDevices, ControllerScanStats, DrainStats, InputDevices, InputError, TouchscreenDevice,
+};
 pub use tty::{MediumRawKeyboard, MediumRawKeyboardError};
 
 /// Logical width reported by the Deck touchscreen.
@@ -296,6 +298,27 @@ pub struct TouchPoint {
     y: u16,
 }
 
+/// Complete logical touchscreen state after one or more committed reports.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TouchState {
+    point: TouchPoint,
+    down: bool,
+}
+
+impl TouchState {
+    /// Latest clamped contact position.
+    #[must_use]
+    pub const fn point(self) -> TouchPoint {
+        self.point
+    }
+
+    /// Whether a contact is currently held.
+    #[must_use]
+    pub const fn down(self) -> bool {
+        self.down
+    }
+}
+
 impl TouchPoint {
     /// Logical horizontal coordinate.
     #[must_use]
@@ -482,6 +505,13 @@ impl TouchTracker {
         self.down = down;
     }
 
+    pub(crate) const fn state(self) -> TouchState {
+        TouchState {
+            point: self.point,
+            down: self.down,
+        }
+    }
+
     pub(crate) fn finish_report(&mut self, emit: &mut impl FnMut(InputEvent)) {
         if self.down && !self.reported_down {
             emit(InputEvent::TouchPressed(self.point));
@@ -632,6 +662,16 @@ mod tests {
         tracker.finish_report(&mut |event| events.push(event));
         tracker.set_down(false);
         tracker.finish_report(&mut |event| events.push(event));
+        assert_eq!(
+            tracker.state(),
+            TouchState {
+                point: TouchPoint {
+                    x: 0,
+                    y: LOGICAL_HEIGHT - 1,
+                },
+                down: false,
+            }
+        );
         assert_eq!(
             events,
             [InputEvent::TouchPressed(TouchPoint {
