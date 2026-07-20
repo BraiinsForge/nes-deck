@@ -25,5 +25,10 @@ libretro-linked = []
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "libretro-deck"
+path = "src/bin/libretro-deck.rs"
+required-features = ["libretro-linked"]
+
 [lints]
 workspace = true

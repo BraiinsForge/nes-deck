@@ -363,6 +363,12 @@ impl CoreFrameReport {
     pub const fn clean(&self) -> bool {
         self.audio_error.is_none() && self.video_error.is_none()
     }
+
+    /// Consume the report into its independent audio and video diagnostics.
+    #[must_use]
+    pub fn into_errors(self) -> (Option<AudioBatchError>, Option<VideoCallbackError>) {
+        (self.audio_error, self.video_error)
+    }
 }
 
 /// Core initialization, metadata, content, or timing failure.
