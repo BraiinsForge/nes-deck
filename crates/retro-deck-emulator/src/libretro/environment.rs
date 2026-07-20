@@ -1,13 +1,9 @@
 //! Audited environment callback state around the raw libretro ABI.
 
-#![allow(
-    dead_code,
-    reason = "the environment object is wired into the executable in the next host migration slice"
-)]
-
 use std::error::Error;
 use std::ffi::{CStr, CString, c_uint, c_void};
 use std::fmt;
+use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
@@ -35,13 +31,7 @@ pub(super) struct Environment {
 impl Environment {
     /// Build stable C strings for one loaded content directory and core.
     pub(super) fn new(core: LibretroCore, directory: &Path) -> Result<Self, EnvironmentError> {
-        let Some(directory_text) = directory.to_str() else {
-            return Err(EnvironmentError::new(
-                directory,
-                EnvironmentFailure::NotUtf8,
-            ));
-        };
-        let directory = CString::new(directory_text)
+        let directory = CString::new(directory.as_os_str().as_bytes())
             .map_err(|_| EnvironmentError::new(directory, EnvironmentFailure::InteriorNul))?;
         let option_values = core
             .options()
@@ -174,11 +164,6 @@ impl EnvironmentError {
 impl fmt::Display for EnvironmentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.failure {
-            EnvironmentFailure::NotUtf8 => write!(
-                formatter,
-                "libretro directory is not valid UTF-8: {}",
-                self.path.display()
-            ),
             EnvironmentFailure::InteriorNul => write!(
                 formatter,
                 "libretro string contains an interior NUL: {}",
@@ -192,7 +177,6 @@ impl Error for EnvironmentError {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EnvironmentFailure {
-    NotUtf8,
     InteriorNul,
 }
 
@@ -370,9 +354,20 @@ mod tests {
     }
 
     #[test]
-    fn invalid_directory_strings_fail_before_core_initialization() {
+    fn unix_directory_bytes_are_preserved_and_nul_is_rejected() {
         let non_utf8 = OsString::from_vec(vec![b'/', 0xff]);
-        assert!(Environment::new(LibretroCore::Fceumm, Path::new(&non_utf8)).is_err());
+        let mut environment = Environment::new(LibretroCore::Fceumm, Path::new(&non_utf8))
+            .expect("Unix path bytes do not require UTF-8");
+        let mut directory: *const c_char = ptr::null();
+        // SAFETY: `directory` has the type required by this command.
+        assert!(unsafe {
+            environment.dispatch(
+                abi::ENVIRONMENT_GET_CONTENT_DIRECTORY,
+                ptr::from_mut(&mut directory).cast(),
+            )
+        });
+        // SAFETY: The returned pointer belongs to the live environment.
+        assert_eq!(unsafe { CStr::from_ptr(directory) }.to_bytes(), b"/\xff");
         assert!(Environment::new(LibretroCore::Fceumm, Path::new("bad\0path")).is_err());
     }
 }
