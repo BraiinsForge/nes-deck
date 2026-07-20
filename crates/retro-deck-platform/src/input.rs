@@ -106,6 +106,83 @@ impl ButtonSet {
     }
 }
 
+/// Nonzero key code emitted by a Linux console in `K_MEDIUMRAW` mode.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct MediumRawKey(u8);
+
+impl MediumRawKey {
+    /// Validate one seven-bit console key code.
+    #[must_use]
+    pub const fn new(code: u8) -> Option<Self> {
+        if code == 0 || code > 0x7f {
+            None
+        } else {
+            Some(Self(code))
+        }
+    }
+
+    /// Numeric Linux key code.
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        self.0
+    }
+}
+
+/// Complete immutable snapshot of a Linux medium-raw keyboard.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct KeyboardState {
+    low: u64,
+    high: u64,
+}
+
+impl KeyboardState {
+    /// Construct an empty keyboard snapshot.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self { low: 0, high: 0 }
+    }
+
+    /// Return whether one key is currently pressed.
+    #[must_use]
+    pub const fn contains(self, key: MediumRawKey) -> bool {
+        let code = key.code();
+        if code < 64 {
+            self.low & (1_u64 << code) != 0
+        } else {
+            self.high & (1_u64 << (code - 64)) != 0
+        }
+    }
+
+    /// Return a copy with one key changed.
+    #[must_use]
+    pub const fn with(mut self, key: MediumRawKey, pressed: bool) -> Self {
+        self.set(key, pressed);
+        self
+    }
+
+    /// Apply one press or release byte emitted by `K_MEDIUMRAW` mode.
+    pub const fn apply_medium_raw_byte(&mut self, byte: u8) {
+        let Some(key) = MediumRawKey::new(byte & 0x7f) else {
+            return;
+        };
+        self.set(key, byte & 0x80 == 0);
+    }
+
+    const fn set(&mut self, key: MediumRawKey, pressed: bool) {
+        let code = key.code();
+        let (word, bit) = if code < 64 {
+            (&mut self.low, code)
+        } else {
+            (&mut self.high, code - 64)
+        };
+        if pressed {
+            *word |= 1_u64 << bit;
+        } else {
+            *word &= !(1_u64 << bit);
+        }
+    }
+}
+
 /// Raw button position in Retro Games' published `THEGamepad` mapping.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PhysicalButton {
@@ -442,6 +519,30 @@ mod tests {
         assert!(!state.contains(Button::A));
         assert!(state.contains(Button::Start));
         assert_eq!(state, state.with(Button::Start, true));
+    }
+
+    #[test]
+    fn medium_raw_keyboard_tracks_both_halves_and_release_bytes() {
+        let low = MediumRawKey::new(30).expect("A is a nonzero medium-raw code");
+        let high = MediumRawKey::new(126).expect("right Meta fits medium-raw mode");
+        let mut state = KeyboardState::empty().with(low, true).with(high, true);
+        assert!(state.contains(low));
+        assert!(state.contains(high));
+        state.apply_medium_raw_byte(0x80 | low.code());
+        assert!(!state.contains(low));
+        assert!(state.contains(high));
+        state.apply_medium_raw_byte(high.code());
+        assert!(state.contains(high));
+    }
+
+    #[test]
+    fn reserved_medium_raw_code_never_changes_keyboard_state() {
+        assert_eq!(MediumRawKey::new(0), None);
+        assert_eq!(MediumRawKey::new(0x80), None);
+        let mut state = KeyboardState::empty();
+        state.apply_medium_raw_byte(0);
+        state.apply_medium_raw_byte(0x80);
+        assert_eq!(state, KeyboardState::empty());
     }
 
     #[test]
