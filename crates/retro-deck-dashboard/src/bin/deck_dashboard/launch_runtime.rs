@@ -91,9 +91,7 @@ impl DashboardRuntime {
                     }
                 }
             }
-            Intent::OpenWifi => eprintln!(
-                "{APPLICATION}: Wi-Fi editor intent remains isolated from the staged Rust runtime"
-            ),
+            Intent::OpenWifi => self.open_wifi_editor(),
         }
     }
 
@@ -268,6 +266,7 @@ impl DashboardRuntime {
         self.input_events.clear();
         let _reports = self.presentation.take_touch_reports();
         self.touch.cancel();
+        self.wifi_touch.cancel();
     }
 
     fn reload_child_volume(&mut self) {

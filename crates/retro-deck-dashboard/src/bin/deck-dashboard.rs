@@ -18,7 +18,7 @@ use retro_deck_dashboard::{
     DashboardFrame, DashboardModel, DashboardPreferences, MenuCue, NetworkView, PreferenceLoad,
     PreferencePathError, PreferencePaths, PreferenceSubmit, PreferenceWorker,
     PreferenceWorkerReport, RenderError, Screen, SettingChange, SettingsView, TouchCommitter,
-    controller_action, menu_notes,
+    WifiAction, WifiProfileWriter, WifiSession, controller_action, menu_notes,
 };
 use retro_deck_platform::audio::{AudioGate, ToneCueWorker, ToneWorkerReport};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
@@ -29,8 +29,11 @@ use retro_deck_platform::wayland::{PresentOutcome, WaylandPresentation, WaylandP
 
 #[path = "deck_dashboard/launch_runtime.rs"]
 mod launch_runtime;
+#[path = "deck_dashboard/wifi_runtime.rs"]
+mod wifi_runtime;
 
 use launch_runtime::PendingLaunch;
+use wifi_runtime::{start_wifi_writer, wifi_controller_action};
 
 const APPLICATION: &str = "deck-dashboard";
 const INPUT_EVENT_CAPACITY: usize = 64;
@@ -223,10 +226,13 @@ struct DashboardRuntime {
     palette: Palette,
     frame: DashboardFrame,
     touch: TouchCommitter,
+    wifi_touch: TouchCommitter<WifiAction>,
     controller_guard: ControllerGuard,
     audio: Option<ToneCueWorker<MenuCue>>,
     audio_gate: AudioGate,
     preferences: Option<PreferenceWorker>,
+    wifi_session: WifiSession,
+    wifi_writer: Option<WifiProfileWriter>,
     pending_launch: Option<PendingLaunch>,
     started_at: Instant,
     credits_started_at: Instant,
@@ -272,8 +278,9 @@ impl DashboardRuntime {
         let volume = Volume::new(model.volume().percent()).ok_or(RuntimeError::InvalidDefaults)?;
         let audio_gate = desired_audio_gate(presentation.visible(), volume.muted());
         let audio = start_audio(volume, audio_gate);
+        let wifi_writer = start_wifi_writer();
         eprintln!(
-            "{APPLICATION}: native navigation runtime started with {} controller(s); Wi-Fi editing remains isolated",
+            "{APPLICATION}: native navigation runtime started with {} controller(s)",
             controllers.controller_count()
         );
         let now = Instant::now();
@@ -289,10 +296,13 @@ impl DashboardRuntime {
             palette,
             frame,
             touch: TouchCommitter::default(),
+            wifi_touch: TouchCommitter::default(),
             controller_guard: ControllerGuard::new(),
             audio,
             audio_gate,
             preferences: preference_worker,
+            wifi_session: WifiSession::new(),
+            wifi_writer,
             pending_launch: None,
             started_at: now,
             credits_started_at: now,
@@ -305,6 +315,7 @@ impl DashboardRuntime {
 
     fn run(mut self) -> Result<(), RuntimeError> {
         let result = self.event_loop();
+        self.finish_wifi_writer();
         self.finish_audio();
         self.finish_preferences();
         result
@@ -318,6 +329,7 @@ impl DashboardRuntime {
             self.sync_audio_gate();
             self.report_audio_errors();
             self.report_preference_errors();
+            self.service_wifi_writer();
             if self.shutdown.requested() || self.presentation.shutdown_requested() {
                 break;
             }
@@ -386,25 +398,43 @@ impl DashboardRuntime {
             let InputEvent::Controller { button, edge, .. } = event else {
                 continue;
             };
+            if self.wifi_session.is_open() {
+                let Some(action) = wifi_controller_action(button, edge) else {
+                    continue;
+                };
+                if !self.accept_controller_edge() {
+                    continue;
+                }
+                self.touch.cancel();
+                self.wifi_touch.cancel();
+                self.apply_wifi_action(action);
+                break;
+            }
             let Some(action) = controller_action(self.model.screen(), button, edge) else {
                 continue;
             };
-            let was_suspended = self.controller_guard.suspended();
-            if !self.controller_guard.accept(self.monotonic_ms()) {
-                if !was_suspended && self.controller_guard.suspended() {
-                    eprintln!(
-                        "{APPLICATION}: controller input suspended after a burst; waiting for quiet"
-                    );
-                }
+            if !self.accept_controller_edge() {
                 continue;
             }
             self.touch.cancel();
+            self.wifi_touch.cancel();
             self.apply_action(action);
-            if self.pending_launch.is_some() {
+            if self.pending_launch.is_some() || self.wifi_session.is_open() {
                 break;
             }
         }
         self.input_events = events;
+    }
+
+    fn accept_controller_edge(&mut self) -> bool {
+        let was_suspended = self.controller_guard.suspended();
+        if self.controller_guard.accept(self.monotonic_ms()) {
+            return true;
+        }
+        if !was_suspended && self.controller_guard.suspended() {
+            eprintln!("{APPLICATION}: controller input suspended after a burst; waiting for quiet");
+        }
+        false
     }
 
     fn handle_touch(&mut self) {
@@ -414,8 +444,23 @@ impl DashboardRuntime {
                 "{APPLICATION}: discarded {dropped} stale touch report(s) after the bounded queue"
             );
             self.touch.cancel();
+            self.wifi_touch.cancel();
         }
         for report in reports {
+            if self.wifi_session.is_open() {
+                let target = self
+                    .frame
+                    .wifi_action_at(usize::from(report.x()), usize::from(report.y()));
+                let Some(action) =
+                    self.wifi_touch
+                        .update(report.pressed(), report.released(), target)
+                else {
+                    continue;
+                };
+                self.apply_wifi_action(action);
+                self.wifi_touch.cancel();
+                break;
+            }
             let target = self
                 .frame
                 .action_at(usize::from(report.x()), usize::from(report.y()));
@@ -427,6 +472,7 @@ impl DashboardRuntime {
             };
             self.apply_action(action);
             self.touch.cancel();
+            self.wifi_touch.cancel();
             break;
         }
     }
@@ -561,6 +607,11 @@ impl DashboardRuntime {
     }
 
     fn redraw(&mut self) {
+        if let Some(editor) = self.wifi_session.editor() {
+            self.frame
+                .redraw_wifi(editor, NetworkView::unavailable(), &self.palette);
+            return;
+        }
         match self.model.screen() {
             Screen::Dashboard => {
                 self.frame
