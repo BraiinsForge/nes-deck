@@ -117,6 +117,81 @@
       libretroRustSources = rustWorkspaceSources [
         ./protocol/deck-widget-v1.xml
       ];
+      nativeStaticLibraries = [
+        "-lm"
+        "-lutil"
+        "-lrt"
+        "-lpthread"
+        "-ldl"
+        "-lc"
+        "-lgcc_eh"
+        "-lgcc"
+      ];
+      libretroLinkFlags = coreArchive: nativeLibraries:
+        pkgs.lib.concatMapStringsSep " "
+          (argument: "-C link-arg=${argument}")
+          (
+            [ "-Wl,--start-group" coreArchive ]
+            ++ nativeLibraries
+            ++ nativeStaticLibraries
+            ++ [ "-Wl,--end-group" ]
+          );
+      mkLibretroHost =
+        {
+          pname,
+          version,
+          coreBuild,
+          coreArchive,
+          nativeLibraries ? [ ],
+          extraNativeBuildInputs ? [ ],
+          extraBuildInputs ? [ ],
+          installLicenses,
+          description,
+          homepage,
+          license,
+        }:
+        pkgsCross.rustPlatform.buildRustPackage {
+          inherit pname version;
+
+          src = libretroRustSources;
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [
+            "-p"
+            "retro-deck-emulator"
+            "--bin"
+            "libretro-deck"
+            "--no-default-features"
+            "--features"
+            "libretro-linked"
+          ];
+          doCheck = false;
+
+          env.RUSTFLAGS = "-C target-feature=+crt-static";
+          nativeBuildInputs = [ pkgs.gnumake pkgs.nukeReferences ]
+            ++ extraNativeBuildInputs;
+          buildInputs = [ pkgsCross.glibc.static ] ++ extraBuildInputs;
+          allowedReferences = [ ];
+
+          preBuild = coreBuild + ''
+            export RUSTFLAGS="$RUSTFLAGS ${libretroLinkFlags coreArchive nativeLibraries}"
+          '';
+
+          postInstall = ''
+            mkdir -p $out/bin $out/share/licenses/${pname}
+            mv $out/bin/libretro-deck $out/bin/${pname}
+          '' + installLicenses;
+
+          postFixup = ''
+            ${pkgsCross.stdenv.cc.bintools.bintools}/bin/${pkgsCross.stdenv.cc.targetPrefix}strip \
+              --strip-all $out/bin/${pname}
+            nuke-refs $out/bin/${pname}
+          '';
+
+          meta = {
+            inherit description homepage license;
+            platforms = [ "armv7l-linux" ];
+          };
+        };
       uploaderPackage = {
         pname = "rom-uploader";
         version = "0.1.0";
@@ -135,32 +210,10 @@
       packages.${system} = {
         runtime-licenses = runtimeLicenses;
 
-        nes-deck = pkgsCross.rustPlatform.buildRustPackage {
+        nes-deck = mkLibretroHost {
           pname = "nes-deck";
           version = "0.2.0";
-
-          src = libretroRustSources;
-          cargoLock.lockFile = ./Cargo.lock;
-          cargoBuildFlags = [
-            "-p"
-            "retro-deck-emulator"
-            "--bin"
-            "libretro-deck"
-            "--no-default-features"
-            "--features"
-            "libretro-linked"
-          ];
-          doCheck = false;
-
-          env.RUSTFLAGS = "-C target-feature=+crt-static";
-          nativeBuildInputs = [ pkgs.gnumake pkgs.gnupatch pkgs.nukeReferences ];
-          buildInputs = [
-            pkgsCross.glibc.static
-            staticCross.zlib
-          ];
-          allowedReferences = [ ];
-
-          preBuild = ''
+          coreBuild = ''
             core=$TMPDIR/fceumm-core
             cp -R ${fceumm-src} "$core"
             chmod -R u+w "$core"
@@ -184,41 +237,18 @@
               EXTERNAL_ZLIB=1 \
               CC=$CC \
               AR=${pkgsCross.stdenv.cc.targetPrefix}ar
-            export RUSTFLAGS="$RUSTFLAGS \
-              -C link-arg=-Wl,--start-group \
-              -C link-arg=$core/fceumm_libretro.a \
-              -C link-arg=-lstdc++ \
-              -C link-arg=-lz \
-              -C link-arg=-lm \
-              -C link-arg=-lutil \
-              -C link-arg=-lrt \
-              -C link-arg=-lpthread \
-              -C link-arg=-ldl \
-              -C link-arg=-lc \
-              -C link-arg=-lgcc_eh \
-              -C link-arg=-lgcc \
-              -C link-arg=-Wl,--end-group"
           '';
-
-          postInstall = ''
-            mkdir -p $out/bin $out/share/licenses/nes-deck
-            mv $out/bin/libretro-deck $out/bin/nes-deck
+          coreArchive = "$core/fceumm_libretro.a";
+          nativeLibraries = [ "-lstdc++" "-lz" ];
+          extraNativeBuildInputs = [ pkgs.gnupatch ];
+          extraBuildInputs = [ staticCross.zlib ];
+          installLicenses = ''
             install -m644 ${fceumm-src}/Copying \
               $out/share/licenses/nes-deck/FCEUmm-COPYING
           '';
-
-          postFixup = ''
-            ${pkgsCross.stdenv.cc.bintools.bintools}/bin/${pkgsCross.stdenv.cc.targetPrefix}strip \
-              --strip-all $out/bin/nes-deck
-            nuke-refs $out/bin/nes-deck
-          '';
-
-          meta = {
-            description = "Rust Deck host with the pinned FCEUmm NES core";
-            homepage = "https://github.com/libretro/libretro-fceumm";
-            license = pkgs.lib.licenses.gpl2Only;
-            platforms = [ "armv7l-linux" ];
-          };
+          description = "Rust Deck host with the pinned FCEUmm NES core";
+          homepage = "https://github.com/libretro/libretro-fceumm";
+          license = pkgs.lib.licenses.gpl2Only;
         };
 
 
