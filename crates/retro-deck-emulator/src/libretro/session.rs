@@ -19,7 +19,9 @@ use retro_deck_platform::display::Dimensions;
 
 use super::abi;
 use super::callbacks::{CallbackBinding, CallbackBindingError};
-use super::{Content, ControllerDevice, LibretroCore, MAXIMUM_SAVE_BYTES, MemoryKind};
+use super::{
+    Content, ControllerDevice, LibretroCore, MAXIMUM_SAVE_BYTES, MemoryKind, SaveError, SaveStore,
+};
 
 const MAXIMUM_FRAMES_PER_SECOND: f64 = 1_000.0;
 const MAXIMUM_SAMPLE_RATE: f64 = 192_000.0;
@@ -160,6 +162,7 @@ pub struct CoreSession {
     content_path: CString,
     metadata: CoreMetadata,
     av_info: CoreAvInfo,
+    persistence: Persistence,
 }
 
 impl CoreSession {
@@ -177,6 +180,8 @@ impl CoreSession {
         let path = content.path();
         let content_path = CString::new(path.as_os_str().as_bytes())
             .map_err(|_| CoreSessionError::ContentPath(path.to_owned()))?;
+        let mut persistence =
+            Persistence::new(&content).map_err(CoreSessionError::PersistenceSetup)?;
         let directory = content_directory(path);
         let callbacks =
             CallbackBinding::install(core, directory).map_err(CoreSessionError::Callbacks)?;
@@ -205,6 +210,7 @@ impl CoreSession {
             return Err(CoreSessionError::ContentRejected { core });
         }
         let av_info = CoreAvInfo::validate(lifecycle.system_av_info())?;
+        persistence.load(core, &mut lifecycle);
 
         Ok(Self {
             lifecycle,
@@ -213,6 +219,7 @@ impl CoreSession {
             content_path,
             metadata,
             av_info,
+            persistence,
         })
     }
 
@@ -233,6 +240,16 @@ impl CoreSession {
     pub const fn av_info(&self) -> CoreAvInfo {
         self.av_info
     }
+
+    /// Startup persistence problems retained for explicit diagnostics.
+    #[must_use]
+    #[allow(
+        clippy::missing_const_for_fn,
+        reason = "Vec-to-slice dereference is not const on the supported Rust toolchain"
+    )]
+    pub fn persistence_issues(&self) -> &[PersistenceIssue] {
+        &self.persistence.startup_issues
+    }
 }
 
 /// Core initialization, metadata, content, or timing failure.
@@ -247,6 +264,8 @@ pub enum CoreSessionError {
     },
     /// Content path cannot form a stable C string.
     ContentPath(PathBuf),
+    /// Native persistence paths cannot be derived safely.
+    PersistenceSetup(SaveError),
     /// Process-global callback ownership or environment setup failed.
     Callbacks(CallbackBindingError),
     /// Core reports a libretro API other than version 1.
@@ -279,6 +298,7 @@ impl fmt::Display for CoreSessionError {
                 "content path cannot form a C string: {}",
                 path.display()
             ),
+            Self::PersistenceSetup(source) => source.fmt(formatter),
             Self::Callbacks(source) => source.fmt(formatter),
             Self::ApiVersion { actual } => {
                 write!(formatter, "core reports libretro API {actual}; expected 1")
@@ -304,6 +324,7 @@ impl Error for CoreSessionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Callbacks(source) => Some(source),
+            Self::PersistenceSetup(source) => Some(source),
             Self::WrongCore { .. }
             | Self::ContentPath(_)
             | Self::ApiVersion { .. }
@@ -350,7 +371,108 @@ impl fmt::Display for CoreMemoryError {
     }
 }
 
+impl CoreMemoryError {
+    /// Profile memory kind rejected by validation.
+    #[must_use]
+    pub const fn kind(self) -> MemoryKind {
+        match self {
+            Self::NullPointer { kind, .. } | Self::TooLarge { kind, .. } => kind,
+        }
+    }
+}
+
 impl Error for CoreMemoryError {}
+
+/// Nonfatal native persistence problem for one loaded memory region.
+#[derive(Debug)]
+pub enum PersistenceIssue {
+    /// The core exposed an invalid memory region.
+    CoreMemory(CoreMemoryError),
+    /// An existing native save could not be loaded exactly.
+    Read {
+        /// Profile memory kind left unchanged in the core.
+        kind: MemoryKind,
+        /// Filesystem validation or I/O failure.
+        source: SaveError,
+    },
+}
+
+impl PersistenceIssue {
+    /// Memory kind affected by this problem.
+    #[must_use]
+    pub const fn kind(&self) -> MemoryKind {
+        match self {
+            Self::CoreMemory(source) => source.kind(),
+            Self::Read { kind, .. } => *kind,
+        }
+    }
+}
+
+impl fmt::Display for PersistenceIssue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CoreMemory(source) => source.fmt(formatter),
+            Self::Read { kind, source } => {
+                write!(formatter, "cannot load native {kind:?} memory: {source}")
+            }
+        }
+    }
+}
+
+impl Error for PersistenceIssue {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::CoreMemory(source) => Some(source),
+            Self::Read { source, .. } => Some(source),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Persistence {
+    store: SaveStore,
+    blocked: Vec<MemoryKind>,
+    startup_issues: Vec<PersistenceIssue>,
+}
+
+impl Persistence {
+    fn new(content: &Content) -> Result<Self, SaveError> {
+        Ok(Self {
+            store: SaveStore::for_content(content)?,
+            blocked: Vec::new(),
+            startup_issues: Vec::new(),
+        })
+    }
+
+    fn load(&mut self, core: LibretroCore, lifecycle: &mut CoreLifecycle) {
+        for memory in core.memory_files() {
+            let result = lifecycle.memory_mut(memory.kind());
+            match result {
+                Ok(None) => {}
+                Ok(Some(destination)) => {
+                    if let Err(source) = self.store.load(*memory, destination) {
+                        self.block(memory.kind());
+                        self.startup_issues.push(PersistenceIssue::Read {
+                            kind: memory.kind(),
+                            source,
+                        });
+                    }
+                }
+                Err(source) => {
+                    self.block(source.kind());
+                    self.startup_issues
+                        .push(PersistenceIssue::CoreMemory(source));
+                }
+            }
+        }
+    }
+
+    fn block(&mut self, kind: MemoryKind) {
+        if !self.blocked.contains(&kind) {
+            self.blocked.push(kind);
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 struct CoreApi {
@@ -790,6 +912,62 @@ mod tests {
                 bytes: 4
             })
         ));
+    }
+
+    #[test]
+    fn startup_loads_exact_native_saves_and_preserves_malformed_files() {
+        let _session = serialize_test_sessions();
+        reset_fake();
+        fake().save_ram = vec![0; 8];
+        fake().rtc = vec![0x77; 4];
+        let (directory, content) = content_fixture(LibretroCore::Gambatte);
+        let save_path = directory.path().join("game.sav");
+        let rtc_path = directory.path().join("game.rtc");
+        fs::write(&save_path, b"battery!").expect("exact native save");
+        fs::write(&rtc_path, b"bad").expect("malformed native RTC");
+
+        let session = CoreSession::open_with_api(LibretroCore::Gambatte, content, test_api())
+            .expect("save errors do not block gameplay");
+        assert_eq!(fake().save_ram, b"battery!");
+        assert_eq!(fake().rtc, [0x77; 4]);
+        assert!(matches!(
+            session.persistence_issues(),
+            [PersistenceIssue::Read {
+                kind: MemoryKind::Rtc,
+                ..
+            }]
+        ));
+        assert_eq!(session.persistence.blocked, [MemoryKind::Rtc]);
+        assert!(matches!(fs::read(rtc_path), Ok(bytes) if bytes == b"bad"));
+    }
+
+    #[test]
+    fn missing_saves_are_normal_but_invalid_core_memory_is_blocked() {
+        let _session = serialize_test_sessions();
+        reset_fake();
+        fake().save_ram = vec![0x44; 4];
+        let (_directory, content) = content_fixture(LibretroCore::Fceumm);
+        {
+            let session = CoreSession::open_with_api(LibretroCore::Fceumm, content, test_api())
+                .expect("missing save is normal");
+            assert!(session.persistence_issues().is_empty());
+            assert!(session.persistence.blocked.is_empty());
+            assert_eq!(fake().save_ram, [0x44; 4]);
+        }
+
+        reset_fake();
+        fake().reported_memory_size = Some((MemoryKind::SaveRam, MAXIMUM_SAVE_BYTES + 1));
+        let (_directory, content) = content_fixture(LibretroCore::Fceumm);
+        let session = CoreSession::open_with_api(LibretroCore::Fceumm, content, test_api())
+            .expect("invalid optional persistence does not block gameplay");
+        assert!(matches!(
+            session.persistence_issues(),
+            [PersistenceIssue::CoreMemory(CoreMemoryError::TooLarge {
+                kind: MemoryKind::SaveRam,
+                ..
+            })]
+        ));
+        assert_eq!(session.persistence.blocked, [MemoryKind::SaveRam]);
     }
 
     unsafe extern "C" fn fake_set_environment(_: abi::EnvironmentCallback) {
