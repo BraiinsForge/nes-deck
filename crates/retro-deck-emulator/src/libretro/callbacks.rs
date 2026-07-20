@@ -177,6 +177,11 @@ impl CallbackBinding {
         self.state.audio.take()
     }
 
+    /// Borrow the worker for gate, volume, and asynchronous diagnostics.
+    pub(super) const fn audio_worker(&self) -> Option<&PcmStreamWorker> {
+        self.state.audio.as_ref()
+    }
+
     /// Take the first malformed batch observed since the previous call.
     pub(super) fn take_audio_batch_error(&mut self) -> Option<AudioBatchError> {
         self.state.audio_batch_error.take()

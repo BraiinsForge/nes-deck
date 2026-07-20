@@ -15,7 +15,9 @@ use std::slice;
 use std::time::Duration;
 
 use retro_deck_audio::SampleRate;
-use retro_deck_platform::{display::Dimensions, input::KeyboardState};
+use retro_deck_platform::{
+    audio::PcmStreamWorker, display::Dimensions, input::KeyboardState, wayland::WaylandPresentation,
+};
 
 use super::abi;
 use super::callbacks::{CallbackBinding, CallbackBindingError};
@@ -259,6 +261,49 @@ impl CoreSession {
     #[must_use]
     pub fn save_persistent_memory(&self) -> Vec<PersistenceIssue> {
         self.persistence.save(self.core(), &self.lifecycle)
+    }
+
+    /// Attach the sole nonblocking PCM worker.
+    ///
+    /// Returns `worker` unchanged when one is already attached.
+    #[must_use]
+    pub fn attach_audio_worker(&mut self, worker: PcmStreamWorker) -> Option<PcmStreamWorker> {
+        self.callbacks.attach_audio_worker(worker)
+    }
+
+    /// Borrow the PCM worker for gate, volume, and device diagnostics.
+    #[must_use]
+    pub const fn audio_worker(&self) -> Option<&PcmStreamWorker> {
+        self.callbacks.audio_worker()
+    }
+
+    /// Detach the PCM worker for explicit release and shutdown reporting.
+    #[must_use]
+    pub fn take_audio_worker(&mut self) -> Option<PcmStreamWorker> {
+        self.callbacks.take_audio_worker()
+    }
+
+    /// Attach the sole Wayland presentation.
+    ///
+    /// Returns `presentation` unchanged when one is already attached.
+    #[must_use]
+    pub fn attach_presentation(
+        &mut self,
+        presentation: WaylandPresentation,
+    ) -> Option<WaylandPresentation> {
+        self.callbacks.attach_presentation(presentation)
+    }
+
+    /// Borrow the active presentation for descriptor polling and state.
+    #[must_use]
+    pub const fn presentation(&self) -> Option<&WaylandPresentation> {
+        self.callbacks.presentation()
+    }
+
+    /// Borrow the active presentation for nonblocking event dispatch.
+    #[must_use]
+    pub const fn presentation_mut(&mut self) -> Option<&mut WaylandPresentation> {
+        self.callbacks.presentation_mut()
     }
 
     /// Replace the complete input snapshot observed by the next core frame.
@@ -787,6 +832,7 @@ fn rounded_sample_rate(rate: f64) -> Option<SampleRate> {
 mod tests {
     use super::super::callbacks::serialize_test_sessions;
     use super::*;
+    use retro_deck_audio::Volume;
     use retro_deck_platform::input::{Button, ButtonSet};
     use std::fs;
     use std::os::unix::ffi::OsStringExt as _;
@@ -1148,6 +1194,31 @@ mod tests {
         fake().emit_callback_errors = false;
         assert!(session.run_frame().clean());
         assert!(fake().events.ends_with(&["run", "run"]));
+    }
+
+    #[test]
+    fn session_exclusively_owns_and_explicitly_releases_audio() {
+        let _session = serialize_test_sessions();
+        reset_fake();
+        let (_directory, content) = content_fixture(LibretroCore::Fceumm);
+        let mut session = CoreSession::open_with_api(LibretroCore::Fceumm, content, test_api())
+            .expect("valid session");
+        let rate = session.av_info().sample_rate();
+        let worker = PcmStreamWorker::spawn(rate, Volume::MUTED).expect("first PCM worker");
+        assert!(session.attach_audio_worker(worker).is_none());
+        assert!(session.audio_worker().is_some());
+
+        let duplicate = PcmStreamWorker::spawn(rate, Volume::MUTED).expect("second PCM worker");
+        let duplicate = session
+            .attach_audio_worker(duplicate)
+            .expect("duplicate is returned unchanged");
+        assert!(!duplicate.shutdown().panicked);
+
+        let worker = session
+            .take_audio_worker()
+            .expect("attached worker is recoverable");
+        assert!(session.audio_worker().is_none());
+        assert!(!worker.shutdown().panicked);
     }
 
     unsafe extern "C" fn fake_set_environment(_: abi::EnvironmentCallback) {
