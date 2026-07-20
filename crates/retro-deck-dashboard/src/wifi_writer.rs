@@ -5,6 +5,7 @@ use std::fmt;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -26,13 +27,27 @@ const CHILD_PATH: &str = "/usr/sbin:/usr/bin:/sbin:/bin";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WifiWriterSubmit {
     /// The validated request entered the bounded worker queue.
-    Queued,
+    Queued(WifiWriterRequestId),
     /// One request is already waiting for the writer.
     Busy,
     /// Credentials violated the writer's defensive schema check.
     Invalid,
     /// The writer thread is no longer available.
     Disconnected,
+    /// The process-lifetime request identifier space was exhausted.
+    Exhausted,
+}
+
+/// Process-lifetime identity of one accepted profile save.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct WifiWriterRequestId(u64);
+
+impl WifiWriterRequestId {
+    /// Return the monotonically increasing identifier value.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
 }
 
 /// Nonblocking result-channel state.
@@ -50,9 +65,17 @@ pub enum WifiWriterPoll {
 #[derive(Debug)]
 pub enum WifiWriterResult {
     /// The installed helper reported success.
-    Saved,
+    Saved {
+        /// Identity returned when this request was submitted.
+        request: WifiWriterRequestId,
+    },
     /// The request failed without exposing either credential.
-    Failed(WifiWriteError),
+    Failed {
+        /// Identity returned when this request was submitted.
+        request: WifiWriterRequestId,
+        /// Redacted helper or supervision failure.
+        error: WifiWriteError,
+    },
 }
 
 /// Input-side handle for the isolated profile writer thread.
@@ -64,6 +87,7 @@ pub struct WifiProfileWriter {
     requests: Option<SyncSender<WifiSaveRequest>>,
     results: Receiver<WifiWriterResult>,
     thread: Option<JoinHandle<WifiWriterReport>>,
+    next_request: AtomicU64,
 }
 
 impl WifiProfileWriter {
@@ -92,21 +116,35 @@ impl WifiProfileWriter {
             requests: Some(requests),
             results,
             thread: Some(thread),
+            next_request: AtomicU64::new(1),
         })
     }
 
     /// Queue one validated editor snapshot without waiting for the helper.
     #[must_use]
     pub fn try_save(&self, credentials: &WifiCredentials<'_>) -> WifiWriterSubmit {
-        let Some(request) = WifiSaveRequest::new(credentials.ssid(), credentials.passphrase())
-        else {
+        if !WifiSaveRequest::valid(credentials.ssid(), credentials.passphrase()) {
             return WifiWriterSubmit::Invalid;
-        };
+        }
         let Some(requests) = &self.requests else {
             return WifiWriterSubmit::Disconnected;
         };
+        let Ok(serial) =
+            self.next_request
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    current.checked_add(1)
+                })
+        else {
+            return WifiWriterSubmit::Exhausted;
+        };
+        let request_id = WifiWriterRequestId(serial);
+        let Some(request) =
+            WifiSaveRequest::new(request_id, credentials.ssid(), credentials.passphrase())
+        else {
+            return WifiWriterSubmit::Invalid;
+        };
         match requests.try_send(request) {
-            Ok(()) => WifiWriterSubmit::Queued,
+            Ok(()) => WifiWriterSubmit::Queued(request_id),
             Err(TrySendError::Full(_)) => WifiWriterSubmit::Busy,
             Err(TrySendError::Disconnected(_)) => WifiWriterSubmit::Disconnected,
         }
@@ -249,13 +287,20 @@ impl WriterTiming {
 }
 
 struct WifiSaveRequest {
+    id: WifiWriterRequestId,
     ssid: BoundedAscii<MAXIMUM_SSID_BYTES>,
     passphrase: BoundedAscii<MAXIMUM_PASSPHRASE_BYTES>,
 }
 
 impl WifiSaveRequest {
-    fn new(ssid: &str, passphrase: &str) -> Option<Self> {
+    fn valid(ssid: &str, passphrase: &str) -> bool {
+        BoundedAscii::<MAXIMUM_SSID_BYTES>::valid(ssid, 1)
+            && BoundedAscii::<MAXIMUM_PASSPHRASE_BYTES>::valid(passphrase, MINIMUM_PASSPHRASE_BYTES)
+    }
+
+    fn new(id: WifiWriterRequestId, ssid: &str, passphrase: &str) -> Option<Self> {
         Some(Self {
+            id,
             ssid: BoundedAscii::new(ssid, 1)?,
             passphrase: BoundedAscii::new(passphrase, MINIMUM_PASSPHRASE_BYTES)?,
         })
@@ -273,6 +318,7 @@ impl fmt::Debug for WifiSaveRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("WifiSaveRequest")
+            .field("id", &self.id)
             .field("ssid_bytes", &self.ssid.len())
             .field("passphrase_bytes", &self.passphrase.len())
             .finish()
@@ -285,12 +331,16 @@ struct BoundedAscii<const CAPACITY: usize> {
 }
 
 impl<const CAPACITY: usize> BoundedAscii<CAPACITY> {
+    fn valid(value: &str, minimum: usize) -> bool {
+        let bytes = value.as_bytes();
+        bytes.len() >= minimum
+            && bytes.len() <= CAPACITY
+            && bytes.iter().all(|byte| (b' '..=b'~').contains(byte))
+    }
+
     fn new(value: &str, minimum: usize) -> Option<Self> {
         let bytes = value.as_bytes();
-        if bytes.len() < minimum
-            || bytes.len() > CAPACITY
-            || !bytes.iter().all(|byte| (b' '..=b'~').contains(byte))
-        {
+        if !Self::valid(value, minimum) {
             return None;
         }
         let mut output = Self {
@@ -346,11 +396,16 @@ fn run_writer(
         let result = match write_profile(helper, timing, &request) {
             Ok(()) => {
                 report.saved = report.saved.saturating_add(1);
-                WifiWriterResult::Saved
+                WifiWriterResult::Saved {
+                    request: request.id,
+                }
             }
             Err(error) => {
                 report.failed = report.failed.saturating_add(1);
-                WifiWriterResult::Failed(error)
+                WifiWriterResult::Failed {
+                    request: request.id,
+                    error,
+                }
             }
         };
         match results.try_send(result) {
@@ -413,8 +468,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        WifiProfileWriter, WifiWriteError, WifiWriterPoll, WifiWriterResult, WifiWriterStartError,
-        WifiWriterSubmit, WriterTiming,
+        WifiProfileWriter, WifiWriteError, WifiWriterPoll, WifiWriterRequestId, WifiWriterResult,
+        WifiWriterStartError, WifiWriterSubmit, WriterTiming,
     };
     use crate::{WifiAction, WifiEditor, WifiField};
 
@@ -466,10 +521,13 @@ mod tests {
         let Some(credentials) = editor.credentials() else {
             return;
         };
-        assert_eq!(writer.try_save(&credentials), WifiWriterSubmit::Queued);
+        let submission = writer.try_save(&credentials);
+        assert_eq!(submission, WifiWriterSubmit::Queued(WifiWriterRequestId(1)));
         assert!(matches!(
             wait_result(&writer),
-            Some(WifiWriterResult::Saved)
+            Some(WifiWriterResult::Saved {
+                request: WifiWriterRequestId(1)
+            })
         ));
         let report = writer.shutdown();
         assert_eq!(report.attempts, 1);
@@ -494,7 +552,10 @@ mod tests {
         let result = wait_result(&writer);
         assert!(matches!(
             result,
-            Some(WifiWriterResult::Failed(WifiWriteError::Exit(_)))
+            Some(WifiWriterResult::Failed {
+                request: WifiWriterRequestId(1),
+                error: WifiWriteError::Exit(_),
+            })
         ));
         let diagnostics = format!("{result:?}");
         assert!(!diagnostics.contains("secret!9"));
@@ -513,7 +574,10 @@ mod tests {
         let result = wait_result(&writer);
         assert!(matches!(
             result,
-            Some(WifiWriterResult::Failed(WifiWriteError::Timeout))
+            Some(WifiWriterResult::Failed {
+                request: WifiWriterRequestId(1),
+                error: WifiWriteError::Timeout,
+            })
         ));
         assert_eq!(writer.shutdown().failed, 1);
     }
@@ -547,7 +611,10 @@ mod tests {
         let Some(credentials) = editor.credentials() else {
             return;
         };
-        assert_eq!(writer.try_save(&credentials), WifiWriterSubmit::Queued);
+        assert!(matches!(
+            writer.try_save(&credentials),
+            WifiWriterSubmit::Queued(_)
+        ));
     }
 
     fn wait_result(writer: &WifiProfileWriter) -> Option<WifiWriterResult> {

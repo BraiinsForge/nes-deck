@@ -61,6 +61,6 @@ pub use wifi::{
 };
 pub use wifi_render::WifiLayout;
 pub use wifi_writer::{
-    WifiProfileWriter, WifiWriteError, WifiWriterPoll, WifiWriterReport, WifiWriterResult,
-    WifiWriterStartError, WifiWriterSubmit,
+    WifiProfileWriter, WifiWriteError, WifiWriterPoll, WifiWriterReport, WifiWriterRequestId,
+    WifiWriterResult, WifiWriterStartError, WifiWriterSubmit,
 };
