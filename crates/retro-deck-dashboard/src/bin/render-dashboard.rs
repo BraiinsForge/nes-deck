@@ -11,7 +11,8 @@ use std::process::ExitCode;
 use retro_deck_config::{Catalog, Credits, Palette};
 use retro_deck_dashboard::{
     Action, Brightness, CANVAS_HEIGHT, CANVAS_WIDTH, CreditsCrawl, DashboardCatalog,
-    DashboardFrame, DashboardModel, Keymap, NetworkView, SettingsView, VolumeState,
+    DashboardFrame, DashboardModel, Keymap, NetworkView, SettingsView, VolumeState, WifiAction,
+    WifiEditor, WifiField,
 };
 
 const APPLICATION: &str = "render-dashboard";
@@ -40,6 +41,10 @@ fn main() -> ExitCode {
         Some(output) if first == "credits-intro" => (PreviewScreen::CreditsIntro, output),
         Some(output) if first == "credits-crawl" => (PreviewScreen::CreditsCrawl, output),
         Some(output) if first == "credits-static" => (PreviewScreen::CreditsStatic, output),
+        Some(output) if first == "wifi-lowercase" => (PreviewScreen::WifiLowercase, output),
+        Some(output) if first == "wifi-uppercase" => (PreviewScreen::WifiUppercase, output),
+        Some(output) if first == "wifi-password" => (PreviewScreen::WifiPassword, output),
+        Some(output) if first == "wifi-symbols" => (PreviewScreen::WifiSymbols, output),
         Some(_) => {
             print_usage(Path::new(&program));
             return ExitCode::from(2);
@@ -57,7 +62,7 @@ fn main() -> ExitCode {
 
 fn print_usage(program: &Path) {
     eprintln!(
-        "Usage: {} [menu|settings|credits-intro|credits-crawl|credits-static] OUTPUT.ppm",
+        "Usage: {} [menu|settings|credits-intro|credits-crawl|credits-static|wifi-lowercase|wifi-uppercase|wifi-password|wifi-symbols] OUTPUT.ppm",
         program.display()
     );
 }
@@ -69,6 +74,10 @@ enum PreviewScreen {
     CreditsIntro,
     CreditsCrawl,
     CreditsStatic,
+    WifiLowercase,
+    WifiUppercase,
+    WifiPassword,
+    WifiSymbols,
 }
 
 fn render_preview(output: &Path, screen: PreviewScreen) -> Result<(), Box<dyn Error>> {
@@ -105,9 +114,49 @@ fn render_preview(output: &Path, screen: PreviewScreen) -> Result<(), Box<dyn Er
         PreviewScreen::CreditsStatic => {
             DashboardFrame::render_credits(&credits, &palette, true, 0)?
         }
+        PreviewScreen::WifiLowercase
+        | PreviewScreen::WifiUppercase
+        | PreviewScreen::WifiPassword
+        | PreviewScreen::WifiSymbols => {
+            let editor = wifi_preview(screen);
+            DashboardFrame::render_wifi(
+                &editor,
+                NetworkView::new("STUDIO", "192.0.2.20", "198.51.100.10", "CONNECTED"),
+                &palette,
+            )?
+        }
     };
     write_ppm(output, frame.pixels())?;
     Ok(())
+}
+
+fn wifi_preview(screen: PreviewScreen) -> WifiEditor {
+    let mut editor = WifiEditor::new();
+    if matches!(
+        screen,
+        PreviewScreen::WifiUppercase | PreviewScreen::WifiPassword | PreviewScreen::WifiSymbols
+    ) {
+        let _ = editor.apply(WifiAction::ToggleShift);
+    }
+    if matches!(
+        screen,
+        PreviewScreen::WifiPassword | PreviewScreen::WifiSymbols
+    ) {
+        type_wifi_text(&mut editor, "NETWORK");
+        let _ = editor.apply(WifiAction::SelectField(WifiField::Passphrase));
+        type_wifi_text(&mut editor, "password");
+    }
+    if screen == PreviewScreen::WifiSymbols {
+        let _ = editor.apply(WifiAction::ToggleShift);
+        let _ = editor.apply(WifiAction::ToggleSymbols);
+    }
+    editor
+}
+
+fn type_wifi_text(editor: &mut WifiEditor, text: &str) {
+    for byte in text.bytes() {
+        let _ = editor.apply(WifiAction::TypeAscii(byte));
+    }
 }
 
 fn write_ppm(path: &Path, pixels: &[u16]) -> io::Result<()> {

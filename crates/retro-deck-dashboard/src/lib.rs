@@ -14,6 +14,7 @@ mod render;
 mod settings;
 mod state;
 mod wifi;
+mod wifi_render;
 
 pub use artwork::{ArtworkError, ArtworkIssue, ArtworkReport, ArtworkStore, ArtworkStoreError};
 pub use assets::{
@@ -52,3 +53,4 @@ pub use wifi::{
     MAXIMUM_PASSPHRASE_BYTES, MAXIMUM_SSID_BYTES, MINIMUM_PASSPHRASE_BYTES, WifiAction,
     WifiCredentials, WifiEditor, WifiEffect, WifiField, WifiStatus, WifiTransition,
 };
+pub use wifi_render::WifiLayout;

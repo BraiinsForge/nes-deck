@@ -7,7 +7,8 @@ use retro_deck_ui::{Canvas, Rect, TextBuffer, fit_text_scale, rgb888_to_rgb565};
 
 use crate::credits::{CreditsCrawl, CreditsLayout, draw_credits};
 use crate::settings::{SettingsLayout, SettingsView, draw_settings};
-use crate::{Action, DashboardModel, Keymap, Status};
+use crate::wifi_render::{WifiLayout, draw_wifi};
+use crate::{Action, DashboardModel, Keymap, NetworkView, Status, WifiAction, WifiEditor};
 
 /// Logical dashboard width presented to the platform layer.
 pub const CANVAS_WIDTH: usize = 1_280;
@@ -253,6 +254,8 @@ pub enum RenderedScreen {
     Menu,
     /// Device and application settings controls.
     Settings,
+    /// Explicit Wi-Fi profile editor.
+    Wifi,
     /// License and attribution crawl.
     Credits,
 }
@@ -263,6 +266,7 @@ pub struct DashboardFrame {
     pixels: Vec<u16>,
     screen: RenderedScreen,
     menu_layout: MenuLayout,
+    wifi_layout: WifiLayout,
 }
 
 impl DashboardFrame {
@@ -302,6 +306,21 @@ impl DashboardFrame {
     ) -> Result<Self, RenderError> {
         let mut frame = Self::allocate(palette)?;
         frame.redraw_settings(model, palette, view);
+        Ok(frame)
+    }
+
+    /// Allocate and render the isolated Wi-Fi profile editor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] if the fixed frame allocation fails.
+    pub fn render_wifi(
+        editor: &WifiEditor,
+        network: NetworkView<'_>,
+        palette: &Palette,
+    ) -> Result<Self, RenderError> {
+        let mut frame = Self::allocate(palette)?;
+        frame.redraw_wifi(editor, network, palette);
         Ok(frame)
     }
 
@@ -354,6 +373,20 @@ impl DashboardFrame {
         self.screen = RenderedScreen::Settings;
     }
 
+    /// Redraw the isolated Wi-Fi editor in the existing allocation.
+    pub fn redraw_wifi(
+        &mut self,
+        editor: &WifiEditor,
+        network: NetworkView<'_>,
+        palette: &Palette,
+    ) {
+        let Some(mut canvas) = Canvas::new(&mut self.pixels, CANVAS_WIDTH, CANVAS_HEIGHT) else {
+            return;
+        };
+        self.wifi_layout = draw_wifi(&mut canvas, editor, network, palette);
+        self.screen = RenderedScreen::Wifi;
+    }
+
     /// Redraw software credits in the existing frame allocation.
     pub fn redraw_credits(
         &mut self,
@@ -396,7 +429,7 @@ impl DashboardFrame {
     pub const fn menu_layout(&self) -> Option<&MenuLayout> {
         match self.screen {
             RenderedScreen::Menu => Some(&self.menu_layout),
-            RenderedScreen::Settings | RenderedScreen::Credits => None,
+            RenderedScreen::Settings | RenderedScreen::Wifi | RenderedScreen::Credits => None,
         }
     }
 
@@ -405,7 +438,16 @@ impl DashboardFrame {
     pub const fn settings_layout(&self) -> Option<SettingsLayout> {
         match self.screen {
             RenderedScreen::Settings => Some(SettingsLayout::fixed()),
-            RenderedScreen::Menu | RenderedScreen::Credits => None,
+            RenderedScreen::Menu | RenderedScreen::Wifi | RenderedScreen::Credits => None,
+        }
+    }
+
+    /// Wi-Fi editor geometry when the current frame contains that editor.
+    #[must_use]
+    pub const fn wifi_layout(&self) -> Option<&WifiLayout> {
+        match self.screen {
+            RenderedScreen::Wifi => Some(&self.wifi_layout),
+            RenderedScreen::Menu | RenderedScreen::Settings | RenderedScreen::Credits => None,
         }
     }
 
@@ -414,7 +456,7 @@ impl DashboardFrame {
     pub const fn credits_layout(&self) -> Option<CreditsLayout> {
         match self.screen {
             RenderedScreen::Credits => Some(CreditsLayout::fixed()),
-            RenderedScreen::Menu | RenderedScreen::Settings => None,
+            RenderedScreen::Menu | RenderedScreen::Settings | RenderedScreen::Wifi => None,
         }
     }
 
@@ -424,7 +466,17 @@ impl DashboardFrame {
         match self.screen {
             RenderedScreen::Menu => self.menu_layout.action_at(x, y),
             RenderedScreen::Settings => SettingsLayout::fixed().action_at(x, y),
+            RenderedScreen::Wifi => None,
             RenderedScreen::Credits => CreditsLayout::fixed().action_at(x, y),
+        }
+    }
+
+    /// Map one coordinate on a represented Wi-Fi editor frame to an action.
+    #[must_use]
+    pub fn wifi_action_at(&self, x: usize, y: usize) -> Option<WifiAction> {
+        match self.screen {
+            RenderedScreen::Wifi => self.wifi_layout.action_at(x, y),
+            RenderedScreen::Menu | RenderedScreen::Settings | RenderedScreen::Credits => None,
         }
     }
 
@@ -447,6 +499,7 @@ impl DashboardFrame {
             pixels,
             screen: RenderedScreen::Menu,
             menu_layout: MenuLayout::empty(),
+            wifi_layout: WifiLayout::empty(),
         })
     }
 }
@@ -1179,7 +1232,7 @@ mod tests {
 
     #[test]
     fn switching_screens_reuses_one_complete_frame_allocation() {
-        use crate::{NetworkView, RenderedScreen, SettingsView};
+        use crate::{NetworkView, RenderedScreen, SettingsView, WifiAction, WifiEditor};
 
         let Some(mut model) = model() else {
             return;
@@ -1199,6 +1252,14 @@ mod tests {
         assert_eq!(frame.rendered_screen(), RenderedScreen::Settings);
         assert_eq!(frame.pixels.as_ptr(), allocation);
         assert_eq!(frame.pixels.capacity(), capacity);
+
+        let editor = WifiEditor::new();
+        frame.redraw_wifi(&editor, NetworkView::unavailable(), &palette);
+        assert_eq!(frame.rendered_screen(), RenderedScreen::Wifi);
+        assert_eq!(frame.pixels.as_ptr(), allocation);
+        assert_eq!(frame.pixels.capacity(), capacity);
+        assert_eq!(frame.action_at(20, 20), None);
+        assert_eq!(frame.wifi_action_at(20, 20), Some(WifiAction::Close));
 
         let _ = model.apply(Action::Back);
         let Some(credits) = Credits::parse(DEPLOYED_CREDITS).ok() else {

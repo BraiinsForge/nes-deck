@@ -40,6 +40,30 @@ impl<'text> NetworkView<'text> {
     pub const fn unavailable() -> Self {
         Self::new("", "", "", "STATUS UNAVAILABLE")
     }
+
+    /// Active wireless network name, or empty when unavailable.
+    #[must_use]
+    pub const fn ssid(self) -> &'text str {
+        self.ssid
+    }
+
+    /// Wireless interface IPv4 address, or empty when unavailable.
+    #[must_use]
+    pub const fn wlan_ipv4(self) -> &'text str {
+        self.wlan_ipv4
+    }
+
+    /// `WireGuard` interface IPv4 address, or empty when unavailable.
+    #[must_use]
+    pub const fn wireguard_ipv4(self) -> &'text str {
+        self.wireguard_ipv4
+    }
+
+    /// Read-only automatic-selector status text.
+    #[must_use]
+    pub const fn selector(self) -> &'text str {
+        self.selector
+    }
 }
 
 /// Device text needed only while drawing settings.
