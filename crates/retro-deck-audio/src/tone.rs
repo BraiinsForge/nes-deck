@@ -3,66 +3,14 @@
 use std::error::Error;
 use std::fmt;
 
-const MAXIMUM_SAMPLE_RATE: u32 = 192_000;
+use crate::{SampleRate, Volume};
+
 const MAXIMUM_FREQUENCY: u32 = 24_000;
 const MAXIMUM_NOTE_DURATION_MS: u32 = 2_000;
 const MAXIMUM_TONE_DURATION_MS: u32 = 5_000;
 const MAXIMUM_NOTES: usize = 16;
 const MAXIMUM_AMPLITUDE: i32 = 5_000;
 const MINIMUM_AUDIBLE_AMPLITUDE: i32 = 256;
-
-/// Positive PCM sample rate bounded for an appliance audio stream.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct SampleRate(u32);
-
-impl SampleRate {
-    /// Validate a rate from 1 through 192 kHz.
-    #[must_use]
-    pub const fn new(hertz: u32) -> Option<Self> {
-        if hertz == 0 || hertz > MAXIMUM_SAMPLE_RATE {
-            None
-        } else {
-            Some(Self(hertz))
-        }
-    }
-
-    /// Return samples per second.
-    #[must_use]
-    pub const fn get(self) -> u32 {
-        self.0
-    }
-}
-
-/// User volume percentage from muted through full scale.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct Volume(u8);
-
-impl Volume {
-    /// Muted output.
-    pub const MUTED: Self = Self(0);
-
-    /// Validate a percentage from 0 through 100.
-    #[must_use]
-    pub const fn new(percent: u8) -> Option<Self> {
-        if percent <= 100 {
-            Some(Self(percent))
-        } else {
-            None
-        }
-    }
-
-    /// Return the validated percentage.
-    #[must_use]
-    pub const fn percent(self) -> u8 {
-        self.0
-    }
-
-    /// Whether playback should avoid opening an audio device.
-    #[must_use]
-    pub const fn muted(self) -> bool {
-        self.0 == 0
-    }
-}
 
 /// One positive square-wave note in a short cue.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -244,8 +192,14 @@ impl Error for ToneError {}
 mod tests {
     use super::*;
 
-    const RATE: SampleRate = SampleRate(44_100);
-    const FULL: Volume = Volume(100);
+    const RATE: SampleRate = match SampleRate::new(44_100) {
+        Some(rate) => rate,
+        None => panic!("test sample rate must be valid"),
+    };
+    const FULL: Volume = match Volume::new(100) {
+        Some(volume) => volume,
+        None => panic!("test volume must be valid"),
+    };
 
     fn note(frequency: u32, duration: u32) -> ToneNote {
         ToneNote::new(frequency, duration).unwrap_or(ToneNote {
@@ -255,13 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn primitive_values_are_strictly_bounded() {
-        assert_eq!(SampleRate::new(0), None);
-        assert_eq!(SampleRate::new(44_100), Some(RATE));
-        assert_eq!(SampleRate::new(192_001), None);
-        assert_eq!(Volume::new(0), Some(Volume::MUTED));
-        assert_eq!(Volume::new(100), Some(FULL));
-        assert_eq!(Volume::new(101), None);
+    fn note_values_are_strictly_bounded() {
         assert_eq!(ToneNote::new(0, 20), None);
         assert_eq!(ToneNote::new(440, 0), None);
         assert_eq!(ToneNote::new(24_001, 20), None);
@@ -287,7 +235,10 @@ mod tests {
 
     #[test]
     fn volume_scales_without_clipping_and_muting_allocates_no_pcm() {
-        let quiet = SquareTone::render(&[note(440, 20)], RATE, Volume(1));
+        let Some(quiet_volume) = Volume::new(1) else {
+            return;
+        };
+        let quiet = SquareTone::render(&[note(440, 20)], RATE, quiet_volume);
         assert!(quiet.is_ok());
         let quiet = quiet.unwrap_or(SquareTone {
             rate: RATE,
