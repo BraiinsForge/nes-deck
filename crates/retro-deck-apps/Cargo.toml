@@ -18,5 +18,10 @@ retro-deck-policy = { path = "../retro-deck-policy" }
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "chiptune-deck"
+path = "src/bin/chiptune-deck.rs"
+required-features = ["chiptune-gme"]
+
 [lints]
 workspace = true
