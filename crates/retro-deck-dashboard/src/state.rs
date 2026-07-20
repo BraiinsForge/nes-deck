@@ -115,9 +115,10 @@ impl SettingsTarget {
 }
 
 /// Terminal keymap selected in settings.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Keymap {
     /// US ANSI key positions.
+    #[default]
     Us,
     /// Czech key positions.
     Czech,
@@ -140,12 +141,6 @@ impl Keymap {
             Self::Us => "us",
             Self::Czech => "cz",
         }
-    }
-}
-
-impl Default for Keymap {
-    fn default() -> Self {
-        Self::Us
     }
 }
 
