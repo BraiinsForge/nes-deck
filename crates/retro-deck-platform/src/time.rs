@@ -78,9 +78,26 @@ impl FrameClock {
     /// Start a new fixed-rate schedule with its first frame due now.
     #[must_use]
     pub fn start(rate: FrameRate) -> Self {
+        Self::with_period(rate.period())
+    }
+
+    /// Start a schedule from an exact nonzero frame period.
+    ///
+    /// This preserves fractional emulator rates whose reciprocal cannot be
+    /// represented by an integer [`FrameRate`].
+    #[must_use]
+    pub fn start_period(period: Duration) -> Option<Self> {
+        if period.is_zero() {
+            None
+        } else {
+            Some(Self::with_period(period))
+        }
+    }
+
+    fn with_period(period: Duration) -> Self {
         Self {
             origin: Instant::now(),
-            schedule: FrameSchedule::new(rate.period()),
+            schedule: FrameSchedule::new(period),
         }
     }
 
@@ -186,6 +203,15 @@ mod tests {
             period - processing
         );
         assert_eq!(schedule.deadline, period.saturating_mul(2));
+    }
+
+    #[test]
+    fn exact_period_clock_rejects_zero_without_rounding() {
+        assert!(FrameClock::start_period(Duration::ZERO).is_none());
+        let period = Duration::from_nanos(16_639_274);
+        let clock = FrameClock::start_period(period).expect("nonzero exact period");
+        assert_eq!(clock.schedule.period, period);
+        assert_eq!(clock.schedule.deadline, Duration::ZERO);
     }
 
     #[test]
