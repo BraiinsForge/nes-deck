@@ -10,6 +10,7 @@ mod keyboard;
 mod options;
 mod profile;
 mod save;
+mod session;
 mod video;
 
 pub use content::{Content, ContentError};

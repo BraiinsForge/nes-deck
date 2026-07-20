@@ -14,6 +14,8 @@ use std::path::Path;
 use std::ptr;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+use std::sync::{Mutex, MutexGuard};
 
 use retro_deck_platform::{
     audio::PcmStreamWorker,
@@ -29,6 +31,8 @@ use super::{
 };
 
 static SESSION_ACTIVE: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static TEST_SESSION: Mutex<()> = Mutex::new(());
 
 thread_local! {
     static CALLBACK_STATE: Cell<*mut CallbackState> = const { Cell::new(ptr::null_mut()) };
@@ -262,6 +266,13 @@ impl Error for CallbackBindingError {
     }
 }
 
+#[cfg(test)]
+pub(super) fn serialize_test_sessions() -> MutexGuard<'static, ()> {
+    TEST_SESSION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) -> bool {
     CALLBACK_STATE.with(|slot| {
         // SAFETY: A non-null slot points to the binding's live boxed state,
@@ -410,20 +421,11 @@ mod tests {
     use retro_deck_audio::{SampleRate, Volume};
     use retro_deck_platform::input::{Button, ButtonSet, MediumRawKey};
     use std::ptr;
-    use std::sync::{Mutex, MutexGuard};
     use std::thread;
-
-    static TEST_SESSION: Mutex<()> = Mutex::new(());
-
-    fn serialize_sessions() -> MutexGuard<'static, ()> {
-        TEST_SESSION
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
 
     #[test]
     fn binding_routes_callbacks_only_during_its_lifetime() {
-        let _test_session = serialize_sessions();
+        let _test_session = serialize_test_sessions();
         let callback;
         {
             let binding = CallbackBinding::install(LibretroCore::Fceumm, Path::new("/roms/nes"))
@@ -454,7 +456,7 @@ mod tests {
 
     #[test]
     fn process_allows_only_one_active_session() {
-        let _test_session = serialize_sessions();
+        let _test_session = serialize_test_sessions();
         let first = CallbackBinding::install(LibretroCore::Gambatte, Path::new("/roms/gb"))
             .expect("first callback binding");
         assert!(matches!(
@@ -467,7 +469,7 @@ mod tests {
 
     #[test]
     fn callbacks_from_an_unbound_thread_fail_closed() {
-        let _test_session = serialize_sessions();
+        let _test_session = serialize_test_sessions();
         let binding = CallbackBinding::install(LibretroCore::Fceumm, Path::new("/roms/nes"))
             .expect("first callback binding");
         let callback = binding.environment_callback();
@@ -490,7 +492,7 @@ mod tests {
 
     #[test]
     fn negotiated_state_remains_owned_by_the_binding() {
-        let _test_session = serialize_sessions();
+        let _test_session = serialize_test_sessions();
         let binding = CallbackBinding::install(LibretroCore::Gambatte, Path::new("/roms/gb"))
             .expect("first callback binding");
         let callback = binding.environment_callback();
@@ -507,7 +509,7 @@ mod tests {
 
     #[test]
     fn console_cores_merge_keyboard_controls_into_player_one() {
-        let _test_session = serialize_sessions();
+        let _test_session = serialize_test_sessions();
         let mut binding = CallbackBinding::install(LibretroCore::Fceumm, Path::new("/roms/nes"))
             .expect("first callback binding");
         let player_one = JoypadState::from_buttons(
@@ -543,7 +545,7 @@ mod tests {
 
     #[test]
     fn zx_keeps_keyboard_and_joystick_queries_separate() {
-        let _test_session = serialize_sessions();
+        let _test_session = serialize_test_sessions();
         let mut binding = CallbackBinding::install(LibretroCore::Fuse, Path::new("/roms/zx"))
             .expect("first callback binding");
         let letter_a = MediumRawKey::new(30).expect("A key code");
@@ -570,7 +572,7 @@ mod tests {
 
     #[test]
     fn audio_callbacks_consume_disabled_and_malformed_batches() {
-        let _test_session = serialize_sessions();
+        let _test_session = serialize_test_sessions();
         let mut binding = CallbackBinding::install(LibretroCore::Gambatte, Path::new("/roms/gb"))
             .expect("callback binding");
         let batch = binding.audio_sample_batch_callback();
@@ -597,7 +599,7 @@ mod tests {
 
     #[test]
     fn audio_callbacks_submit_to_an_inactive_worker_without_device_io() {
-        let _test_session = serialize_sessions();
+        let _test_session = serialize_test_sessions();
         let mut binding = CallbackBinding::install(LibretroCore::Fceumm, Path::new("/roms/nes"))
             .expect("callback binding");
         let rate = SampleRate::new(48_000).expect("valid sample rate");
@@ -621,7 +623,7 @@ mod tests {
 
     #[test]
     fn video_callbacks_skip_duplicates_and_record_the_first_invalid_frame() {
-        let _test_session = serialize_sessions();
+        let _test_session = serialize_test_sessions();
         let mut binding = CallbackBinding::install(LibretroCore::Fceumm, Path::new("/roms/nes"))
             .expect("callback binding");
         assert!(binding.presentation().is_none());
