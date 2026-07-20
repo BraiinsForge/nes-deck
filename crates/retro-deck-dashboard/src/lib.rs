@@ -23,7 +23,9 @@ pub use audio::menu_notes;
 pub use catalog::{Category, DashboardCatalog, DashboardCatalogError, MAXIMUM_DASHBOARD_ENTRIES};
 pub use controls::{ControllerGuard, TouchCommitter, controller_action};
 pub use credits::{CreditsCrawl, CreditsLayout};
-pub use launch::{LaunchTarget, LaunchTargetError, TerminalMode};
+pub use launch::{
+    ExitPolicy, LaunchPlan, LaunchPlanError, LaunchTarget, LaunchTargetError, TerminalMode,
+};
 pub use preference_io::{
     PreferenceLoad, PreferenceLoadError, PreferenceLoadIssue, PreferencePathError, PreferencePaths,
 };
