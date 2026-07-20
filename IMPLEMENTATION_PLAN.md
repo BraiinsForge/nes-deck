@@ -157,6 +157,11 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   text fitting, fixed-capacity labels, and the complete case-sensitive 5x7
   font. The Rust timer uses it without changing any reference pixel snapshot,
   and future Wi-Fi labels can render capitalization unambiguously.
+- The Rust catalog screen now renders into one fixed 1280x480 allocation with
+  bounded tabs, cards, indicators, cover-art borrowing, approved cog fallback,
+  and hit targets that return semantic model actions. Its canonical NES frame
+  is pixel-identical to the current C++ renderer, and a host PPM capture uses
+  the production Rust pixel path.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
 

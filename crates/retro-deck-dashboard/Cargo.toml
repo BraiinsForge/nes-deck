@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 retro-deck-config = { path = "../retro-deck-config" }
+retro-deck-ui = { path = "../retro-deck-ui" }
 
 [lib]
 path = "src/lib.rs"

@@ -217,7 +217,7 @@ impl<'pixels> Canvas<'pixels> {
         let mut error = delta_x + delta_y;
         loop {
             if let (Ok(x), Ok(y)) = (usize::try_from(from_x), usize::try_from(from_y)) {
-                self.fill_rect(Rect::new(x, y, 1, 1), color);
+                self.set_pixel(x, y, color);
             }
             if from_x == to_x && from_y == to_y {
                 break;
@@ -231,6 +231,19 @@ impl<'pixels> Canvas<'pixels> {
                 error += delta_x;
                 from_y += step_y;
             }
+        }
+    }
+
+    /// Write one pixel when it lies inside the canvas.
+    pub fn set_pixel(&mut self, x: usize, y: usize, color: u16) {
+        if x >= self.width || y >= self.height {
+            return;
+        }
+        let Some(offset) = y.checked_mul(self.width).and_then(|row| row.checked_add(x)) else {
+            return;
+        };
+        if let Some(pixel) = self.pixels.get_mut(offset) {
+            *pixel = color;
         }
     }
 
