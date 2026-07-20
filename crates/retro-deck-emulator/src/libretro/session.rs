@@ -250,6 +250,15 @@ impl CoreSession {
     pub fn persistence_issues(&self) -> &[PersistenceIssue] {
         &self.persistence.startup_issues
     }
+
+    /// Atomically persist every writable native core memory region.
+    ///
+    /// Regions whose file or core-memory validation failed at startup remain
+    /// untouched and are returned as [`PersistenceIssue::WriteBlocked`].
+    #[must_use]
+    pub fn save_persistent_memory(&self) -> Vec<PersistenceIssue> {
+        self.persistence.save(self.core(), &self.lifecycle)
+    }
 }
 
 /// Core initialization, metadata, content, or timing failure.
@@ -395,6 +404,18 @@ pub enum PersistenceIssue {
         /// Filesystem validation or I/O failure.
         source: SaveError,
     },
+    /// A native save could not be written atomically.
+    Write {
+        /// Profile memory kind that remains only in core memory.
+        kind: MemoryKind,
+        /// Filesystem validation or I/O failure.
+        source: SaveError,
+    },
+    /// A startup validation failure protects existing data from replacement.
+    WriteBlocked {
+        /// Profile memory kind deliberately left on disk unchanged.
+        kind: MemoryKind,
+    },
 }
 
 impl PersistenceIssue {
@@ -403,7 +424,9 @@ impl PersistenceIssue {
     pub const fn kind(&self) -> MemoryKind {
         match self {
             Self::CoreMemory(source) => source.kind(),
-            Self::Read { kind, .. } => *kind,
+            Self::Read { kind, .. } | Self::Write { kind, .. } | Self::WriteBlocked { kind } => {
+                *kind
+            }
         }
     }
 }
@@ -415,6 +438,13 @@ impl fmt::Display for PersistenceIssue {
             Self::Read { kind, source } => {
                 write!(formatter, "cannot load native {kind:?} memory: {source}")
             }
+            Self::Write { kind, source } => {
+                write!(formatter, "cannot save native {kind:?} memory: {source}")
+            }
+            Self::WriteBlocked { kind } => write!(
+                formatter,
+                "native {kind:?} memory was not saved because startup validation did not establish a safe replacement"
+            ),
         }
     }
 }
@@ -423,7 +453,8 @@ impl Error for PersistenceIssue {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::CoreMemory(source) => Some(source),
-            Self::Read { source, .. } => Some(source),
+            Self::Read { source, .. } | Self::Write { source, .. } => Some(source),
+            Self::WriteBlocked { .. } => None,
         }
     }
 }
@@ -465,6 +496,27 @@ impl Persistence {
                 }
             }
         }
+    }
+
+    fn save(&self, core: LibretroCore, lifecycle: &CoreLifecycle) -> Vec<PersistenceIssue> {
+        let mut issues = Vec::new();
+        for memory in core.memory_files() {
+            let kind = memory.kind();
+            if self.blocked.contains(&kind) {
+                issues.push(PersistenceIssue::WriteBlocked { kind });
+                continue;
+            }
+            match lifecycle.memory(kind) {
+                Ok(None) => {}
+                Ok(Some(source)) => {
+                    if let Err(source) = self.store.save(*memory, source) {
+                        issues.push(PersistenceIssue::Write { kind, source });
+                    }
+                }
+                Err(source) => issues.push(PersistenceIssue::CoreMemory(source)),
+            }
+        }
+        issues
     }
 
     fn block(&mut self, kind: MemoryKind) {
@@ -938,7 +990,18 @@ mod tests {
             }]
         ));
         assert_eq!(session.persistence.blocked, [MemoryKind::Rtc]);
-        assert!(matches!(fs::read(rtc_path), Ok(bytes) if bytes == b"bad"));
+        assert!(matches!(fs::read(&rtc_path), Ok(bytes) if bytes == b"bad"));
+
+        fake().save_ram = b"updated!".to_vec();
+        fake().rtc = b"nope".to_vec();
+        assert!(matches!(
+            session.save_persistent_memory().as_slice(),
+            [PersistenceIssue::WriteBlocked {
+                kind: MemoryKind::Rtc
+            }]
+        ));
+        assert!(matches!(fs::read(&save_path), Ok(bytes) if bytes == b"updated!"));
+        assert!(matches!(fs::read(&rtc_path), Ok(bytes) if bytes == b"bad"));
     }
 
     #[test]
@@ -968,6 +1031,25 @@ mod tests {
             })]
         ));
         assert_eq!(session.persistence.blocked, [MemoryKind::SaveRam]);
+    }
+
+    #[test]
+    fn explicit_save_reports_atomic_write_failures() {
+        let _session = serialize_test_sessions();
+        reset_fake();
+        fake().save_ram = vec![0x44; 4];
+        let (directory, content) = content_fixture(LibretroCore::Fceumm);
+        let session = CoreSession::open_with_api(LibretroCore::Fceumm, content, test_api())
+            .expect("valid session");
+        fs::create_dir(directory.path().join("game.srm")).expect("blocking directory");
+        assert!(matches!(
+            session.save_persistent_memory().as_slice(),
+            [PersistenceIssue::Write {
+                kind: MemoryKind::SaveRam,
+                ..
+            }]
+        ));
+        assert!(!fake().events.contains(&"unload"));
     }
 
     unsafe extern "C" fn fake_set_environment(_: abi::EnvironmentCallback) {
