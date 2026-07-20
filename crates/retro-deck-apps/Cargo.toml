@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+lewton = "0.10.2"
 retro-deck-audio = { path = "../retro-deck-audio" }
 retro-deck-platform = { path = "../retro-deck-platform" }
 retro-deck-policy = { path = "../retro-deck-policy" }
