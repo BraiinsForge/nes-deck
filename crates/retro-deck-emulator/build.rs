@@ -1,5 +1,7 @@
+#[cfg(feature = "chip8")]
 use std::path::PathBuf;
 
+#[cfg(feature = "chip8")]
 fn main() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let adapter = manifest.join("native/c_octo_adapter.c");
@@ -17,3 +19,6 @@ fn main() {
         .warnings_into_errors(true)
         .compile("retro_deck_c_octo");
 }
+
+#[cfg(not(feature = "chip8"))]
+fn main() {}
