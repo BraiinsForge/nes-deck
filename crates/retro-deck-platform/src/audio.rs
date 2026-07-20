@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 use retro_deck_audio::{ReleaseReason, SampleRate};
 use rustix::fs::{Mode, OFlags, fcntl_getfl, fcntl_setfl, open};
-use rustix::ioctl::{NoArg, Opcode, Updater, ioctl, opcode};
+use rustix::ioctl::{Getter, NoArg, Opcode, Setter, Updater, ioctl, opcode};
 
 /// Standard BMC audio output device.
 pub const DEFAULT_OSS_DEVICE: &str = "/dev/dsp";
@@ -32,10 +32,14 @@ const DSP_SPEED: Opcode = opcode::read_write::<i32>(OSS_GROUP, 2);
 const DSP_SET_FORMAT: Opcode = opcode::read_write::<i32>(OSS_GROUP, 5);
 const DSP_CHANNELS: Opcode = opcode::read_write::<i32>(OSS_GROUP, 6);
 const DSP_SET_FRAGMENT: Opcode = opcode::read_write::<i32>(OSS_GROUP, 10);
+const DSP_GET_OUTPUT_SPACE: Opcode = opcode::read::<AudioBufferInfo>(OSS_GROUP, 12);
+const DSP_SET_TRIGGER: Opcode = opcode::write::<i32>(OSS_GROUP, 16);
 const FORMAT_S16_LE: i32 = 0x10;
 const MONO_CHANNELS: i32 = 1;
+const ENABLE_OUTPUT: i32 = 0x2;
 const ENCODED_CHUNK_BYTES: usize = 4_096;
 const SAMPLES_PER_CHUNK: usize = ENCODED_CHUNK_BYTES / size_of::<i16>();
+const MAXIMUM_PRIME_BYTES: usize = 1_048_576;
 pub(crate) const GATE_ACTIVE: u8 = 0;
 pub(crate) const GATE_MUTED: u8 = 1;
 pub(crate) const GATE_PAUSED: u8 = 2;
@@ -112,6 +116,7 @@ pub struct OssPcm {
     file: File,
     path: PathBuf,
     rate: SampleRate,
+    output_held: bool,
 }
 
 impl OssPcm {
@@ -202,6 +207,7 @@ impl OssPcm {
             file,
             path,
             rate: negotiated_rate,
+            output_held: false,
         })
     }
 
@@ -269,6 +275,58 @@ impl OssPcm {
         Ok(PcmWriteOutcome::Complete)
     }
 
+    /// Prime the negotiated stream ring with silence while output is held.
+    ///
+    /// Holding and querying the ring are optional OSS capabilities. If either
+    /// ioctl is unavailable, playback remains usable and this returns zero.
+    /// A discovered ring is bounded to one MiB before any write. This mirrors
+    /// the live-proven startup sequence that prevents a first-callback XRUN
+    /// on GB and GBC cores.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OssError::Write`] if a validated ring cannot be filled.
+    pub fn prime_stream(&mut self) -> Result<usize, OssError> {
+        self.output_held = set_i32::<DSP_SET_TRIGGER>(&self.file, 0).is_ok();
+        let samples = get_value::<DSP_GET_OUTPUT_SPACE, AudioBufferInfo>(&self.file)
+            .ok()
+            .and_then(prime_sample_count)
+            .unwrap_or(0);
+        let silence = [0_i16; SAMPLES_PER_CHUNK];
+        let mut remaining = samples;
+        while remaining != 0 {
+            let count = remaining.min(silence.len());
+            let Some(chunk) = silence.get(..count) else {
+                break;
+            };
+            self.write_mono(chunk)?;
+            remaining -= count;
+        }
+        Ok(samples - remaining)
+    }
+
+    /// Start output after [`Self::prime_stream`] successfully held it.
+    ///
+    /// Calling this without a held trigger is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OssError::Configure`] if OSS accepted the hold but rejects
+    /// the matching start request.
+    pub fn start_output(&mut self) -> Result<(), OssError> {
+        if !self.output_held {
+            return Ok(());
+        }
+        set_i32::<DSP_SET_TRIGGER>(&self.file, ENABLE_OUTPUT).map_err(|source| {
+            OssError::Configure {
+                operation: "start PCM output",
+                source,
+            }
+        })?;
+        self.output_held = false;
+        Ok(())
+    }
+
     /// Wait until every queued sample has played.
     ///
     /// # Errors
@@ -288,6 +346,23 @@ impl OssPcm {
     pub fn reset(&self) -> Result<(), OssError> {
         no_arg::<DSP_RESET>(&self.file).map_err(OssError::Reset)
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct AudioBufferInfo {
+    fragments: i32,
+    fragment_total: i32,
+    fragment_size: i32,
+    bytes: i32,
+}
+
+fn prime_sample_count(info: AudioBufferInfo) -> Option<usize> {
+    let bytes = usize::try_from(info.bytes).ok()?;
+    if bytes == 0 || bytes > MAXIMUM_PRIME_BYTES || bytes % size_of::<i16>() != 0 {
+        return None;
+    }
+    Some(bytes / size_of::<i16>())
 }
 
 fn update_i32<const REQUEST: Opcode>(file: &File, value: &mut i32) -> io::Result<()> {
@@ -313,6 +388,36 @@ fn no_arg<const REQUEST: Opcode>(file: &File) -> io::Result<()> {
         let operation = unsafe { NoArg::<REQUEST>::new() };
         // SAFETY: the file is an owned open descriptor and this request has no
         // userspace pointer operand.
+        match unsafe { ioctl(file, operation) } {
+            Ok(()) => return Ok(()),
+            Err(rustix::io::Errno::INTR) => {}
+            Err(source) => return Err(source.into()),
+        }
+    }
+}
+
+fn get_value<const REQUEST: Opcode, T>(file: &File) -> io::Result<T> {
+    loop {
+        // SAFETY: callers bind REQUEST and T to one exact read-only OSS ioctl
+        // declaration. The kernel initializes the complete returned value.
+        let operation = unsafe { Getter::<REQUEST, T>::new() };
+        // SAFETY: the file is an owned open descriptor and the operation above
+        // provides storage with the exact type encoded in REQUEST.
+        match unsafe { ioctl(file, operation) } {
+            Ok(value) => return Ok(value),
+            Err(rustix::io::Errno::INTR) => {}
+            Err(source) => return Err(source.into()),
+        }
+    }
+}
+
+fn set_i32<const REQUEST: Opcode>(file: &File, value: i32) -> io::Result<()> {
+    loop {
+        // SAFETY: callers bind REQUEST to an OSS ioctl declared with a const
+        // int pointer in linux/soundcard.h.
+        let operation = unsafe { Setter::<REQUEST, i32>::new(value) };
+        // SAFETY: the file is an owned open descriptor and the operation above
+        // exactly describes this request's input integer.
         match unsafe { ioctl(file, operation) } {
             Ok(()) => return Ok(()),
             Err(rustix::io::Errno::INTR) => {}
@@ -453,6 +558,7 @@ mod tests {
             file,
             path: PathBuf::from("/dev/null"),
             rate,
+            output_held: false,
         };
         let samples = vec![1_i16; SAMPLES_PER_CHUNK * 3];
         let mut checks = 0;
@@ -463,5 +569,33 @@ mod tests {
 
         assert!(matches!(outcome, Ok(PcmWriteOutcome::Cancelled)));
         assert_eq!(checks, 2);
+    }
+
+    #[test]
+    fn stream_priming_accepts_only_bounded_whole_samples() {
+        let valid = AudioBufferInfo {
+            bytes: 8_192,
+            ..AudioBufferInfo::default()
+        };
+        assert_eq!(prime_sample_count(valid), Some(4_096));
+        assert_eq!(
+            prime_sample_count(AudioBufferInfo { bytes: 0, ..valid }),
+            None
+        );
+        assert_eq!(
+            prime_sample_count(AudioBufferInfo { bytes: 3, ..valid }),
+            None
+        );
+        assert_eq!(
+            prime_sample_count(AudioBufferInfo {
+                bytes: 1_048_578,
+                ..valid
+            }),
+            None
+        );
+        assert_eq!(
+            prime_sample_count(AudioBufferInfo { bytes: -1, ..valid }),
+            None
+        );
     }
 }
