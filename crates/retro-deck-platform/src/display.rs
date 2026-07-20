@@ -181,7 +181,7 @@ impl<'pixels> Frame<'pixels> {
     }
 }
 
-/// Cached nearest-neighbor coordinate mapping for a fixed surface.
+/// Cached nearest-neighbor coordinate mapping for a fixed target surface.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScalePlan {
     source: Dimensions,
@@ -208,6 +208,28 @@ impl ScalePlan {
     #[must_use]
     pub const fn target(&self) -> Dimensions {
         self.target
+    }
+
+    /// Source frame dimensions currently represented by the coordinate maps.
+    #[must_use]
+    pub const fn source(&self) -> Dimensions {
+        self.source
+    }
+
+    /// Rebuild coordinate maps for a changed source and the same target.
+    ///
+    /// Returns whether the source changed. The target surface and its backing
+    /// allocation remain untouched.
+    pub fn update_source(&mut self, source: Dimensions) -> bool {
+        if source == self.source {
+            return false;
+        }
+        let horizontal = coordinate_map(source.width, self.target.width);
+        let vertical = coordinate_map(source.height, self.target.height);
+        self.source = source;
+        self.horizontal = horizontal;
+        self.vertical = vertical;
+        true
     }
 
     /// Convert and scale one complete frame into a persistent XRGB8888 slot.
@@ -601,6 +623,34 @@ mod tests {
             plan.blit(frame, &mut [0; 15]),
             Err(DisplayError::TargetLength)
         );
+    }
+
+    #[test]
+    fn scale_plan_updates_its_source_without_changing_the_target() {
+        let other = Dimensions::new(1, 4).expect("fixed dimensions are valid");
+        let source = [0xf800_u16, 0x07e0, 0x001f, 0xffff];
+        let frame = Frame::rgb565(&source, other, 1).expect("changed frame is valid");
+        let mut plan = ScalePlan::new(SOURCE, TARGET);
+
+        assert_eq!(plan.source(), SOURCE);
+        assert_eq!(plan.target(), TARGET);
+        assert!(plan.update_source(other));
+        assert!(!plan.update_source(other));
+        assert_eq!(plan.source(), other);
+        assert_eq!(plan.target(), TARGET);
+
+        let mut target = [0_u32; 16];
+        assert_eq!(plan.blit(frame, &mut target), Ok(()));
+        for row in target.chunks_exact(4) {
+            assert!(
+                row.first()
+                    .is_some_and(|first| row.iter().all(|pixel| pixel == first))
+            );
+        }
+        assert_eq!(target[0], 0xffff_0000);
+        assert_eq!(target[4], 0xff00_ff00);
+        assert_eq!(target[8], 0xff00_00ff);
+        assert_eq!(target[12], 0xffff_ffff);
     }
 
     #[test]

@@ -811,13 +811,31 @@ pub enum PresentOutcome {
     Busy,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SourceMode {
+    Fixed,
+    FrameDriven,
+}
+
+impl SourceMode {
+    fn prepare(self, scale: &mut ScalePlan, source: Dimensions) {
+        if matches!(self, Self::FrameDriven) {
+            let _changed = scale.update_source(source);
+        }
+    }
+}
+
 /// Configured Wayland surface with persistent XRGB8888 presentation buffers.
+///
+/// Widget source geometry is fixed. Gameplay source geometry may follow core
+/// frames while the compositor surface and its allocations remain unchanged.
 #[derive(Debug)]
 pub struct WaylandPresentation {
     frames: SharedBuffers,
     background: Option<SharedBuffers>,
     surface: WaylandSurface,
     scale: ScalePlan,
+    source_mode: SourceMode,
 }
 
 impl WaylandPresentation {
@@ -839,6 +857,7 @@ impl WaylandPresentation {
             background: None,
             surface,
             scale: ScalePlan::new(source, target),
+            source_mode: SourceMode::Fixed,
         })
     }
 
@@ -881,6 +900,7 @@ impl WaylandPresentation {
             background: Some(background),
             surface,
             scale: ScalePlan::new(source, target),
+            source_mode: SourceMode::FrameDriven,
         })
     }
 
@@ -930,7 +950,7 @@ impl WaylandPresentation {
     /// # Errors
     ///
     /// Returns [`WaylandPresentationError`] when dispatch, conversion,
-    /// ownership, or the fixed configured dimensions fail.
+    /// ownership, or configured surface dimensions fail.
     pub fn present(
         &mut self,
         frame: Frame<'_>,
@@ -974,6 +994,8 @@ impl WaylandPresentation {
         slot: SlotId,
         frame: Frame<'_>,
     ) -> Result<(), WaylandPresentationError> {
+        self.source_mode
+            .prepare(&mut self.scale, frame.dimensions());
         let pixels = self.frames.pixels_mut(slot.index())?;
         self.scale
             .blit(frame, pixels)
@@ -1568,6 +1590,22 @@ mod tests {
         for (index, role) in roles.into_iter().enumerate() {
             assert!(matches!(role, BufferRole::Frame(slot) if slot.index() == index));
         }
+    }
+
+    #[test]
+    fn only_gameplay_scale_maps_follow_source_frames() {
+        let first = Dimensions::new(2, 2).unwrap_or(DECK_DIMENSIONS);
+        let second = Dimensions::new(4, 1).unwrap_or(DECK_DIMENSIONS);
+        let target = Dimensions::new(8, 4).unwrap_or(DECK_DIMENSIONS);
+
+        let mut fixed = ScalePlan::new(first, target);
+        SourceMode::Fixed.prepare(&mut fixed, second);
+        assert_eq!(fixed.source(), first);
+
+        let mut gameplay = ScalePlan::new(first, target);
+        SourceMode::FrameDriven.prepare(&mut gameplay, second);
+        assert_eq!(gameplay.source(), second);
+        assert_eq!(gameplay.target(), target);
     }
 
     #[test]

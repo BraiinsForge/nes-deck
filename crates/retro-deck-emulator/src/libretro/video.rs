@@ -153,7 +153,7 @@ impl Error for VideoFrameError {
 pub enum VideoCallbackError {
     /// Core-owned frame metadata or memory was invalid.
     Frame(VideoFrameError),
-    /// The fixed Wayland presentation path failed.
+    /// The checked Wayland presentation path failed.
     Presentation(WaylandPresentationError),
 }
 
