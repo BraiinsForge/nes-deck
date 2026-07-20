@@ -1,5 +1,6 @@
 //! Safe models and boundaries for statically linked libretro cores.
 
+mod abi;
 mod content;
 mod input;
 mod keyboard;
