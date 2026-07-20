@@ -9,6 +9,10 @@ use crate::DashboardCatalog;
 const VOLUME_STEP: u8 = 5;
 const BRIGHTNESS_STEP: u8 = 10;
 const MINIMUM_BRIGHTNESS: u8 = 10;
+/// Compiled audible level used when no valid state exists.
+pub const DEFAULT_VOLUME_PERCENT: u8 = 42;
+/// Compiled display level used when no valid state exists.
+pub const DEFAULT_BRIGHTNESS_PERCENT: u8 = 60;
 
 /// Current top-level dashboard screen.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -138,6 +142,12 @@ impl Keymap {
     }
 }
 
+impl Default for Keymap {
+    fn default() -> Self {
+        Self::Us
+    }
+}
+
 /// Valid volume plus the last level to restore after mute.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct VolumeState {
@@ -146,6 +156,12 @@ pub struct VolumeState {
 }
 
 impl VolumeState {
+    /// Compiled safe startup state.
+    pub const DEFAULT: Self = Self {
+        percent: DEFAULT_VOLUME_PERCENT,
+        last_audible: DEFAULT_VOLUME_PERCENT,
+    };
+
     /// Validate current and restore levels.
     ///
     /// The current value may be muted. The restore level must be audible so
@@ -233,6 +249,9 @@ impl std::error::Error for VolumeError {}
 pub struct Brightness(u8);
 
 impl Brightness {
+    /// Compiled safe startup state.
+    pub const DEFAULT: Self = Self(DEFAULT_BRIGHTNESS_PERCENT);
+
     /// Validate one 10-point step from 10 through 100.
     ///
     /// # Errors
