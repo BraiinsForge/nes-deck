@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+png = "0.18.1"
 retro-deck-audio = { path = "../retro-deck-audio" }
 retro-deck-config = { path = "../retro-deck-config" }
 retro-deck-platform = { path = "../retro-deck-platform" }

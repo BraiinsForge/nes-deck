@@ -1,5 +1,6 @@
 //! Native Retro Deck dashboard model, renderer, and runtime seams.
 
+mod artwork;
 mod assets;
 mod audio;
 mod catalog;
@@ -10,6 +11,7 @@ mod render;
 mod settings;
 mod state;
 
+pub use artwork::{ArtworkError, ArtworkIssue, ArtworkReport, ArtworkStore, ArtworkStoreError};
 pub use assets::{
     AssetKind, AssetPathError, CreditsFallback, DashboardAssetPaths, DashboardAssets,
     DashboardAssetsError, PaletteFallback,
