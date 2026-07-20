@@ -187,6 +187,10 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   bounded regular-file descriptors that reject final symlinks. Catalog failure
   stops before display setup; credits and palette failures remain observable
   while selecting safe unavailable and compiled-color fallbacks.
+- A staged native dashboard binary now drives the production Rust Wayland
+  widget, controller discovery and hotplug, touch commits, visibility-aware
+  polling, menu/settings switching, and 25 Hz credits frames through one reused
+  allocation. It is not packaged or deployed until external effects land.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
 
