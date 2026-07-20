@@ -10,13 +10,15 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
+use retro_deck_audio::{SampleRate, Volume};
 use retro_deck_config::{Catalog, MAXIMUM_CATALOG_BYTES, MAXIMUM_PALETTE_BYTES, Palette};
 use retro_deck_dashboard::{
     Action, AssetPathError, Brightness, ControllerGuard, CreditsCrawl, DashboardAssetPaths,
-    DashboardAssets, DashboardAssetsError, DashboardFrame, DashboardModel, Intent, Keymap,
+    DashboardAssets, DashboardAssetsError, DashboardFrame, DashboardModel, Intent, Keymap, MenuCue,
     NetworkView, RenderError, Screen, SettingChange, SettingsView, TouchCommitter, VolumeState,
-    controller_action,
+    controller_action, menu_notes,
 };
+use retro_deck_platform::audio::{AudioGate, ToneCueWorker, ToneWorkerReport};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
 use retro_deck_platform::file::{BoundedReadError, read_regular_bounded};
 use retro_deck_platform::input::{ControllerDevices, InputError, InputEvent};
@@ -29,6 +31,7 @@ const IDLE_POLL: Duration = Duration::from_millis(250);
 const BUSY_RETRY: Duration = Duration::from_millis(8);
 const CREDITS_FRAME: Duration = Duration::from_millis(40);
 const CONTROLLER_SCAN: Duration = Duration::from_secs(1);
+const CUE_SAMPLE_RATE: u32 = 44_100;
 
 fn main() -> ExitCode {
     let command = match parse_arguments(env::args_os().skip(1)) {
@@ -207,6 +210,8 @@ struct DashboardRuntime {
     frame: DashboardFrame,
     touch: TouchCommitter,
     controller_guard: ControllerGuard,
+    audio: Option<ToneCueWorker<MenuCue>>,
+    audio_gate: AudioGate,
     started_at: Instant,
     credits_started_at: Instant,
     last_credits_frame: Instant,
@@ -237,8 +242,11 @@ impl DashboardRuntime {
         let presentation = WaylandPresentation::connect_widget(source_dimensions)
             .map_err(RuntimeError::Presentation)?;
         let controllers = ControllerDevices::discover().map_err(RuntimeError::Input)?;
+        let volume = Volume::new(model.volume().percent()).ok_or(RuntimeError::InvalidDefaults)?;
+        let audio_gate = desired_audio_gate(presentation.visible(), volume.muted());
+        let audio = start_audio(volume, audio_gate);
         eprintln!(
-            "{APPLICATION}: native navigation runtime started with {} controller(s); external effects remain disabled",
+            "{APPLICATION}: native navigation runtime started with {} controller(s); launch and persistence effects remain disabled",
             controllers.controller_count()
         );
         let now = Instant::now();
@@ -254,6 +262,8 @@ impl DashboardRuntime {
             frame,
             touch: TouchCommitter::default(),
             controller_guard: ControllerGuard::new(),
+            audio,
+            audio_gate,
             started_at: now,
             credits_started_at: now,
             last_credits_frame: now,
@@ -264,10 +274,18 @@ impl DashboardRuntime {
     }
 
     fn run(mut self) -> Result<(), RuntimeError> {
+        let result = self.event_loop();
+        self.finish_audio();
+        result
+    }
+
+    fn event_loop(&mut self) -> Result<(), RuntimeError> {
         while !self.shutdown.requested() && !self.presentation.shutdown_requested() {
             self.presentation
                 .dispatch_nonblocking()
                 .map_err(RuntimeError::Presentation)?;
+            self.sync_audio_gate();
+            self.report_audio_errors();
             if self.shutdown.requested() || self.presentation.shutdown_requested() {
                 break;
             }
@@ -384,8 +402,56 @@ impl DashboardRuntime {
             report_disabled_intent(intent);
         }
         if let Some(setting) = transition.setting {
+            self.apply_setting(setting);
             report_unpersisted_setting(setting);
         }
+        self.sync_audio_gate();
+        if let (Some(audio), Some(cue)) = (&self.audio, transition.cue) {
+            let _outcome = audio.try_play(cue);
+        }
+    }
+
+    fn apply_setting(&self, setting: SettingChange) {
+        let SettingChange::Volume(percent) = setting else {
+            return;
+        };
+        let Some(volume) = Volume::new(percent) else {
+            eprintln!("{APPLICATION}: rejected invalid in-memory audio volume {percent}");
+            return;
+        };
+        if let Some(audio) = &self.audio {
+            audio.set_volume(volume);
+        }
+    }
+
+    fn sync_audio_gate(&mut self) {
+        let requested =
+            desired_audio_gate(self.presentation.visible(), self.model.volume().is_muted());
+        if requested == self.audio_gate {
+            return;
+        }
+        self.audio_gate = requested;
+        if let Some(audio) = &self.audio {
+            audio.set_gate(requested);
+        }
+    }
+
+    fn report_audio_errors(&self) {
+        let Some(audio) = &self.audio else {
+            return;
+        };
+        for error in audio.take_errors() {
+            eprintln!("{APPLICATION}: menu sound unavailable for now: {error}");
+        }
+    }
+
+    fn finish_audio(&mut self) {
+        self.report_audio_errors();
+        let Some(audio) = self.audio.take() else {
+            return;
+        };
+        audio.set_gate(AudioGate::Hidden);
+        report_audio_shutdown(audio.shutdown());
     }
 
     fn schedule_credits_frame(&mut self) {
@@ -451,6 +517,45 @@ impl DashboardRuntime {
 
     fn monotonic_ms(&self) -> u64 {
         elapsed_milliseconds(self.started_at)
+    }
+}
+
+fn start_audio(volume: Volume, gate: AudioGate) -> Option<ToneCueWorker<MenuCue>> {
+    let Some(rate) = SampleRate::new(CUE_SAMPLE_RATE) else {
+        eprintln!("{APPLICATION}: internal cue sample rate is invalid; menu sound disabled");
+        return None;
+    };
+    match ToneCueWorker::spawn(rate, volume, menu_notes) {
+        Ok(worker) => {
+            worker.set_gate(gate);
+            Some(worker)
+        }
+        Err(error) => {
+            eprintln!("{APPLICATION}: cannot start audio worker: {error}; menu sound disabled");
+            None
+        }
+    }
+}
+
+const fn desired_audio_gate(visible: bool, muted: bool) -> AudioGate {
+    if !visible {
+        AudioGate::Hidden
+    } else if muted {
+        AudioGate::Muted
+    } else {
+        AudioGate::Active
+    }
+}
+
+fn report_audio_shutdown(report: ToneWorkerReport) {
+    if report.panicked {
+        eprintln!("{APPLICATION}: audio worker panicked during shutdown");
+    }
+    if report.errors != 0 || report.dropped_errors != 0 {
+        eprintln!(
+            "{APPLICATION}: audio worker stopped with {} error(s), including {} unreported",
+            report.errors, report.dropped_errors
+        );
     }
 }
 
@@ -551,7 +656,9 @@ mod tests {
     use std::ffi::OsString;
     use std::path::Path;
 
-    use super::{Command, UsageError, parse_arguments};
+    use retro_deck_platform::audio::AudioGate;
+
+    use super::{Command, UsageError, desired_audio_gate, parse_arguments};
 
     fn parse(arguments: &[&str]) -> Result<Command, UsageError> {
         parse_arguments(arguments.iter().map(OsString::from))
@@ -581,5 +688,13 @@ mod tests {
         assert!(parse(&["--manifest", "relative"]).is_err());
         assert!(parse(&["--unknown", "/tmp/value"]).is_err());
         assert!(parse(&["--manifest", "/a", "--manifest", "/b"]).is_err());
+    }
+
+    #[test]
+    fn audio_gate_releases_hidden_and_muted_dashboard_sound() {
+        assert_eq!(desired_audio_gate(true, false), AudioGate::Active);
+        assert_eq!(desired_audio_gate(true, true), AudioGate::Muted);
+        assert_eq!(desired_audio_gate(false, false), AudioGate::Hidden);
+        assert_eq!(desired_audio_gate(false, true), AudioGate::Hidden);
     }
 }
