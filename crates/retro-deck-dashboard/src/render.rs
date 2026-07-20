@@ -5,6 +5,7 @@ use std::{fmt, fmt::Write as _};
 use retro_deck_config::{CatalogEntry, CatalogSystem, Palette, PaletteRole, Rgb};
 use retro_deck_ui::{Canvas, Rect, TextBuffer, fit_text_scale, rgb888_to_rgb565};
 
+use crate::credits::{CreditsCrawl, CreditsLayout, draw_credits};
 use crate::settings::{SettingsLayout, SettingsView, draw_settings};
 use crate::{Action, DashboardModel, Keymap, Status};
 
@@ -252,6 +253,8 @@ pub enum RenderedScreen {
     Menu,
     /// Device and application settings controls.
     Settings,
+    /// License and attribution crawl.
+    Credits,
 }
 
 /// Fixed-size dashboard frame plus exact hit-test geometry.
@@ -302,6 +305,22 @@ impl DashboardFrame {
         Ok(frame)
     }
 
+    /// Allocate and render software credits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] if the fixed frame allocation fails.
+    pub fn render_credits(
+        crawl: &CreditsCrawl,
+        palette: &Palette,
+        reduced_motion: bool,
+        elapsed_ms: u64,
+    ) -> Result<Self, RenderError> {
+        let mut frame = Self::allocate(palette)?;
+        frame.redraw_credits(crawl, palette, reduced_motion, elapsed_ms);
+        Ok(frame)
+    }
+
     /// Redraw in the existing allocation without optional artwork.
     pub fn redraw_menu(&mut self, model: &DashboardModel, palette: &Palette) {
         self.redraw_menu_with_artwork(model, palette, &NoArtwork);
@@ -335,6 +354,21 @@ impl DashboardFrame {
         self.screen = RenderedScreen::Settings;
     }
 
+    /// Redraw software credits in the existing frame allocation.
+    pub fn redraw_credits(
+        &mut self,
+        crawl: &CreditsCrawl,
+        palette: &Palette,
+        reduced_motion: bool,
+        elapsed_ms: u64,
+    ) {
+        let Some(mut canvas) = Canvas::new(&mut self.pixels, CANVAS_WIDTH, CANVAS_HEIGHT) else {
+            return;
+        };
+        let _ = draw_credits(&mut canvas, crawl, palette, reduced_motion, elapsed_ms);
+        self.screen = RenderedScreen::Credits;
+    }
+
     /// Borrow tightly packed native-endian RGB565 pixels.
     #[must_use]
     #[allow(
@@ -362,7 +396,7 @@ impl DashboardFrame {
     pub const fn menu_layout(&self) -> Option<&MenuLayout> {
         match self.screen {
             RenderedScreen::Menu => Some(&self.menu_layout),
-            RenderedScreen::Settings => None,
+            RenderedScreen::Settings | RenderedScreen::Credits => None,
         }
     }
 
@@ -371,7 +405,16 @@ impl DashboardFrame {
     pub const fn settings_layout(&self) -> Option<SettingsLayout> {
         match self.screen {
             RenderedScreen::Settings => Some(SettingsLayout::fixed()),
-            RenderedScreen::Menu => None,
+            RenderedScreen::Menu | RenderedScreen::Credits => None,
+        }
+    }
+
+    /// Credits geometry when the current frame contains attributions.
+    #[must_use]
+    pub const fn credits_layout(&self) -> Option<CreditsLayout> {
+        match self.screen {
+            RenderedScreen::Credits => Some(CreditsLayout::fixed()),
+            RenderedScreen::Menu | RenderedScreen::Settings => None,
         }
     }
 
@@ -1033,11 +1076,14 @@ mod tests {
         ArtworkProvider, CANVAS_HEIGHT, CANVAS_WIDTH, Cover, CoverError, DashboardFrame,
         EntryButton, MenuLayout, PIXELS, draw_cover_square, palette_pixel,
     };
-    use crate::{Action, Brightness, DashboardCatalog, DashboardModel, Keymap, VolumeState};
-    use retro_deck_config::{Catalog, Palette, PaletteRole};
+    use crate::{
+        Action, Brightness, CreditsCrawl, DashboardCatalog, DashboardModel, Keymap, VolumeState,
+    };
+    use retro_deck_config::{Catalog, Credits, Palette, PaletteRole};
     use retro_deck_ui::{Canvas, Rect};
 
     const DEPLOYED_CATALOG: &[u8] = include_bytes!("../../../deploy/menu/games.tsv");
+    const DEPLOYED_CREDITS: &[u8] = include_bytes!("../../../deploy/menu/credits.tsv");
 
     fn model() -> Option<DashboardModel> {
         let catalog = Catalog::parse(DEPLOYED_CATALOG).ok()?;
@@ -1141,6 +1187,23 @@ mod tests {
         assert_eq!(frame.rendered_screen(), RenderedScreen::Settings);
         assert_eq!(frame.pixels.as_ptr(), allocation);
         assert_eq!(frame.pixels.capacity(), capacity);
+
+        let _ = model.apply(Action::Back);
+        let Some(credits) = Credits::parse(DEPLOYED_CREDITS).ok() else {
+            return;
+        };
+        let crawl = CreditsCrawl::from_credits(&credits);
+        let _ = model.apply(Action::ShowCredits);
+        frame.redraw_credits(&crawl, &palette, false, 2_000);
+        assert_eq!(frame.rendered_screen(), RenderedScreen::Credits);
+        assert_eq!(frame.pixels.as_ptr(), allocation);
+        assert_eq!(frame.pixels.capacity(), capacity);
+        assert_eq!(
+            frame
+                .credits_layout()
+                .and_then(|layout| layout.action_at(1_240, 40)),
+            Some(Action::Back)
+        );
 
         let _ = model.apply(Action::Back);
         frame.redraw_menu(&model, &palette);

@@ -166,6 +166,10 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   renders case-sensitive SSID, WLAN, WireGuard, selector, login-shell, volume,
   brightness, and keymap values from a bounded read-only view. Its hit targets
   return typed actions only; no network or device mutation occurs in rendering.
+- The bounded Rust credits schema rejects malformed, duplicate, empty, or
+  excessive manifests. Its intro, perspective crawl, and reduced-motion views
+  are pixel-identical to the C++ references while sampling the shared font
+  directly instead of retaining per-line raster masks.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
 

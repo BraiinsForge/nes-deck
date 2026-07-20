@@ -8,15 +8,16 @@ use std::io::{self, BufWriter, Write as _};
 use std::path::Path;
 use std::process::ExitCode;
 
-use retro_deck_config::{Catalog, Palette};
+use retro_deck_config::{Catalog, Credits, Palette};
 use retro_deck_dashboard::{
-    Action, Brightness, CANVAS_HEIGHT, CANVAS_WIDTH, DashboardCatalog, DashboardFrame,
-    DashboardModel, Keymap, NetworkView, SettingsView, VolumeState,
+    Action, Brightness, CANVAS_HEIGHT, CANVAS_WIDTH, CreditsCrawl, DashboardCatalog,
+    DashboardFrame, DashboardModel, Keymap, NetworkView, SettingsView, VolumeState,
 };
 
 const APPLICATION: &str = "render-dashboard";
 const CATALOG: &[u8] = include_bytes!("../../../../deploy/menu/games.tsv");
 const PALETTE: &[u8] = include_bytes!("../../../../deploy/menu/palette.tsv");
+const CREDITS: &[u8] = include_bytes!("../../../../deploy/menu/credits.tsv");
 
 fn main() -> ExitCode {
     let mut arguments = env::args_os();
@@ -36,6 +37,9 @@ fn main() -> ExitCode {
         None => (PreviewScreen::Menu, first),
         Some(output) if first == "menu" => (PreviewScreen::Menu, output),
         Some(output) if first == "settings" => (PreviewScreen::Settings, output),
+        Some(output) if first == "credits-intro" => (PreviewScreen::CreditsIntro, output),
+        Some(output) if first == "credits-crawl" => (PreviewScreen::CreditsCrawl, output),
+        Some(output) if first == "credits-static" => (PreviewScreen::CreditsStatic, output),
         Some(_) => {
             print_usage(Path::new(&program));
             return ExitCode::from(2);
@@ -52,13 +56,19 @@ fn main() -> ExitCode {
 }
 
 fn print_usage(program: &Path) {
-    eprintln!("Usage: {} [menu|settings] OUTPUT.ppm", program.display());
+    eprintln!(
+        "Usage: {} [menu|settings|credits-intro|credits-crawl|credits-static] OUTPUT.ppm",
+        program.display()
+    );
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PreviewScreen {
     Menu,
     Settings,
+    CreditsIntro,
+    CreditsCrawl,
+    CreditsStatic,
 }
 
 fn render_preview(output: &Path, screen: PreviewScreen) -> Result<(), Box<dyn Error>> {
@@ -71,6 +81,8 @@ fn render_preview(output: &Path, screen: PreviewScreen) -> Result<(), Box<dyn Er
         Keymap::Us,
     );
     let palette = Palette::parse_tsv(PALETTE)?;
+    let credits = Credits::parse(CREDITS)?;
+    let credits = CreditsCrawl::from_credits(&credits);
     let frame = match screen {
         PreviewScreen::Menu => DashboardFrame::render_menu(&model, &palette)?,
         PreviewScreen::Settings => {
@@ -83,6 +95,15 @@ fn render_preview(output: &Path, screen: PreviewScreen) -> Result<(), Box<dyn Er
                     "/BIN/ASH",
                 ),
             )?
+        }
+        PreviewScreen::CreditsIntro => {
+            DashboardFrame::render_credits(&credits, &palette, false, 2_000)?
+        }
+        PreviewScreen::CreditsCrawl => {
+            DashboardFrame::render_credits(&credits, &palette, false, 20_000)?
+        }
+        PreviewScreen::CreditsStatic => {
+            DashboardFrame::render_credits(&credits, &palette, true, 0)?
         }
     };
     write_ppm(output, frame.pixels())?;
