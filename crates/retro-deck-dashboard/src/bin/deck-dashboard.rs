@@ -15,10 +15,10 @@ use retro_deck_config::{Catalog, MAXIMUM_CATALOG_BYTES, MAXIMUM_PALETTE_BYTES, P
 use retro_deck_dashboard::{
     Action, ArtworkStore, AssetPathError, BrightnessDevicePaths, BrightnessPathError,
     ControllerGuard, CreditsCrawl, DashboardAssetPaths, DashboardAssets, DashboardAssetsError,
-    DashboardFrame, DashboardModel, DashboardPreferences, MenuCue, NetworkView, PreferenceLoad,
-    PreferencePathError, PreferencePaths, PreferenceSubmit, PreferenceWorker,
-    PreferenceWorkerReport, RenderError, Screen, SettingChange, SettingsView, TouchCommitter,
-    WifiAction, WifiProfileWriter, WifiSession, controller_action, menu_notes,
+    DashboardFrame, DashboardModel, DashboardPreferences, MenuCue, NetworkStatus,
+    NetworkStatusWorker, PreferenceLoad, PreferencePathError, PreferencePaths, PreferenceSubmit,
+    PreferenceWorker, PreferenceWorkerReport, RenderError, Screen, SettingChange, SettingsView,
+    TouchCommitter, WifiAction, WifiProfileWriter, WifiSession, controller_action, menu_notes,
 };
 use retro_deck_platform::audio::{AudioGate, ToneCueWorker, ToneWorkerReport};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
@@ -29,10 +29,13 @@ use retro_deck_platform::wayland::{PresentOutcome, WaylandPresentation, WaylandP
 
 #[path = "deck_dashboard/launch_runtime.rs"]
 mod launch_runtime;
+#[path = "deck_dashboard/network_runtime.rs"]
+mod network_runtime;
 #[path = "deck_dashboard/wifi_runtime.rs"]
 mod wifi_runtime;
 
 use launch_runtime::PendingLaunch;
+use network_runtime::start_network_worker;
 use wifi_runtime::{start_wifi_writer, wifi_controller_action};
 
 const APPLICATION: &str = "deck-dashboard";
@@ -233,6 +236,9 @@ struct DashboardRuntime {
     preferences: Option<PreferenceWorker>,
     wifi_session: WifiSession,
     wifi_writer: Option<WifiProfileWriter>,
+    network_status: NetworkStatus,
+    network_worker: Option<NetworkStatusWorker>,
+    network_failure_reported: bool,
     pending_launch: Option<PendingLaunch>,
     started_at: Instant,
     credits_started_at: Instant,
@@ -279,6 +285,7 @@ impl DashboardRuntime {
         let audio_gate = desired_audio_gate(presentation.visible(), volume.muted());
         let audio = start_audio(volume, audio_gate);
         let wifi_writer = start_wifi_writer();
+        let network_worker = start_network_worker();
         eprintln!(
             "{APPLICATION}: native navigation runtime started with {} controller(s)",
             controllers.controller_count()
@@ -303,6 +310,9 @@ impl DashboardRuntime {
             preferences: preference_worker,
             wifi_session: WifiSession::new(),
             wifi_writer,
+            network_status: NetworkStatus::unavailable(),
+            network_worker,
+            network_failure_reported: false,
             pending_launch: None,
             started_at: now,
             credits_started_at: now,
@@ -315,6 +325,7 @@ impl DashboardRuntime {
 
     fn run(mut self) -> Result<(), RuntimeError> {
         let result = self.event_loop();
+        self.finish_network_worker();
         self.finish_wifi_writer();
         self.finish_audio();
         self.finish_preferences();
@@ -330,6 +341,7 @@ impl DashboardRuntime {
             self.report_audio_errors();
             self.report_preference_errors();
             self.service_wifi_writer();
+            self.service_network_status();
             if self.shutdown.requested() || self.presentation.shutdown_requested() {
                 break;
             }
@@ -609,7 +621,7 @@ impl DashboardRuntime {
     fn redraw(&mut self) {
         if let Some(editor) = self.wifi_session.editor() {
             self.frame
-                .redraw_wifi(editor, NetworkView::unavailable(), &self.palette);
+                .redraw_wifi(editor, self.network_status.view(), &self.palette);
             return;
         }
         match self.model.screen() {
@@ -620,7 +632,7 @@ impl DashboardRuntime {
             Screen::Settings => self.frame.redraw_settings(
                 &self.model,
                 &self.palette,
-                SettingsView::new(NetworkView::unavailable(), "/BIN/ASH"),
+                SettingsView::new(self.network_status.view(), "/BIN/ASH"),
             ),
             Screen::Credits => self.frame.redraw_credits(
                 &self.credits,
