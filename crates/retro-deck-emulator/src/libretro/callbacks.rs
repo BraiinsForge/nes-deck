@@ -15,10 +15,15 @@ use std::ptr;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use retro_deck_platform::{audio::PcmStreamWorker, input::KeyboardState};
+use retro_deck_platform::{
+    audio::PcmStreamWorker,
+    input::KeyboardState,
+    wayland::{PresentOutcome, WaylandPresentation},
+};
 
 use super::audio::{AudioBatchError, stereo_frames};
 use super::environment::{Environment, EnvironmentError};
+use super::video::{VideoCallbackError, VideoFrameLayout};
 use super::{
     JoypadState, LibretroCore, PixelFormat, abi, joypad_from_keyboard, medium_raw_key_for_retro,
 };
@@ -38,6 +43,8 @@ struct CallbackState {
     keyboard: KeyboardState,
     audio: Option<PcmStreamWorker>,
     audio_batch_error: Option<AudioBatchError>,
+    presentation: Option<WaylandPresentation>,
+    video_error: Option<VideoCallbackError>,
 }
 
 /// Exclusive binding between one core session and its context-free callbacks.
@@ -73,6 +80,8 @@ impl CallbackBinding {
                 keyboard: KeyboardState::default(),
                 audio: None,
                 audio_batch_error: None,
+                presentation: None,
+                video_error: None,
             }),
             not_send_or_sync: PhantomData,
         };
@@ -136,6 +145,14 @@ impl CallbackBinding {
         audio_sample_batch_callback
     }
 
+    #[allow(
+        clippy::unused_self,
+        reason = "requiring a live binding to obtain callbacks documents the ownership invariant"
+    )]
+    pub(super) const fn video_refresh_callback(&self) -> abi::VideoRefreshCallback {
+        video_refresh_callback
+    }
+
     /// Attach the sole PCM worker, returning it unchanged if one is present.
     #[must_use]
     pub(super) fn attach_audio_worker(
@@ -159,6 +176,35 @@ impl CallbackBinding {
     /// Take the first malformed batch observed since the previous call.
     pub(super) fn take_audio_batch_error(&mut self) -> Option<AudioBatchError> {
         self.state.audio_batch_error.take()
+    }
+
+    /// Attach the sole presentation, returning it unchanged if one is present.
+    #[must_use]
+    pub(super) fn attach_presentation(
+        &mut self,
+        presentation: WaylandPresentation,
+    ) -> Option<WaylandPresentation> {
+        if self.state.presentation.is_some() {
+            Some(presentation)
+        } else {
+            self.state.presentation = Some(presentation);
+            None
+        }
+    }
+
+    /// Borrow the active presentation for polling and shutdown checks.
+    pub(super) const fn presentation(&self) -> Option<&WaylandPresentation> {
+        self.state.presentation.as_ref()
+    }
+
+    /// Borrow the active presentation for nonblocking event dispatch.
+    pub(super) const fn presentation_mut(&mut self) -> Option<&mut WaylandPresentation> {
+        self.state.presentation.as_mut()
+    }
+
+    /// Take the first frame or presentation failure since the previous call.
+    pub(super) fn take_video_error(&mut self) -> Option<VideoCallbackError> {
+        self.state.video_error.take()
     }
 
     pub(super) fn set_input(
@@ -230,6 +276,58 @@ unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) ->
 }
 
 const unsafe extern "C" fn input_poll_callback() {}
+
+unsafe extern "C" fn video_refresh_callback(
+    data: *const c_void,
+    width: c_uint,
+    height: c_uint,
+    pitch_bytes: usize,
+) {
+    if data.is_null() {
+        return;
+    }
+    CALLBACK_STATE.with(|slot| {
+        // SAFETY: A non-null slot points to the binding's live boxed state,
+        // and `CallbackBinding` cannot leave the installing thread.
+        let Some(state) = (unsafe { slot.get().as_mut() }) else {
+            return;
+        };
+        let layout = match VideoFrameLayout::new(
+            state.environment.pixel_format(),
+            width,
+            height,
+            pitch_bytes,
+        ) {
+            Ok(layout) => layout,
+            Err(error) => {
+                record_video_error(state, VideoCallbackError::Frame(error));
+                return;
+            }
+        };
+        // SAFETY: The trusted core owns the readable callback extent. The
+        // checked layout rejects unaligned and excessive borrows.
+        let frame = match unsafe { layout.frame(data) } {
+            Ok(frame) => frame,
+            Err(error) => {
+                record_video_error(state, VideoCallbackError::Frame(error));
+                return;
+            }
+        };
+        let Some(presentation) = &mut state.presentation else {
+            return;
+        };
+        match presentation.present(frame) {
+            Ok(PresentOutcome::Submitted | PresentOutcome::Busy) => {}
+            Err(error) => record_video_error(state, VideoCallbackError::Presentation(error)),
+        }
+    });
+}
+
+fn record_video_error(state: &mut CallbackState, error: VideoCallbackError) {
+    if state.video_error.is_none() {
+        state.video_error = Some(error);
+    }
+}
 
 unsafe extern "C" fn audio_sample_callback(left: i16, right: i16) {
     CALLBACK_STATE.with(|slot| {
@@ -519,5 +617,46 @@ mod tests {
         let worker = binding.take_audio_worker().expect("attached PCM worker");
         assert_eq!(worker.stats().inactive_frames, 3);
         assert!(!worker.shutdown().panicked);
+    }
+
+    #[test]
+    fn video_callbacks_skip_duplicates_and_record_the_first_invalid_frame() {
+        let _test_session = serialize_sessions();
+        let mut binding = CallbackBinding::install(LibretroCore::Fceumm, Path::new("/roms/nes"))
+            .expect("callback binding");
+        assert!(binding.presentation().is_none());
+        assert!(binding.presentation_mut().is_none());
+        let callback = binding.video_refresh_callback();
+
+        // SAFETY: Null denotes a duplicate frame and is never dereferenced.
+        unsafe { callback(ptr::null(), c_uint::MAX, c_uint::MAX, usize::MAX) };
+        assert!(binding.take_video_error().is_none());
+
+        let pixels = [0_u32; 4];
+        // SAFETY: `pixels` is an aligned packed 2-by-2 XRGB8888 frame.
+        unsafe { callback(pixels.as_ptr().cast(), 2, 2, 8) };
+        assert!(binding.take_video_error().is_none());
+
+        // SAFETY: The zero width is rejected before pixel memory is read.
+        unsafe { callback(pixels.as_ptr().cast(), 0, 2, 8) };
+        let unaligned = pixels.as_ptr().cast::<u8>().wrapping_add(1).cast();
+        // SAFETY: The unaligned pointer is rejected before dereference, and
+        // the earlier error remains the diagnostic until it is taken.
+        unsafe { callback(unaligned, 2, 2, 8) };
+        assert!(matches!(
+            binding.take_video_error(),
+            Some(VideoCallbackError::Frame(
+                super::super::video::VideoFrameError::InvalidDimensions
+            ))
+        ));
+
+        // SAFETY: The unaligned pointer is rejected before dereference.
+        unsafe { callback(unaligned, 2, 2, 8) };
+        assert!(matches!(
+            binding.take_video_error(),
+            Some(VideoCallbackError::Frame(
+                super::super::video::VideoFrameError::UnalignedData
+            ))
+        ));
     }
 }

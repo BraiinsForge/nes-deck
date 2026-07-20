@@ -10,7 +10,10 @@ use std::ffi::c_void;
 use std::fmt;
 use std::slice;
 
-use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
+use retro_deck_platform::{
+    display::{Dimensions, DisplayError, Frame},
+    wayland::WaylandPresentationError,
+};
 
 use super::PixelFormat;
 
@@ -146,6 +149,33 @@ impl Error for VideoFrameError {
             | Self::TooLarge
             | Self::NullData
             | Self::UnalignedData => None,
+        }
+    }
+}
+
+/// Failure while validating or presenting one core video callback.
+#[derive(Debug)]
+pub(super) enum VideoCallbackError {
+    /// Core-owned frame metadata or memory was invalid.
+    Frame(VideoFrameError),
+    /// The fixed Wayland presentation path failed.
+    Presentation(WaylandPresentationError),
+}
+
+impl fmt::Display for VideoCallbackError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Frame(source) => source.fmt(formatter),
+            Self::Presentation(source) => source.fmt(formatter),
+        }
+    }
+}
+
+impl Error for VideoCallbackError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Frame(source) => Some(source),
+            Self::Presentation(source) => Some(source),
         }
     }
 }
