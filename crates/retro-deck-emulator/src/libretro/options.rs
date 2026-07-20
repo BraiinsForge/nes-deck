@@ -28,7 +28,7 @@ const FUSE_OPTIONS: &[CoreOption] = &[
     CoreOption::new("fuse_joypad_right", "<none>"),
     CoreOption::new("fuse_joypad_up", "<none>"),
     CoreOption::new("fuse_joypad_down", "<none>"),
-    CoreOption::new("fuse_joypad_start", "Enter"),
+    CoreOption::new("fuse_joypad_start", "<none>"),
     CoreOption::new("fuse_joypad_a", "<none>"),
     CoreOption::new("fuse_joypad_b", "<none>"),
     CoreOption::new("fuse_joypad_x", "<none>"),
@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn fuse_loads_tapes_without_stealing_joystick_buttons() {
+    fn fuse_loads_tapes_without_duplicate_button_keys() {
         assert_eq!(
             LibretroCore::Fuse.option("fuse_machine"),
             Some("Spectrum 48K")
@@ -131,7 +131,7 @@ mod tests {
         assert_eq!(LibretroCore::Fuse.option("fuse_joypad_b"), Some("<none>"));
         assert_eq!(
             LibretroCore::Fuse.option("fuse_joypad_start"),
-            Some("Enter")
+            Some("<none>")
         );
         assert_eq!(LibretroCore::Fuse.options().len(), 28);
     }

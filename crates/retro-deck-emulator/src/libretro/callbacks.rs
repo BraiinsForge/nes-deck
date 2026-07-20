@@ -27,7 +27,8 @@ use super::audio::{AudioBatchError, stereo_frames};
 use super::environment::{Environment, EnvironmentError};
 use super::video::{VideoCallbackError, VideoFrameLayout};
 use super::{
-    JoypadState, LibretroCore, PixelFormat, abi, joypad_from_keyboard, medium_raw_key_for_retro,
+    JoypadButton, JoypadState, LibretroCore, PixelFormat, abi, joypad_from_keyboard,
+    zx_keyboard_key_pressed,
 };
 
 static SESSION_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -406,16 +407,18 @@ unsafe extern "C" fn input_state_callback(
             if !port_device.is_keyboard() || index != 0 {
                 return 0;
             }
-            return medium_raw_key_for_retro(identifier)
-                .is_some_and(|key| state.keyboard.contains(key))
-                .into();
+            return zx_keyboard_key_pressed(identifier, state.keyboard, state.player_one).into();
         }
         if device != abi::DEVICE_JOYPAD || !port_device.is_joypad() || index != 0 {
             return 0;
         }
-        let joypad = match port {
-            0 => state.player_one,
-            1 => state.player_two,
+        let joypad = match (state.core, port) {
+            (LibretroCore::Fuse, 0) => state
+                .player_one
+                .without(JoypadButton::B)
+                .without(JoypadButton::Select),
+            (_, 0) => state.player_one,
+            (_, 1) => state.player_two,
             _ => return 0,
         };
         i16::try_from(joypad.value(identifier)).unwrap_or_default()
@@ -557,7 +560,13 @@ mod tests {
             .expect("first callback binding");
         let letter_a = MediumRawKey::new(30).expect("A key code");
         binding.set_input(
-            JoypadState::from_buttons(ButtonSet::empty().with(Button::A, true)),
+            JoypadState::from_buttons(
+                ButtonSet::empty()
+                    .with(Button::A, true)
+                    .with(Button::B, true)
+                    .with(Button::Start, true)
+                    .with(Button::Select, true),
+            ),
             JoypadState::from_buttons(ButtonSet::empty().with(Button::B, true)),
             KeyboardState::empty().with(letter_a, true),
         );
@@ -567,6 +576,14 @@ mod tests {
         // SAFETY: Input callbacks have no pointer parameters.
         assert_eq!(unsafe { callback(2, abi::DEVICE_KEYBOARD, 0, 282) }, 0);
         // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(2, abi::DEVICE_KEYBOARD, 0, 32) }, 1);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(2, abi::DEVICE_KEYBOARD, 0, 304) }, 1);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(2, abi::DEVICE_KEYBOARD, 0, 13) }, 1);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(2, abi::DEVICE_KEYBOARD, 0, 306) }, 1);
+        // SAFETY: Input callbacks have no pointer parameters.
         assert_eq!(unsafe { callback(0, abi::DEVICE_KEYBOARD, 0, 97) }, 0);
         // SAFETY: Input callbacks have no pointer parameters.
         assert_eq!(unsafe { callback(2, abi::DEVICE_JOYPAD, 0, 8) }, 0);
@@ -575,6 +592,10 @@ mod tests {
             unsafe { callback(0, abi::device_subclass(abi::DEVICE_JOYPAD, 1), 0, 8) },
             1
         );
+        // SAFETY: Fuse must not also interpret B as joystick Up.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_JOYPAD, 0, 0) }, 0);
+        // SAFETY: Fuse must not use Select to open its keyboard overlay.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_JOYPAD, 0, 2) }, 0);
         // SAFETY: Input callbacks have no pointer parameters.
         assert_eq!(unsafe { callback(1, abi::DEVICE_JOYPAD, 0, 0) }, 1);
         // SAFETY: The poll callback has no parameters or side effects.

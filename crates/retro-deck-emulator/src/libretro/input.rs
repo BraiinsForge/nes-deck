@@ -115,6 +115,12 @@ impl JoypadState {
     pub const fn merged(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
+
+    /// Return a snapshot with one supported button released.
+    #[must_use]
+    pub const fn without(self, button: JoypadButton) -> Self {
+        Self(self.0 & !(1_u16 << button.id()))
+    }
 }
 
 const fn projected_bit(buttons: ButtonSet, button: JoypadButton) -> u16 {
@@ -186,5 +192,18 @@ mod tests {
         let merged = first.merged(second);
         assert!(merged.contains(JoypadButton::A));
         assert!(merged.contains(JoypadButton::B));
+    }
+
+    #[test]
+    fn removing_a_button_updates_masks_and_individual_queries() {
+        let original = JoypadState::from_buttons(
+            ButtonSet::empty()
+                .with(Button::A, true)
+                .with(Button::B, true),
+        );
+        let filtered = original.without(JoypadButton::B);
+        assert!(filtered.contains(JoypadButton::A));
+        assert!(!filtered.contains(JoypadButton::B));
+        assert_eq!(filtered.value(JOYPAD_MASK_ID), 1 << JoypadButton::A.id());
     }
 }

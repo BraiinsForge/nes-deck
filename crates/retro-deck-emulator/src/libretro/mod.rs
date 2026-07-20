@@ -18,7 +18,7 @@ pub use callbacks::CallbackBindingError;
 pub use content::{Content, ContentError};
 pub use environment::{EnvironmentError, PixelFormat};
 pub use input::{JOYPAD_MASK_ID, JoypadButton, JoypadState};
-pub use keyboard::{joypad_from_keyboard, medium_raw_key_for_retro};
+pub use keyboard::{joypad_from_keyboard, medium_raw_key_for_retro, zx_keyboard_key_pressed};
 pub use options::CoreOption;
 pub use profile::{InputPortDevice, LibretroCore, MAXIMUM_ROM_BYTES, MemoryFile, MemoryKind};
 pub use save::{LoadOutcome, MAXIMUM_SAVE_BYTES, SaveError, SaveOutcome, SaveStore};

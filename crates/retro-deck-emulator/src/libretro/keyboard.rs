@@ -2,7 +2,12 @@
 
 use retro_deck_platform::input::{Button, ButtonSet, KeyboardState, MediumRawKey};
 
-use super::JoypadState;
+use super::{JoypadButton, JoypadState};
+
+const RETRO_KEY_ENTER: u32 = 13;
+const RETRO_KEY_SPACE: u32 = 32;
+const RETRO_KEY_LEFT_SHIFT: u32 = 304;
+const RETRO_KEY_LEFT_CONTROL: u32 = 306;
 
 const KEY_1: u8 = 2;
 const KEY_2: u8 = 3;
@@ -144,6 +149,30 @@ pub const fn medium_raw_key_for_retro(retro_key: u32) -> Option<MediumRawKey> {
     MediumRawKey::new(code)
 }
 
+/// Whether the physical keyboard or Player 1 presses one Fuse keyboard key.
+///
+/// The controller projection gives keyboard-driven Spectrum games four useful
+/// keys without requiring the core's on-screen keyboard overlay.
+#[must_use]
+pub const fn zx_keyboard_key_pressed(
+    retro_key: u32,
+    keyboard: KeyboardState,
+    player_one: JoypadState,
+) -> bool {
+    let physical = match medium_raw_key_for_retro(retro_key) {
+        Some(key) => keyboard.contains(key),
+        None => false,
+    };
+    physical
+        || match retro_key {
+            RETRO_KEY_SPACE => player_one.contains(JoypadButton::A),
+            RETRO_KEY_LEFT_SHIFT => player_one.contains(JoypadButton::B),
+            RETRO_KEY_ENTER => player_one.contains(JoypadButton::Start),
+            RETRO_KEY_LEFT_CONTROL => player_one.contains(JoypadButton::Select),
+            _ => false,
+        }
+}
+
 const fn pressed(keyboard: KeyboardState, code: u8) -> bool {
     let Some(key) = MediumRawKey::new(code) else {
         return false;
@@ -228,5 +257,47 @@ mod tests {
         assert_eq!(medium_raw_key_for_retro(9), None);
         assert_eq!(medium_raw_key_for_retro(282), None);
         assert_eq!(medium_raw_key_for_retro(u32::MAX), None);
+    }
+
+    #[test]
+    fn zx_player_one_buttons_supply_the_promised_keyboard_keys() {
+        let buttons = ButtonSet::empty()
+            .with(Button::A, true)
+            .with(Button::B, true)
+            .with(Button::Start, true)
+            .with(Button::Select, true);
+        let player_one = JoypadState::from_buttons(buttons);
+        for retro_key in [
+            RETRO_KEY_SPACE,
+            RETRO_KEY_LEFT_SHIFT,
+            RETRO_KEY_ENTER,
+            RETRO_KEY_LEFT_CONTROL,
+        ] {
+            assert!(zx_keyboard_key_pressed(
+                retro_key,
+                KeyboardState::empty(),
+                player_one
+            ));
+        }
+        assert!(!zx_keyboard_key_pressed(
+            97,
+            KeyboardState::empty(),
+            player_one
+        ));
+    }
+
+    #[test]
+    fn zx_physical_keyboard_remains_available_beside_the_controller() {
+        let keyboard = KeyboardState::empty().with(key(KEY_A), true);
+        assert!(zx_keyboard_key_pressed(
+            97,
+            keyboard,
+            JoypadState::default()
+        ));
+        assert!(!zx_keyboard_key_pressed(
+            98,
+            keyboard,
+            JoypadState::default()
+        ));
     }
 }
