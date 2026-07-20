@@ -16,6 +16,7 @@ mod settings;
 mod state;
 mod wifi;
 mod wifi_render;
+mod wifi_session;
 mod wifi_writer;
 
 pub use artwork::{ArtworkError, ArtworkIssue, ArtworkReport, ArtworkStore, ArtworkStoreError};
@@ -60,6 +61,7 @@ pub use wifi::{
     WifiCredentials, WifiEditor, WifiEffect, WifiField, WifiStatus, WifiTransition,
 };
 pub use wifi_render::WifiLayout;
+pub use wifi_session::WifiSession;
 pub use wifi_writer::{
     WifiProfileWriter, WifiWriteError, WifiWriterPoll, WifiWriterReport, WifiWriterRequestId,
     WifiWriterResult, WifiWriterStartError, WifiWriterSubmit,

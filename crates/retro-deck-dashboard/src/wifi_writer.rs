@@ -48,6 +48,11 @@ impl WifiWriterRequestId {
     pub const fn get(self) -> u64 {
         self.0
     }
+
+    #[cfg(test)]
+    pub(crate) const fn from_test_serial(serial: u64) -> Self {
+        Self(serial)
+    }
 }
 
 /// Nonblocking result-channel state.

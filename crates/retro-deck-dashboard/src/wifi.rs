@@ -98,16 +98,16 @@ pub struct WifiCredentials<'editor> {
     passphrase: &'editor str,
 }
 
-impl WifiCredentials<'_> {
+impl<'editor> WifiCredentials<'editor> {
     /// Printable ASCII network name.
     #[must_use]
-    pub const fn ssid(&self) -> &str {
+    pub const fn ssid(&self) -> &'editor str {
         self.ssid
     }
 
     /// Printable ASCII WPA passphrase.
     #[must_use]
-    pub const fn passphrase(&self) -> &str {
+    pub const fn passphrase(&self) -> &'editor str {
         self.passphrase
     }
 }
