@@ -1,8 +1,8 @@
 //! Retro Deck product UI expressed as a native `bmc-render` tree.
 
-use bmc_render::tree::{DrawCommand, PropsData, TreeNode};
-use bmc_wasm_protocol::{
-    AutoFit, Color, Fill, FontFamily, FontWeight, PathPaint, TextAlign, TextStyle, VerticalAlign,
+use bmc_render::tree::{
+    AutoFit, Color, DrawCommand, Fill, FontFamily, FontWeight, PathPaint, PropsData, TextAlign,
+    TextStyle, TreeNode, VerticalAlign,
 };
 
 use crate::{Action, Category, DashboardModel};
