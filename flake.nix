@@ -47,7 +47,6 @@
         ./src/joypad_input.cpp
         ./src/libretro_deck.cpp
       ];
-      gbSources = sourceTree libretroSources;
       zxSources = sourceTree (libretroSources ++ [ ./src/zx_keyboard.h ]);
       chiptuneSources = sourceTree (runtimeSources ++ [
         ./src/chiptune_deck.cpp
@@ -131,7 +130,7 @@
         pkgs.lib.concatMapStringsSep " "
           (argument: "-C link-arg=${argument}")
           (
-            [ "-Wl,--start-group" coreArchive ]
+            [ "-Wl,--start-group" "-Wl,-Bstatic" coreArchive ]
             ++ nativeLibraries
             ++ nativeStaticLibraries
             ++ [ "-Wl,--end-group" ]
@@ -166,7 +165,7 @@
           ];
           doCheck = false;
 
-          env.RUSTFLAGS = "-C target-feature=+crt-static";
+          env.RUSTFLAGS = "-C target-feature=+crt-static -C link-arg=-static";
           nativeBuildInputs = [ pkgs.gnumake pkgs.nukeReferences ]
             ++ extraNativeBuildInputs;
           buildInputs = [ pkgsCross.glibc.static ] ++ extraBuildInputs;
@@ -405,83 +404,56 @@
           };
         };
 
-        gb-deck = pkgsCross.stdenv.mkDerivation {
+        gb-deck = mkLibretroHost {
           pname = "gb-deck";
-          version = "0.5.0-20260703-deck";
-
-          src = gambatte-src;
-          nativeBuildInputs =
-            [ pkgs.gnumake pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
-          allowedReferences = [ ];
-
-          NIX_CFLAGS_COMPILE = "-static -O3";
-          NIX_LDFLAGS = "-static";
-
-          postPatch = ''
+          version = "0.2.0";
+          coreBuild = ''
+            core=$TMPDIR/gambatte-core
+            cp -R ${gambatte-src} "$core"
+            chmod -R u+w "$core"
+            patch_root=${./vendor/emulators/gambatte/patches}
+            while IFS= read -r local_patch || [ -n "$local_patch" ]; do
+              case "$local_patch" in
+                ""|\#*) continue ;;
+              esac
+              patch -d "$core" -p1 < "$patch_root/$local_patch"
+            done < "$patch_root/series"
             # Preserve Gambatte's include/feature flags while replacing its
-            # generic -O2 release setting with the Deck SoC tuning used by
-            # the project's own Cortex-A7 targets.
-            substituteInPlace Makefile.libretro \
+            # generic release setting with safe Deck Cortex-A7 tuning.
+            substituteInPlace "$core/Makefile.libretro" \
               --replace-fail \
                 'CFLAGS   += -O2 -DNDEBUG' \
-                'CFLAGS   += -Ofast -flto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -marm -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -DNDEBUG' \
+                'CFLAGS   += -O3 -fomit-frame-pointer -marm -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -DNDEBUG' \
               --replace-fail \
                 'CXXFLAGS += -O2 -DNDEBUG' \
-                'CXXFLAGS += -Ofast -flto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -marm -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -DNDEBUG'
+                'CXXFLAGS += -O3 -fomit-frame-pointer -marm -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -DNDEBUG'
             # Libretro's normal static build expects these utility symbols
             # from RetroArch.  This standalone frontend has no RetroArch, so
             # include the core's vendored implementations in its archive.
-            substituteInPlace Makefile.common \
+            substituteInPlace "$core/Makefile.common" \
               --replace-fail \
                 'ifneq ($(STATIC_LINKING), 1)' \
                 'ifeq ($(STATIC_LINKING), 1)'
-          '';
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
-            make \
+            make -C "$core" -j$NIX_BUILD_CORES \
               STATIC_LINKING=1 \
               platform=unix \
               TARGET=gambatte_libretro.a \
               CC=$CC \
               CXX=$CXX \
-              AR=$CC-ar \
+              AR=${pkgsCross.stdenv.cc.targetPrefix}ar \
               fpic= \
               HAVE_NETWORK=0
-            $CXX -std=c++11 -Ofast -flto -fuse-linker-plugin \
-              -fomit-frame-pointer -marm -march=armv7-a -mtune=cortex-a7 \
-              -mfpu=neon-vfpv4 -mfloat-abi=hard \
-              -Wall -Wextra -Wpedantic -Werror \
-              -I. -Ilibgambatte/libretro-common/include -I${gbSources} \
-              -DRETRO_DECK_GB=1 -DRETRO_DECK_WAYLAND=1 \
-              ${gbSources}/libretro_deck.cpp \
-              ${gbSources}/deck_runtime.cpp \
-              ${gbSources}/deck_wayland.cpp \
-              ${gbSources}/joypad_input.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              gambatte_libretro.a \
-              -static -pthread -lm -lwayland-client -lffi -o gb-deck
-            runHook postBuild
           '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin $out/share/licenses/gb-deck
-            install -m755 gb-deck $out/bin/gb-deck
-            install -m644 COPYING $out/share/licenses/gb-deck/Gambatte-COPYING
-            nuke-refs $out/bin/gb-deck
-            runHook postInstall
+          coreArchive = "$core/gambatte_libretro.a";
+          nativeLibraries = [ "-lstdc++" ];
+          extraNativeBuildInputs = [ pkgs.gnupatch ];
+          installLicenses = ''
+            install -m644 ${gambatte-src}/COPYING \
+              $out/share/licenses/gb-deck/Gambatte-COPYING
           '';
-
-          meta = {
-            description = "Gambatte GB/GBC core with Deck-native framebuffer frontend";
-            homepage = "https://github.com/libretro/gambatte-libretro";
-            license = pkgs.lib.licenses.gpl2Only;
-            platforms = [ "armv7l-linux" ];
-          };
+          description = "Rust Deck host with the pinned Gambatte GB/GBC core";
+          homepage = "https://github.com/libretro/gambatte-libretro";
+          license = pkgs.lib.licenses.gpl2Only;
         };
 
         zx-deck = pkgsCross.stdenv.mkDerivation {
