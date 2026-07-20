@@ -708,7 +708,7 @@ impl<'output> EventCollector<'output> {
     }
 }
 
-fn event_paths(input_directory: &Path) -> Result<Vec<PathBuf>, InputError> {
+pub(super) fn event_paths(input_directory: &Path) -> Result<Vec<PathBuf>, InputError> {
     let entries = fs::read_dir(input_directory).map_err(|source| InputError::Scan {
         path: input_directory.to_owned(),
         source,

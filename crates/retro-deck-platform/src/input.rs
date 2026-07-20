@@ -1,8 +1,10 @@
 //! Device-independent input state and Linux evdev integration.
 
+mod keyboard;
 mod linux;
 mod tty;
 
+pub use keyboard::{KeyboardDevices, KeyboardDrainStats, KeyboardScanStats};
 pub use linux::{
     ControllerDevices, ControllerScanStats, DrainStats, InputDevices, InputError, TouchscreenDevice,
 };
