@@ -153,6 +153,9 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   `/mnt/data/nes-deck/games/`. Their executable commands and REPL modes are a
   separate launch contract, so shared launchers no longer masquerade as ROM or
   application-data paths.
+- A closed Rust launch classification now maps every console entry, native
+  game, REPL mode, chiptune player, terminal, and reboot entry without storing
+  executable paths in display data. Unknown native applications fail closed.
 - Its pure state machine owns per-category carousel position, modal and
   settings navigation, mute restoration, bounded volume and brightness,
   keymap selection, and typed launch or persistence effects. Input handling
