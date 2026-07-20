@@ -4,7 +4,7 @@ use std::error::Error;
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -107,6 +107,7 @@ pub struct ToneCueWorker<C: Copy + Send + 'static> {
     errors: Receiver<ToneWorkerError>,
     gate: Arc<AtomicU8>,
     volume: Arc<AtomicU8>,
+    released: Arc<AtomicBool>,
     thread: Option<JoinHandle<ToneWorkerReport>>,
 }
 
@@ -135,8 +136,10 @@ impl<C: Copy + Send + 'static> ToneCueWorker<C> {
             GATE_ACTIVE
         }));
         let volume = Arc::new(AtomicU8::new(initial_volume.percent()));
+        let released = Arc::new(AtomicBool::new(true));
         let worker_gate = Arc::clone(&gate);
         let worker_volume = Arc::clone(&volume);
+        let worker_released = Arc::clone(&released);
         let thread = thread::Builder::new()
             .name(WORKER_NAME.to_owned())
             .spawn(move || {
@@ -146,6 +149,7 @@ impl<C: Copy + Send + 'static> ToneCueWorker<C> {
                         errors: &error_sender,
                         gate: worker_gate.as_ref(),
                         volume: worker_volume.as_ref(),
+                        released: worker_released.as_ref(),
                     },
                     requested_rate,
                     IDLE_GRACE,
@@ -158,6 +162,7 @@ impl<C: Copy + Send + 'static> ToneCueWorker<C> {
             errors,
             gate,
             volume,
+            released,
             thread: Some(thread),
         })
     }
@@ -179,6 +184,9 @@ impl<C: Copy + Send + 'static> ToneCueWorker<C> {
 
     /// Change playback eligibility and wake the worker to release promptly.
     pub fn set_gate(&self, gate: AudioGate) {
+        if gate != AudioGate::Active {
+            self.released.store(false, Ordering::Release);
+        }
         self.gate.store(gate.code(), Ordering::Release);
         self.wake();
     }
@@ -190,6 +198,7 @@ impl<C: Copy + Send + 'static> ToneCueWorker<C> {
     pub fn set_volume(&self, volume: Volume) {
         self.volume.store(volume.percent(), Ordering::Release);
         if volume.muted() {
+            self.released.store(false, Ordering::Release);
             let _ = self.gate.compare_exchange(
                 GATE_ACTIVE,
                 GATE_MUTED,
@@ -205,6 +214,14 @@ impl<C: Copy + Send + 'static> ToneCueWorker<C> {
             );
         }
         self.wake();
+    }
+
+    /// Whether the worker has observed its gate and closed the OSS device.
+    ///
+    /// This is a nonblocking acknowledgement intended for process handoff.
+    #[must_use]
+    pub fn device_released(&self) -> bool {
+        self.released.load(Ordering::Acquire)
     }
 
     /// Drain currently reported worker errors without waiting.
@@ -292,6 +309,7 @@ struct WorkerControls<'a> {
     errors: &'a SyncSender<ToneWorkerError>,
     gate: &'a AtomicU8,
     volume: &'a AtomicU8,
+    released: &'a AtomicBool,
 }
 
 impl WorkerControls<'_> {
@@ -340,12 +358,13 @@ impl<D: CueDevice> WorkerState<D> {
         }
     }
 
-    fn expire_idle(&mut self) {
+    fn expire_idle(&mut self, controls: WorkerControls<'_>) {
         if matches!(
             self.lifecycle.tick(monotonic_milliseconds(self.origin)),
             AudioAction::CloseDevice
         ) {
             let _ = self.device.take();
+            controls.released.store(true, Ordering::Release);
         }
         self.idle_deadline = None;
     }
@@ -361,6 +380,7 @@ impl<D: CueDevice> WorkerState<D> {
             self.reset_and_drop(controls);
         } else {
             let _ = self.device.take();
+            controls.released.store(true, Ordering::Release);
         }
     }
 
@@ -374,6 +394,7 @@ impl<D: CueDevice> WorkerState<D> {
                 );
             }
         }
+        controls.released.store(true, Ordering::Release);
     }
 
     fn ensure_device(
@@ -385,6 +406,7 @@ impl<D: CueDevice> WorkerState<D> {
         if !matches!(self.lifecycle.request_playback(), AudioAction::OpenDevice) {
             return self.device.is_some();
         }
+        controls.released.store(false, Ordering::Release);
         match open_device(requested_rate) {
             Ok(opened) => {
                 self.lifecycle.opened(true);
@@ -394,6 +416,7 @@ impl<D: CueDevice> WorkerState<D> {
             }
             Err(error) => {
                 self.lifecycle.opened(false);
+                controls.released.store(true, Ordering::Release);
                 record_error(
                     ToneWorkerError::Open(error),
                     controls.errors,
@@ -526,7 +549,7 @@ where
         }
 
         match event {
-            WorkerEvent::Idle => state.expire_idle(),
+            WorkerEvent::Idle => state.expire_idle(controls),
             WorkerEvent::Wake => {}
             WorkerEvent::Play(cue) => {
                 state.play(cue, requested_rate, notes, &mut open_device, controls);
@@ -651,8 +674,10 @@ mod tests {
         let (error_sender, errors) = mpsc::sync_channel(ERROR_QUEUE_CAPACITY);
         let gate = Arc::new(AtomicU8::new(GATE_ACTIVE));
         let volume = Arc::new(AtomicU8::new(volume.percent()));
+        let released = Arc::new(AtomicBool::new(true));
         let events = Arc::new(Mutex::new(Vec::new()));
         let device_events = Arc::clone(&events);
+        let open_released = Arc::clone(&released);
 
         let report = run_worker(
             &receiver,
@@ -660,11 +685,13 @@ mod tests {
                 errors: &error_sender,
                 gate: gate.as_ref(),
                 volume: volume.as_ref(),
+                released: released.as_ref(),
             },
             rate,
             Duration::ZERO,
             test_notes,
             move |opened_rate| {
+                assert!(!open_released.load(Ordering::Acquire));
                 Ok(FakeDevice {
                     rate: opened_rate,
                     events: Arc::clone(&device_events),
@@ -675,6 +702,7 @@ mod tests {
         assert_eq!(report.opened, 1);
         assert_eq!(report.played, 1);
         assert_eq!(report.errors, 0);
+        assert!(released.load(Ordering::Acquire));
         assert!(errors.try_recv().is_err());
         let Ok(events) = events.lock() else {
             return;
@@ -696,6 +724,7 @@ mod tests {
         let (error_sender, _errors) = mpsc::sync_channel(ERROR_QUEUE_CAPACITY);
         let gate = Arc::new(AtomicU8::new(GATE_MUTED));
         let volume = Arc::new(AtomicU8::new(0));
+        let released = Arc::new(AtomicBool::new(true));
         let mut open_calls = 0;
 
         let report = run_worker::<_, FakeDevice>(
@@ -704,6 +733,7 @@ mod tests {
                 errors: &error_sender,
                 gate: gate.as_ref(),
                 volume: volume.as_ref(),
+                released: released.as_ref(),
             },
             rate,
             Duration::ZERO,
@@ -727,6 +757,16 @@ mod tests {
             return;
         };
         let events = Arc::new(Mutex::new(Vec::new()));
+        let (error_sender, _errors) = mpsc::sync_channel(ERROR_QUEUE_CAPACITY);
+        let gate = AtomicU8::new(GATE_ACTIVE);
+        let volume = AtomicU8::new(80);
+        let released = AtomicBool::new(false);
+        let controls = WorkerControls {
+            errors: &error_sender,
+            gate: &gate,
+            volume: &volume,
+            released: &released,
+        };
         let mut state = WorkerState::new(Duration::ZERO);
         assert_eq!(state.lifecycle.request_playback(), AudioAction::OpenDevice);
         state.lifecycle.opened(true);
@@ -740,10 +780,11 @@ mod tests {
         );
         state.lifecycle.drained(0);
 
-        state.expire_idle();
+        state.expire_idle(controls);
 
         assert_eq!(state.lifecycle.state(), AudioState::Closed);
         assert!(state.device.is_none());
+        assert!(released.load(Ordering::Acquire));
         let Ok(events) = events.lock() else {
             return;
         };
@@ -759,10 +800,12 @@ mod tests {
         let (error_sender, _errors) = mpsc::sync_channel(ERROR_QUEUE_CAPACITY);
         let gate = AtomicU8::new(GATE_HIDDEN);
         let volume = AtomicU8::new(80);
+        let released = AtomicBool::new(false);
         let controls = WorkerControls {
             errors: &error_sender,
             gate: &gate,
             volume: &volume,
+            released: &released,
         };
         let mut state = WorkerState::new(IDLE_GRACE);
         assert_eq!(state.lifecycle.request_playback(), AudioAction::OpenDevice);
@@ -776,6 +819,7 @@ mod tests {
 
         assert_eq!(state.lifecycle.state(), AudioState::Closed);
         assert!(state.device.is_none());
+        assert!(released.load(Ordering::Acquire));
         let Ok(events) = events.lock() else {
             return;
         };
@@ -792,6 +836,7 @@ mod tests {
         let Ok(worker) = worker else {
             return;
         };
+        assert!(worker.device_released());
         assert_eq!(
             worker.try_play(TestCue::Confirm),
             ToneCueEnqueue::DroppedInactive
