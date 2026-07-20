@@ -397,6 +397,7 @@ dependencies = [
  "retro-deck-audio",
  "retro-deck-platform",
  "retro-deck-policy",
+ "retro-deck-ui",
 ]
 
 [[package]]
@@ -445,6 +446,10 @@ dependencies = [
 
 [[package]]
 name = "retro-deck-policy"
+version = "0.1.0"
+
+[[package]]
+name = "retro-deck-ui"
 version = "0.1.0"
 
 [[package]]

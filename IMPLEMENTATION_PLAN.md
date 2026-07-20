@@ -58,6 +58,7 @@ crates/
   retro-deck-dashboard/       dashboard model, renderer, and launcher
   retro-deck-emulator/        libretro and c-octo hosts
   retro-deck-apps/            timer and chiptune applications
+  retro-deck-ui/              fixed RGB565 canvas and complete 5x7 font
   retro-deck-uploader/        authenticated ROM and appearance service
 lisp/
   retro-deck.asd              tracked Common Lisp system
@@ -152,6 +153,10 @@ fails, Rust logs the failure, terminates the worker, and uses built-in behavior.
   settings navigation, mute restoration, bounded volume and brightness,
   keymap selection, and typed launch or persistence effects. Input handling
   performs no filesystem, audio-device, process, or network operation.
+- A device-independent RGB565 canvas now owns clipped drawing, panels, lines,
+  text fitting, fixed-capacity labels, and the complete case-sensitive 5x7
+  font. The Rust timer uses it without changing any reference pixel snapshot,
+  and future Wi-Fi labels can render capitalization unambiguously.
 - Port the dashboard model and renderer, using Lisp only on state changes.
 - Generate screenshots from the same Rust renderer used on the Deck.
 

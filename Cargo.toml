@@ -7,6 +7,7 @@ members = [
   "crates/retro-deck-emulator",
   "crates/retro-deck-platform",
   "crates/retro-deck-policy",
+  "crates/retro-deck-ui",
   "crates/retro-deck-uploader",
 ]
 resolver = "2"

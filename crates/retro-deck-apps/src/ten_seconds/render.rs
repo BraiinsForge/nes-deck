@@ -2,6 +2,10 @@
 
 use std::{cmp::Ordering, fmt};
 
+use retro_deck_ui::{Canvas, Rect, text_width_characters};
+
+pub use retro_deck_ui::rgb888_to_rgb565;
+
 use super::{Centiseconds, TimerPhase, TimerView};
 
 /// Native timer canvas width before the platform applies its exact scale.
@@ -17,19 +21,6 @@ const CREAM: u16 = rgb888_to_rgb565(0xff_ed_c2);
 const MUTED: u16 = rgb888_to_rgb565(0xaa_8f_7c);
 const SUCCESS: u16 = rgb888_to_rgb565(0x62_d3_8c);
 const BUTTON: u16 = rgb888_to_rgb565(0x29_21_1e);
-
-/// Convert one packed `0xRRGGBB` color to native RGB565.
-#[must_use]
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "the channel masks prove the packed value fits in u16"
-)]
-pub const fn rgb888_to_rgb565(rgb: u32) -> u16 {
-    let red = (rgb >> 19) & 0x1f;
-    let green = (rgb >> 10) & 0x3f;
-    let blue = (rgb >> 3) & 0x1f;
-    ((red << 11) | (green << 5) | blue) as u16
-}
 
 /// Fixed-size rendered timer frame.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -88,9 +79,12 @@ impl TimerFrame {
     }
 
     fn draw(&mut self, view: TimerView) {
-        self.fill_rect(Rect::new(6, 5, 70, 25), BUTTON);
-        self.draw_text(15, 11, "BACK", 2, CREAM);
-        self.draw_centered_text(9, "STOP AT 10.00", 2, CREAM);
+        let Some(mut canvas) = Canvas::new(&mut self.pixels, CANVAS_WIDTH, CANVAS_HEIGHT) else {
+            return;
+        };
+        canvas.fill_rect(Rect::new(6, 5, 70, 25), BUTTON);
+        canvas.draw_text(15, 11, "BACK", 2, CREAM);
+        draw_centered_text(&mut canvas, 9, "STOP AT 10.00", 2, CREAM);
 
         let digit_color =
             if view.phase() == TimerPhase::Stopped && view.displayed() == Centiseconds::TARGET {
@@ -103,9 +97,9 @@ impl TimerFrame {
             .into_iter()
             .zip(centisecond_digits(view.displayed()))
         {
-            self.draw_digit(x, 43, digit, digit_color, DIM_AMBER);
+            draw_digit(&mut canvas, x, 43, digit, digit_color, DIM_AMBER);
         }
-        self.fill_rect(Rect::new(303, 149, 14, 14), digit_color);
+        canvas.fill_rect(Rect::new(303, 149, 14, 14), digit_color);
 
         if let Some(result) = result(view) {
             let color = if view.displayed() == Centiseconds::TARGET {
@@ -114,9 +108,9 @@ impl TimerFrame {
                 MUTED
             };
             match result {
-                ResultLine::Exact => self.draw_centered_text(178, "EXACT", 1, color),
+                ResultLine::Exact => draw_centered_text(&mut canvas, 178, "EXACT", 1, color),
                 ResultLine::Difference { difference, label } => {
-                    self.draw_centered_result(178, difference, label, color);
+                    draw_centered_result(&mut canvas, 178, difference, label, color);
                 }
             }
         }
@@ -126,131 +120,85 @@ impl TimerFrame {
             TimerPhase::Running => "TAP OR A TO STOP",
             TimerPhase::Stopped => "TAP OR A FOR ANOTHER TRY",
         };
-        self.draw_centered_text(198, instruction, 2, CREAM);
+        draw_centered_text(&mut canvas, 198, instruction, 2, CREAM);
     }
+}
 
-    fn fill_rect(&mut self, rect: Rect, color: u16) {
-        let left = rect.x.min(CANVAS_WIDTH);
-        let top = rect.y.min(CANVAS_HEIGHT);
-        let right = rect.x.saturating_add(rect.width).min(CANVAS_WIDTH);
-        let bottom = rect.y.saturating_add(rect.height).min(CANVAS_HEIGHT);
-        if left >= right || top >= bottom {
-            return;
-        }
-        for y in top..bottom {
-            let start = y.saturating_mul(CANVAS_WIDTH).saturating_add(left);
-            let end = y.saturating_mul(CANVAS_WIDTH).saturating_add(right);
-            if let Some(row) = self.pixels.get_mut(start..end) {
-                row.fill(color);
-            }
-        }
-    }
+fn draw_centered_text(canvas: &mut Canvas<'_>, y: usize, text: &str, scale: usize, color: u16) {
+    let width = text_width_characters(text.len(), scale);
+    let x = CANVAS_WIDTH.saturating_sub(width) / 2;
+    canvas.draw_text(x, y, text, scale, color);
+}
 
-    fn draw_text(&mut self, x: usize, y: usize, text: &str, scale: usize, color: u16) {
-        self.draw_bytes(x, y, text.as_bytes(), scale, color);
-    }
+fn draw_centered_result(
+    canvas: &mut Canvas<'_>,
+    y: usize,
+    difference: Centiseconds,
+    label: &str,
+    color: u16,
+) {
+    let characters = 6_usize.saturating_add(label.len());
+    let x = CANVAS_WIDTH.saturating_sub(text_width_characters(characters, 1)) / 2;
+    canvas.draw_bytes(x, y, &centisecond_text(difference), 1, color);
+    canvas.draw_text(x.saturating_add(36), y, label, 1, color);
+}
 
-    fn draw_bytes(&mut self, x: usize, y: usize, text: &[u8], scale: usize, color: u16) {
-        for (character_index, character) in text.iter().copied().enumerate() {
-            let rows = glyph_rows(character);
-            for (row, bits) in rows.into_iter().enumerate() {
-                for column in 0..5 {
-                    let shift = 4_usize.saturating_sub(column);
-                    if bits & (1_u8 << shift) == 0 {
-                        continue;
-                    }
-                    let character_x = character_index.saturating_mul(6).saturating_mul(scale);
-                    self.fill_rect(
-                        Rect::new(
-                            x.saturating_add(character_x)
-                                .saturating_add(column.saturating_mul(scale)),
-                            y.saturating_add(row.saturating_mul(scale)),
-                            scale,
-                            scale,
-                        ),
-                        color,
-                    );
-                }
-            }
-        }
-    }
-
-    fn draw_centered_text(&mut self, y: usize, text: &str, scale: usize, color: u16) {
-        let width = text_width(text.len(), scale);
-        let x = CANVAS_WIDTH.saturating_sub(width) / 2;
-        self.draw_text(x, y, text, scale, color);
-    }
-
-    fn draw_centered_result(
-        &mut self,
-        y: usize,
-        difference: Centiseconds,
-        label: &str,
-        color: u16,
-    ) {
-        let characters = 6_usize.saturating_add(label.len());
-        let x = CANVAS_WIDTH.saturating_sub(text_width(characters, 1)) / 2;
-        self.draw_bytes(x, y, &centisecond_text(difference), 1, color);
-        self.draw_text(x.saturating_add(36), y, label, 1, color);
-    }
-
-    fn draw_digit(&mut self, x: usize, y: usize, digit: u8, active: u16, inactive: u16) {
-        let width = 76;
-        let height = 128;
-        let thickness = 11;
-        let bounds = [
-            Rect::new(
-                x.saturating_add(thickness),
-                y,
-                width - 2 * thickness,
-                thickness,
-            ),
-            Rect::new(
-                x.saturating_add(width - thickness),
-                y.saturating_add(thickness),
-                thickness,
-                height / 2 - thickness,
-            ),
-            Rect::new(
-                x.saturating_add(width - thickness),
-                y.saturating_add(height / 2),
-                thickness,
-                height / 2 - thickness,
-            ),
-            Rect::new(
-                x.saturating_add(thickness),
-                y.saturating_add(height - thickness),
-                width - 2 * thickness,
-                thickness,
-            ),
-            Rect::new(
-                x,
-                y.saturating_add(height / 2),
-                thickness,
-                height / 2 - thickness,
-            ),
-            Rect::new(
-                x,
-                y.saturating_add(thickness),
-                thickness,
-                height / 2 - thickness,
-            ),
-            Rect::new(
-                x.saturating_add(thickness),
-                y.saturating_add(height / 2 - thickness / 2),
-                width - 2 * thickness,
-                thickness,
-            ),
-        ];
-        let mask = digit_segments(digit);
-        for (index, bounds) in bounds.into_iter().enumerate() {
-            let color = if mask & (1_u8 << index) == 0 {
-                inactive
-            } else {
-                active
-            };
-            self.fill_rect(bounds, color);
-        }
+fn draw_digit(canvas: &mut Canvas<'_>, x: usize, y: usize, digit: u8, active: u16, inactive: u16) {
+    let width = 76;
+    let height = 128;
+    let thickness = 11;
+    let bounds = [
+        Rect::new(
+            x.saturating_add(thickness),
+            y,
+            width - 2 * thickness,
+            thickness,
+        ),
+        Rect::new(
+            x.saturating_add(width - thickness),
+            y.saturating_add(thickness),
+            thickness,
+            height / 2 - thickness,
+        ),
+        Rect::new(
+            x.saturating_add(width - thickness),
+            y.saturating_add(height / 2),
+            thickness,
+            height / 2 - thickness,
+        ),
+        Rect::new(
+            x.saturating_add(thickness),
+            y.saturating_add(height - thickness),
+            width - 2 * thickness,
+            thickness,
+        ),
+        Rect::new(
+            x,
+            y.saturating_add(height / 2),
+            thickness,
+            height / 2 - thickness,
+        ),
+        Rect::new(
+            x,
+            y.saturating_add(thickness),
+            thickness,
+            height / 2 - thickness,
+        ),
+        Rect::new(
+            x.saturating_add(thickness),
+            y.saturating_add(height / 2 - thickness / 2),
+            width - 2 * thickness,
+            thickness,
+        ),
+    ];
+    let mask = digit_segments(digit);
+    for (index, bounds) in bounds.into_iter().enumerate() {
+        let color = if mask & (1_u8 << index) == 0 {
+            inactive
+        } else {
+            active
+        };
+        canvas.fill_rect(bounds, color);
     }
 }
 
@@ -265,25 +213,6 @@ impl fmt::Display for RenderError {
 }
 
 impl std::error::Error for RenderError {}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct Rect {
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
-}
-
-impl Rect {
-    const fn new(x: usize, y: usize, width: usize, height: usize) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ResultLine {
@@ -327,14 +256,6 @@ const fn centisecond_text(value: Centiseconds) -> [u8; 5] {
     [digits[0], digits[1], b'.', digits[2], digits[3]]
 }
 
-const fn text_width(characters: usize, scale: usize) -> usize {
-    let trailing_space = if characters == 0 { 0 } else { 1 };
-    characters
-        .saturating_mul(6)
-        .saturating_sub(trailing_space)
-        .saturating_mul(scale)
-}
-
 const fn digit_segments(digit: u8) -> u8 {
     match digit {
         b'0' => 0x3f,
@@ -348,50 +269,6 @@ const fn digit_segments(digit: u8) -> u8 {
         b'8' => 0x7f,
         b'9' => 0x6f,
         _ => 0,
-    }
-}
-
-const fn glyph_rows(character: u8) -> [u8; 7] {
-    match character.to_ascii_uppercase() {
-        b'A' => [14, 17, 17, 31, 17, 17, 17],
-        b'B' => [30, 17, 17, 30, 17, 17, 30],
-        b'C' => [14, 17, 16, 16, 16, 17, 14],
-        b'D' => [30, 17, 17, 17, 17, 17, 30],
-        b'E' => [31, 16, 16, 30, 16, 16, 31],
-        b'F' => [31, 16, 16, 30, 16, 16, 16],
-        b'G' => [14, 17, 16, 23, 17, 17, 15],
-        b'H' => [17, 17, 17, 31, 17, 17, 17],
-        b'I' => [14, 4, 4, 4, 4, 4, 14],
-        b'J' => [7, 2, 2, 2, 18, 18, 12],
-        b'K' => [17, 18, 20, 24, 20, 18, 17],
-        b'L' => [16, 16, 16, 16, 16, 16, 31],
-        b'M' => [17, 27, 21, 21, 17, 17, 17],
-        b'N' => [17, 25, 21, 19, 17, 17, 17],
-        b'O' => [14, 17, 17, 17, 17, 17, 14],
-        b'P' => [30, 17, 17, 30, 16, 16, 16],
-        b'Q' => [14, 17, 17, 17, 21, 18, 13],
-        b'R' => [30, 17, 17, 30, 20, 18, 17],
-        b'S' => [15, 16, 16, 14, 1, 1, 30],
-        b'T' => [31, 4, 4, 4, 4, 4, 4],
-        b'U' => [17, 17, 17, 17, 17, 17, 14],
-        b'V' => [17, 17, 17, 17, 17, 10, 4],
-        b'W' => [17, 17, 17, 17, 21, 21, 10],
-        b'X' => [17, 17, 10, 4, 10, 17, 17],
-        b'Y' => [17, 17, 10, 4, 4, 4, 4],
-        b'Z' => [31, 1, 2, 4, 8, 16, 31],
-        b'0' => [14, 17, 19, 21, 25, 17, 14],
-        b'1' => [4, 12, 4, 4, 4, 4, 14],
-        b'2' => [14, 17, 1, 2, 4, 8, 31],
-        b'3' => [30, 1, 1, 14, 1, 1, 30],
-        b'4' => [2, 6, 10, 18, 31, 2, 2],
-        b'5' => [31, 16, 16, 30, 1, 1, 30],
-        b'6' => [14, 16, 16, 30, 17, 17, 14],
-        b'7' => [31, 1, 2, 4, 8, 8, 8],
-        b'8' => [14, 17, 17, 14, 17, 17, 14],
-        b'9' => [14, 17, 17, 15, 1, 1, 14],
-        b'.' => [0, 0, 0, 0, 0, 6, 6],
-        b' ' => [0; 7],
-        _ => [14, 17, 1, 2, 4, 0, 4],
     }
 }
 
