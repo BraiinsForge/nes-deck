@@ -50,9 +50,9 @@ const fn directional_action(screen: Screen, action: Action) -> Option<Action> {
 }
 
 /// Touch press/release pairing that commits only one unchanged target.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct TouchCommitter {
-    pressed: Option<Action>,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TouchCommitter<Target = Action> {
+    pressed: Option<Target>,
 }
 
 /// Fixed-capacity guard against a malfunctioning controller event flood.
@@ -227,7 +227,7 @@ impl Default for ControllerGuard {
     }
 }
 
-impl TouchCommitter {
+impl<Target: Copy + Eq> TouchCommitter<Target> {
     /// Start or finish a touch report over the currently hit action.
     ///
     /// Moving off the pressed control cancels activation at release. A report
@@ -238,8 +238,8 @@ impl TouchCommitter {
         &mut self,
         pressed: bool,
         released: bool,
-        target: Option<Action>,
-    ) -> Option<Action> {
+        target: Option<Target>,
+    ) -> Option<Target> {
         if pressed {
             self.pressed = target;
         }
@@ -255,6 +255,12 @@ impl TouchCommitter {
     /// Cancel a partial gesture after a screen change or non-touch action.
     pub const fn cancel(&mut self) {
         self.pressed = None;
+    }
+}
+
+impl<Target> Default for TouchCommitter<Target> {
+    fn default() -> Self {
+        Self { pressed: None }
     }
 }
 
