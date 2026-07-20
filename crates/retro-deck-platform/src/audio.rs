@@ -110,7 +110,7 @@ impl OssProfile {
     const fn fragment_word(self) -> i32 {
         match self {
             Self::Cue => (4 << 16) | 9,
-            Self::Stream => (8 << 16) | 10,
+            Self::Stream => (8 << 16) | 0x0a,
         }
     }
 }
