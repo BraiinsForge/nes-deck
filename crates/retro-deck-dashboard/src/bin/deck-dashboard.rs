@@ -13,10 +13,12 @@ use std::time::{Duration, Instant};
 use retro_deck_audio::{SampleRate, Volume};
 use retro_deck_config::{Catalog, MAXIMUM_CATALOG_BYTES, MAXIMUM_PALETTE_BYTES, Palette};
 use retro_deck_dashboard::{
-    Action, ArtworkStore, AssetPathError, ControllerGuard, CreditsCrawl, DashboardAssetPaths,
-    DashboardAssets, DashboardAssetsError, DashboardFrame, DashboardModel, Intent, MenuCue,
-    NetworkView, PreferenceLoad, PreferencePathError, PreferencePaths, RenderError, Screen,
-    SettingChange, SettingsView, TouchCommitter, controller_action, menu_notes,
+    Action, ArtworkStore, AssetPathError, BrightnessDevicePaths, BrightnessPathError,
+    ControllerGuard, CreditsCrawl, DashboardAssetPaths, DashboardAssets, DashboardAssetsError,
+    DashboardFrame, DashboardModel, DashboardPreferences, Intent, MenuCue, NetworkView,
+    PreferenceLoad, PreferencePathError, PreferencePaths, PreferenceSubmit, PreferenceWorker,
+    PreferenceWorkerReport, RenderError, Screen, SettingChange, SettingsView, TouchCommitter,
+    controller_action, menu_notes,
 };
 use retro_deck_platform::audio::{AudioGate, ToneCueWorker, ToneWorkerReport};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
@@ -36,6 +38,8 @@ const COVER_DIRECTORY: &str = "/mnt/data/nes-deck/covers";
 const VOLUME_STATE: &str = "/mnt/data/nes-deck/state/menu-volume.state";
 const BRIGHTNESS_STATE: &str = "/mnt/data/nes-deck/state/menu-brightness.state";
 const KEYMAP_STATE: &str = "/mnt/data/nes-deck/state/terminal-keymap.state";
+const BRIGHTNESS_DEVICE: &str = "/sys/class/backlight/display-bl/brightness";
+const BRIGHTNESS_MAXIMUM: &str = "/sys/class/backlight/display-bl/max_brightness";
 
 fn main() -> ExitCode {
     let command = match parse_arguments(env::args_os().skip(1)) {
@@ -217,6 +221,7 @@ struct DashboardRuntime {
     controller_guard: ControllerGuard,
     audio: Option<ToneCueWorker<MenuCue>>,
     audio_gate: AudioGate,
+    preferences: Option<PreferenceWorker>,
     started_at: Instant,
     credits_started_at: Instant,
     last_credits_frame: Instant,
@@ -241,6 +246,9 @@ impl DashboardRuntime {
             eprintln!("{APPLICATION}: {issue}");
         }
         let preferences = preference_load.preferences();
+        let brightness_paths = standard_brightness_paths()?;
+        let preference_worker =
+            start_preference_worker(preference_paths, brightness_paths, preferences);
         let model = DashboardModel::new(
             assets.catalog().clone(),
             preferences.volume(),
@@ -259,7 +267,7 @@ impl DashboardRuntime {
         let audio_gate = desired_audio_gate(presentation.visible(), volume.muted());
         let audio = start_audio(volume, audio_gate);
         eprintln!(
-            "{APPLICATION}: native navigation runtime started with {} controller(s); launch and persistence effects remain disabled",
+            "{APPLICATION}: native navigation runtime started with {} controller(s); launch effects remain disabled",
             controllers.controller_count()
         );
         let now = Instant::now();
@@ -278,6 +286,7 @@ impl DashboardRuntime {
             controller_guard: ControllerGuard::new(),
             audio,
             audio_gate,
+            preferences: preference_worker,
             started_at: now,
             credits_started_at: now,
             last_credits_frame: now,
@@ -290,6 +299,7 @@ impl DashboardRuntime {
     fn run(mut self) -> Result<(), RuntimeError> {
         let result = self.event_loop();
         self.finish_audio();
+        self.finish_preferences();
         result
     }
 
@@ -300,6 +310,7 @@ impl DashboardRuntime {
                 .map_err(RuntimeError::Presentation)?;
             self.sync_audio_gate();
             self.report_audio_errors();
+            self.report_preference_errors();
             if self.shutdown.requested() || self.presentation.shutdown_requested() {
                 break;
             }
@@ -417,7 +428,6 @@ impl DashboardRuntime {
         }
         if let Some(setting) = transition.setting {
             self.apply_setting(setting);
-            report_unpersisted_setting(setting);
         }
         self.sync_audio_gate();
         if let (Some(audio), Some(cue)) = (&self.audio, transition.cue) {
@@ -426,15 +436,28 @@ impl DashboardRuntime {
     }
 
     fn apply_setting(&self, setting: SettingChange) {
-        let SettingChange::Volume(percent) = setting else {
+        if let SettingChange::Volume(percent) = setting {
+            let Some(volume) = Volume::new(percent) else {
+                eprintln!("{APPLICATION}: rejected invalid in-memory audio volume {percent}");
+                return;
+            };
+            if let Some(audio) = &self.audio {
+                audio.set_volume(volume);
+            }
+        }
+        let Some(preferences) = &self.preferences else {
             return;
         };
-        let Some(volume) = Volume::new(percent) else {
-            eprintln!("{APPLICATION}: rejected invalid in-memory audio volume {percent}");
-            return;
-        };
-        if let Some(audio) = &self.audio {
-            audio.set_volume(volume);
+        match preferences.try_submit(setting) {
+            PreferenceSubmit::Accepted | PreferenceSubmit::Coalesced => {}
+            PreferenceSubmit::Invalid => {
+                eprintln!("{APPLICATION}: rejected invalid preference effect {setting:?}");
+            }
+            PreferenceSubmit::Disconnected => {
+                eprintln!(
+                    "{APPLICATION}: preference worker is unavailable; {setting:?} remains in memory only"
+                );
+            }
         }
     }
 
@@ -466,6 +489,23 @@ impl DashboardRuntime {
         };
         audio.set_gate(AudioGate::Hidden);
         report_audio_shutdown(audio.shutdown());
+    }
+
+    fn report_preference_errors(&self) {
+        let Some(preferences) = &self.preferences else {
+            return;
+        };
+        for error in preferences.take_errors() {
+            eprintln!("{APPLICATION}: {error}");
+        }
+    }
+
+    fn finish_preferences(&mut self) {
+        self.report_preference_errors();
+        let Some(preferences) = self.preferences.take() else {
+            return;
+        };
+        report_preference_shutdown(preferences.shutdown());
     }
 
     fn schedule_credits_frame(&mut self) {
@@ -542,6 +582,27 @@ fn standard_preference_paths() -> Result<PreferencePaths, RuntimeError> {
         .map_err(RuntimeError::PreferencePaths)
 }
 
+fn standard_brightness_paths() -> Result<BrightnessDevicePaths, RuntimeError> {
+    BrightnessDevicePaths::new(BRIGHTNESS_DEVICE, BRIGHTNESS_MAXIMUM)
+        .map_err(RuntimeError::BrightnessPaths)
+}
+
+fn start_preference_worker(
+    state_paths: PreferencePaths,
+    brightness_paths: BrightnessDevicePaths,
+    initial: DashboardPreferences,
+) -> Option<PreferenceWorker> {
+    match PreferenceWorker::spawn(state_paths, brightness_paths, initial) {
+        Ok(worker) => Some(worker),
+        Err(error) => {
+            eprintln!(
+                "{APPLICATION}: cannot start preference worker: {error}; settings remain in memory only"
+            );
+            None
+        }
+    }
+}
+
 fn load_artwork(entries: &[retro_deck_config::CatalogEntry]) -> ArtworkStore {
     let store = match ArtworkStore::load(COVER_DIRECTORY, entries) {
         Ok(store) => store,
@@ -606,6 +667,18 @@ fn report_audio_shutdown(report: ToneWorkerReport) {
     }
 }
 
+fn report_preference_shutdown(report: PreferenceWorkerReport) {
+    if report.panicked {
+        eprintln!("{APPLICATION}: preference worker panicked during shutdown");
+    }
+    if report.errors != 0 || report.dropped_errors != 0 {
+        eprintln!(
+            "{APPLICATION}: preference worker stopped with {} error(s), including {} unreported",
+            report.errors, report.dropped_errors
+        );
+    }
+}
+
 fn source_dimensions() -> Result<Dimensions, RuntimeError> {
     Dimensions::new(
         retro_deck_dashboard::CANVAS_WIDTH,
@@ -624,17 +697,12 @@ fn report_disabled_intent(intent: Intent) {
     );
 }
 
-fn report_unpersisted_setting(setting: SettingChange) {
-    eprintln!(
-        "{APPLICATION}: staged runtime applied {setting:?} in memory only; persistence is not enabled"
-    );
-}
-
 #[derive(Debug)]
 enum RuntimeError {
     Signals(io::Error),
     Assets(DashboardAssetsError),
     PreferencePaths(PreferencePathError),
+    BrightnessPaths(BrightnessPathError),
     InvalidDefaults,
     InvalidDimensions,
     Presentation(WaylandPresentationError),
@@ -655,6 +723,7 @@ impl fmt::Display for RuntimeError {
             Self::Signals(error) => write!(formatter, "cannot install shutdown handlers: {error}"),
             Self::Assets(error) => error.fmt(formatter),
             Self::PreferencePaths(error) => error.fmt(formatter),
+            Self::BrightnessPaths(error) => error.fmt(formatter),
             Self::InvalidDefaults => formatter.write_str("compiled dashboard defaults are invalid"),
             Self::InvalidDimensions => {
                 formatter.write_str("dashboard canvas dimensions are invalid")
@@ -685,6 +754,7 @@ impl Error for RuntimeError {
             Self::Signals(error) => Some(error),
             Self::Assets(error) => Some(error),
             Self::PreferencePaths(error) => Some(error),
+            Self::BrightnessPaths(error) => Some(error),
             Self::Presentation(error) => Some(error),
             Self::Input(error) => Some(error),
             Self::Render(error) => Some(error),
