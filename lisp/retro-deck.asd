@@ -12,6 +12,8 @@
                              (:file "protocol")))
                (:module "apps"
                 :serial t
-                :components ((:file "ten-seconds")))
+                :components ((:file "dashboard")
+                             (:file "ten-seconds")
+                             (:file "defaults")))
                (:file "policy-worker"
                 :pathname "policy/worker")))

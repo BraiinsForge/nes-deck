@@ -38,11 +38,3 @@
     (declare (ignore input))
     (list :display-centiseconds elapsed
           :cue (if (= elapsed 1000) :exact :miss))))
-
-
-(defun install-default-policy-hooks ()
-  "Install the complete tracked behavior set before local overrides load."
-  (policy--clear-hooks)
-  (register-policy-hook :ten-seconds/result
-                        #'ten-seconds--default-result)
-  t)

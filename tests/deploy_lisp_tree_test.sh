@@ -18,7 +18,7 @@ mkdir -p "$source_tree/apps" "$source_tree/policy" \
   "$destination/site.d"
 for relative in \
   package.lisp retro-deck.asd run-worker.lisp \
-  apps/ten-seconds.lisp \
+  apps/dashboard.lisp apps/defaults.lisp apps/ten-seconds.lisp \
   policy/conditions.lisp policy/hooks.lisp policy/protocol.lisp \
   policy/worker.lisp; do
   printf 'managed %s\n' "$relative" >"$source_tree/$relative"

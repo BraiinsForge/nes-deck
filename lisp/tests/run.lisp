@@ -42,6 +42,24 @@
 (install-default-policy-hooks)
 
 (test-check-equal
+ "default dashboard applications are ordered policy data"
+ '((:lua "LUA REPL" "#5F87FF")
+   (:lisp "LISP REPL" "#AFD75F")
+   (:python "PYTHON REPL" "#FFD700")
+   (:scheme "SCHEME REPL" "#87D787")
+   (:chiptunes "CHIPTUNES" "#FF8700")
+   (:terminal "TERMINAL" "#5F87AF")
+   (:reboot "REBOOT" "#D75F5F"))
+ (call-policy-hook :dashboard/applications nil))
+
+(test-check
+ "dashboard startup policy rejects arguments"
+ (test-condition-p
+  'policy-hook-error
+  (lambda ()
+    (call-policy-hook :dashboard/applications '(:unexpected t)))))
+
+(test-check-equal
  "default timer policy preserves an exact result"
  '(:display-centiseconds 1000 :cue :exact)
  (call-policy-hook :ten-seconds/result

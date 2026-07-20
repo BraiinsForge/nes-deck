@@ -145,7 +145,8 @@ cp -a "$chibi/share/chibi/." "$payload/nes-deck/langs/chibi/lib/"
 cp -a "$ecl/bin" "$ecl/lib" "$payload/nes-deck/ecl/"
 cp lisp/package.lisp lisp/retro-deck.asd lisp/run-worker.lisp \
   "$payload/nes-deck/lisp/"
-cp lisp/apps/ten-seconds.lisp "$payload/nes-deck/lisp/apps/"
+cp lisp/apps/dashboard.lisp lisp/apps/defaults.lisp \
+  lisp/apps/ten-seconds.lisp "$payload/nes-deck/lisp/apps/"
 cp lisp/policy/conditions.lisp lisp/policy/hooks.lisp \
   lisp/policy/protocol.lisp lisp/policy/worker.lisp \
   "$payload/nes-deck/lisp/policy/"

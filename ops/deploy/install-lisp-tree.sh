@@ -31,7 +31,7 @@ validate_source() {
 
   for relative in \
     package.lisp retro-deck.asd run-worker.lisp \
-    apps/ten-seconds.lisp \
+    apps/dashboard.lisp apps/defaults.lisp apps/ten-seconds.lisp \
     policy/conditions.lisp policy/hooks.lisp policy/protocol.lisp \
     policy/worker.lisp; do
     file=$source_tree/$relative
@@ -47,7 +47,7 @@ validate_source() {
     return 1
   }
   file_count=$(find "$source_tree" -type f -print | wc -l | tr -d ' ')
-  [ "$file_count" = 8 ] || {
+  [ "$file_count" = 10 ] || {
     echo "Managed Lisp source contains unexpected files" >&2
     return 1
   }
