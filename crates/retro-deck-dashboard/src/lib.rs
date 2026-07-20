@@ -3,6 +3,8 @@
 mod artwork;
 mod assets;
 mod audio;
+#[cfg(feature = "bmc-native")]
+mod bmc_ui;
 mod catalog;
 mod controls;
 mod credits;
@@ -25,6 +27,8 @@ pub use assets::{
     DashboardAssetsError, PaletteFallback,
 };
 pub use audio::menu_notes;
+#[cfg(feature = "bmc-native")]
+pub use bmc_ui::{BmcScreen, BmcUiAction, bmc_action_for_touch, build_bmc_tree};
 pub use catalog::{Category, DashboardCatalog, DashboardCatalogError, MAXIMUM_DASHBOARD_ENTRIES};
 pub use controls::{
     ControllerGuard, ExitHold, ExitHoldEvent, TouchCommitter, controller_action, keyboard_action,
