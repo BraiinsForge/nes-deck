@@ -396,19 +396,21 @@ unsafe extern "C" fn input_state_callback(
             return 0;
         };
         let device = device & abi::DEVICE_MASK;
+        let Ok(port_index) = usize::try_from(port) else {
+            return 0;
+        };
+        let Some(port_device) = state.core.input_ports().get(port_index).copied() else {
+            return 0;
+        };
         if device == abi::DEVICE_KEYBOARD {
-            if state.core != LibretroCore::Fuse || port != 0 || index != 0 {
+            if !port_device.is_keyboard() || index != 0 {
                 return 0;
             }
             return medium_raw_key_for_retro(identifier)
                 .is_some_and(|key| state.keyboard.contains(key))
                 .into();
         }
-        if device != abi::DEVICE_JOYPAD
-            || index != 0
-            || usize::try_from(port)
-                .map_or(true, |port| port >= state.core.controller_ports().len())
-        {
+        if device != abi::DEVICE_JOYPAD || !port_device.is_joypad() || index != 0 {
             return 0;
         }
         let joypad = match port {
@@ -561,9 +563,13 @@ mod tests {
         );
         let callback = binding.input_state_callback();
         // SAFETY: Input callbacks have no pointer parameters.
-        assert_eq!(unsafe { callback(0, abi::DEVICE_KEYBOARD, 0, 97) }, 1);
+        assert_eq!(unsafe { callback(2, abi::DEVICE_KEYBOARD, 0, 97) }, 1);
         // SAFETY: Input callbacks have no pointer parameters.
-        assert_eq!(unsafe { callback(0, abi::DEVICE_KEYBOARD, 0, 282) }, 0);
+        assert_eq!(unsafe { callback(2, abi::DEVICE_KEYBOARD, 0, 282) }, 0);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(0, abi::DEVICE_KEYBOARD, 0, 97) }, 0);
+        // SAFETY: Input callbacks have no pointer parameters.
+        assert_eq!(unsafe { callback(2, abi::DEVICE_JOYPAD, 0, 8) }, 0);
         // SAFETY: Input callbacks have no pointer parameters.
         assert_eq!(
             unsafe { callback(0, abi::device_subclass(abi::DEVICE_JOYPAD, 1), 0, 8) },

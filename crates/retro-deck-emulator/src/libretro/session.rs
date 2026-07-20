@@ -22,7 +22,7 @@ use retro_deck_platform::{
 use super::abi;
 use super::callbacks::{CallbackBinding, CallbackBindingError};
 use super::{
-    AudioBatchError, Content, ControllerDevice, JoypadState, LibretroCore, MAXIMUM_SAVE_BYTES,
+    AudioBatchError, Content, InputPortDevice, JoypadState, LibretroCore, MAXIMUM_SAVE_BYTES,
     MemoryKind, SaveError, SaveStore, VideoCallbackError,
 };
 
@@ -706,14 +706,17 @@ impl CoreLifecycle {
     }
 
     fn configure_controllers(&self, core: LibretroCore) {
-        for (port, controller) in core.controller_ports().iter().copied().enumerate() {
+        for (port, device) in core.input_ports().iter().copied().enumerate() {
             let Ok(port) = c_uint::try_from(port) else {
                 continue;
             };
-            let device = match controller {
-                ControllerDevice::Joypad => abi::DEVICE_JOYPAD,
-                ControllerDevice::JoypadSubclass(identifier) => {
+            let device = match device {
+                InputPortDevice::Joypad => abi::DEVICE_JOYPAD,
+                InputPortDevice::JoypadSubclass(identifier) => {
                     abi::device_subclass(abi::DEVICE_JOYPAD, c_uint::from(identifier))
+                }
+                InputPortDevice::KeyboardSubclass(identifier) => {
+                    abi::device_subclass(abi::DEVICE_KEYBOARD, c_uint::from(identifier))
                 }
             };
             // SAFETY: The profile contains only bounded API-v1 port devices.

@@ -14,11 +14,12 @@ const GAME_BOY_MEMORY: [MemoryFile; 2] = [
 ];
 const ZX_MEMORY: [MemoryFile; 0] = [];
 
-const NES_CONTROLLERS: [ControllerDevice; 2] = [ControllerDevice::Joypad, ControllerDevice::Joypad];
-const GAME_BOY_CONTROLLERS: [ControllerDevice; 1] = [ControllerDevice::Joypad];
-const ZX_CONTROLLERS: [ControllerDevice; 2] = [
-    ControllerDevice::JoypadSubclass(1),
-    ControllerDevice::JoypadSubclass(3),
+const NES_INPUT_PORTS: [InputPortDevice; 2] = [InputPortDevice::Joypad, InputPortDevice::Joypad];
+const GAME_BOY_INPUT_PORTS: [InputPortDevice; 1] = [InputPortDevice::Joypad];
+const ZX_INPUT_PORTS: [InputPortDevice; 3] = [
+    InputPortDevice::JoypadSubclass(1),
+    InputPortDevice::JoypadSubclass(3),
+    InputPortDevice::KeyboardSubclass(0),
 ];
 
 /// One pinned libretro core and the system contract around it.
@@ -93,13 +94,13 @@ impl LibretroCore {
         }
     }
 
-    /// Controller device assigned to each libretro port in player order.
+    /// Input device assigned to each libretro port.
     #[must_use]
-    pub const fn controller_ports(self) -> &'static [ControllerDevice] {
+    pub const fn input_ports(self) -> &'static [InputPortDevice] {
         match self {
-            Self::Fceumm => &NES_CONTROLLERS,
-            Self::Gambatte => &GAME_BOY_CONTROLLERS,
-            Self::Fuse => &ZX_CONTROLLERS,
+            Self::Fceumm => &NES_INPUT_PORTS,
+            Self::Gambatte => &GAME_BOY_INPUT_PORTS,
+            Self::Fuse => &ZX_INPUT_PORTS,
         }
     }
 }
@@ -138,13 +139,29 @@ impl MemoryFile {
     }
 }
 
-/// Libretro input device assigned to one player port.
+/// Libretro input device assigned to one core port.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ControllerDevice {
+pub enum InputPortDevice {
     /// Standard libretro joypad.
     Joypad,
     /// Core-defined joypad subclass with the given identifier.
     JoypadSubclass(u8),
+    /// Core-defined keyboard subclass with the given identifier.
+    KeyboardSubclass(u8),
+}
+
+impl InputPortDevice {
+    /// Whether this port accepts libretro joypad queries.
+    #[must_use]
+    pub const fn is_joypad(self) -> bool {
+        matches!(self, Self::Joypad | Self::JoypadSubclass(_))
+    }
+
+    /// Whether this port accepts libretro keyboard queries.
+    #[must_use]
+    pub const fn is_keyboard(self) -> bool {
+        matches!(self, Self::KeyboardSubclass(_))
+    }
 }
 
 #[cfg(test)]
@@ -215,20 +232,21 @@ mod tests {
     }
 
     #[test]
-    fn controller_topology_matches_each_machine() {
+    fn input_topology_matches_each_machine() {
         assert_eq!(
-            LibretroCore::Fceumm.controller_ports(),
-            &[ControllerDevice::Joypad, ControllerDevice::Joypad]
+            LibretroCore::Fceumm.input_ports(),
+            &[InputPortDevice::Joypad, InputPortDevice::Joypad]
         );
         assert_eq!(
-            LibretroCore::Gambatte.controller_ports(),
-            &[ControllerDevice::Joypad]
+            LibretroCore::Gambatte.input_ports(),
+            &[InputPortDevice::Joypad]
         );
         assert_eq!(
-            LibretroCore::Fuse.controller_ports(),
+            LibretroCore::Fuse.input_ports(),
             &[
-                ControllerDevice::JoypadSubclass(1),
-                ControllerDevice::JoypadSubclass(3)
+                InputPortDevice::JoypadSubclass(1),
+                InputPortDevice::JoypadSubclass(3),
+                InputPortDevice::KeyboardSubclass(0)
             ]
         );
     }
