@@ -37,15 +37,6 @@
         root = ./src;
         fileset = pkgs.lib.fileset.unions files;
       };
-      runtimeSources = [
-        ./src/deck_runtime.cpp
-        ./src/deck_runtime.h
-        ./src/deck_wayland.cpp
-        ./src/deck_wayland.h
-      ];
-      chiptuneSources = sourceTree (runtimeSources ++ [
-        ./src/chiptune_deck.cpp
-      ]);
       menuSources = sourceTree [
         ./src/deck_menu.cpp
         ./src/deck_wayland.cpp
@@ -103,6 +94,9 @@
       timerRustSources = rustWorkspaceSources [
         ./protocol/deck-widget-v1.xml
       ];
+      chiptuneRustSources = rustWorkspaceSources [
+        ./protocol/deck-widget-v1.xml
+      ];
       chip8RustSources = rustWorkspaceSources [
         ./protocol/deck-widget-v1.xml
         ./vendor/emulators/c-octo/LICENSE.txt
@@ -121,11 +115,11 @@
         "-lgcc_eh"
         "-lgcc"
       ];
-      libretroLinkFlags = coreArchive: nativeLibraries:
+      staticArchiveLinkFlags = archive: nativeLibraries:
         pkgs.lib.concatMapStringsSep " "
           (argument: "-C link-arg=${argument}")
           (
-            [ "-Wl,--start-group" "-Wl,-Bstatic" coreArchive ]
+            [ "-Wl,--start-group" "-Wl,-Bstatic" archive ]
             ++ nativeLibraries
             ++ nativeStaticLibraries
             ++ [ "-Wl,--end-group" ]
@@ -167,7 +161,7 @@
           allowedReferences = [ ];
 
           preBuild = coreBuild + ''
-            export RUSTFLAGS="$RUSTFLAGS ${libretroLinkFlags coreArchive nativeLibraries}"
+            export RUSTFLAGS="$RUSTFLAGS ${staticArchiveLinkFlags coreArchive nativeLibraries}"
           '';
 
           postInstall = ''
@@ -308,63 +302,71 @@
           };
         };
 
-        chiptune-deck = pkgsCross.stdenv.mkDerivation {
+        chiptune-deck = pkgsCross.rustPlatform.buildRustPackage {
           pname = "chiptune-deck";
-          version = pkgs.game-music-emu.version;
+          version = "0.1.0";
+          src = chiptuneRustSources;
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [
+            "-p"
+            "retro-deck-apps"
+            "--bin"
+            "chiptune-deck"
+            "--features"
+            "chiptune-gme"
+          ];
+          doCheck = false;
 
-          src = pkgs.game-music-emu.src;
-          nativeBuildInputs =
-            [ pkgs.cmake pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [
-            pkgsCross.glibc.static
-            staticCross.libvorbis
-            staticCross.zlib
-          ] ++ waylandStaticInputs;
+          env.RUSTFLAGS = "-C target-feature=+crt-static -C link-arg=-static";
+          nativeBuildInputs = [ pkgs.cmake pkgs.nukeReferences ];
+          buildInputs = [ pkgsCross.glibc.static staticCross.zlib ];
           allowedReferences = [ ];
 
-          cmakeFlags = [
-            "-DBUILD_SHARED_LIBS=OFF"
-            "-DENABLE_UBSAN=OFF"
-          ];
-
-          buildPhase = ''
-            runHook preBuild
-            cmake --build . --parallel $NIX_BUILD_CORES
-            ${waylandProtocolBuild}
-            $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${chiptuneSources} -I.. \
-              ${chiptuneSources}/chiptune_deck.cpp \
-              ${chiptuneSources}/deck_runtime.cpp \
-              ${chiptuneSources}/deck_wayland.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              gme/libgme.a \
-              -static -Wl,-s -pthread -lvorbisfile -lvorbis -logg -lm -lz \
-              -lwayland-client -lffi \
-              -o chiptune-deck
-            runHook postBuild
+          preBuild = ''
+            gme_source=$TMPDIR/game-music-emu
+            gme_build=$TMPDIR/game-music-emu-build
+            mkdir -p "$gme_source" "$gme_build"
+            tar --extract --file=${pkgs.game-music-emu.src} \
+              --directory="$gme_source" --strip-components=1
+            chmod -R u+w "$gme_source"
+            cmake -S "$gme_source" -B "$gme_build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER="$CC" \
+              -DCMAKE_CXX_COMPILER="$CXX" \
+              -DCMAKE_AR=${pkgsCross.stdenv.cc.bintools.bintools}/bin/${pkgsCross.stdenv.cc.targetPrefix}ar \
+              -DCMAKE_RANLIB=${pkgsCross.stdenv.cc.bintools.bintools}/bin/${pkgsCross.stdenv.cc.targetPrefix}ranlib \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DENABLE_UBSAN=OFF
+            cmake --build "$gme_build" --parallel "$NIX_BUILD_CORES"
+            export RUSTFLAGS="$RUSTFLAGS ${
+              staticArchiveLinkFlags
+                "$gme_build/gme/libgme.a"
+                [ "-lstdc++" "-lz" ]
+            }"
           '';
 
-          installPhase = ''
-            runHook preInstall
+          postInstall = ''
             mkdir -p $out/bin $out/share/licenses/chiptune-deck
-            install -m755 chiptune-deck $out/bin/chiptune-deck
-            install -m644 ../license.txt \
-              $out/share/licenses/chiptune-deck/license.txt
-            tar -xOf ${pkgs.libvorbis.src} \
-              libvorbis-${pkgs.libvorbis.version}/COPYING \
-              > $out/share/licenses/chiptune-deck/libvorbis-COPYING
-            tar -xOf ${pkgs.libogg.src} \
-              libogg-${pkgs.libogg.version}/COPYING \
-              > $out/share/licenses/chiptune-deck/libogg-COPYING
+            tar --extract --file=${pkgs.game-music-emu.src} \
+              --to-stdout \
+              game-music-emu-${pkgs.game-music-emu.version}/license.txt \
+              > $out/share/licenses/chiptune-deck/license.txt
+          '';
+
+          postFixup = ''
+            ${pkgsCross.stdenv.cc.bintools.bintools}/bin/${pkgsCross.stdenv.cc.targetPrefix}strip \
+              --strip-all $out/bin/chiptune-deck
             nuke-refs $out/bin/chiptune-deck
-            runHook postInstall
           '';
 
           meta = {
-            description = "Native chiptune music player for the Braiins Forge Deck";
+            description = "Rust chiptune music player for the Braiins Forge Deck";
             homepage = "https://github.com/libgme/game-music-emu";
-            license = [ pkgs.lib.licenses.lgpl21Plus pkgs.lib.licenses.bsd3 ];
+            license = [
+              pkgs.lib.licenses.gpl3Only
+              pkgs.lib.licenses.lgpl21Plus
+              pkgs.lib.licenses.bsd3
+            ];
             platforms = [ "armv7l-linux" ];
           };
         };
