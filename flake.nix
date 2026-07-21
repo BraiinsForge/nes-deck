@@ -2,7 +2,7 @@
   description = "Retro Deck emulators and launcher for Braiins Forge Deck";
 
   inputs = {
-    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=a5d0e7ddde0d9753cd81094fa8ff5753161f685d";
+    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=52c04bebde73a582aaaa4abb95092de666e01870";
     nixpkgs.follows = "bmc-main/nixpkgs";
     fceumm-src = {
       url = "github:libretro/libretro-fceumm/3a84a6fd0ba20dd4877c06b1d58741172148395f";
