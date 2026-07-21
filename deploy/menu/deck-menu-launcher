@@ -52,6 +52,7 @@ WIFI_HELPER=/usr/sbin/deck-wifi-profile-add
 WIFI_STATUS=/var/run/deck-wifi/status
 KEYBOARD_QUIRKS=/usr/sbin/deck-keyboard-quirks
 COMPILER=$MENU_DIR/compile-catalog.lisp
+SETTINGS_ICON_INDEX=$MENU_DIR/knekko-settings-icons.tsv
 ECL=$BASE/ecl/bin/ecl.bin
 ECLDIR=$BASE/ecl/lib/ecl/
 LOG_FILE=$LOG_DIR/deck-menu.log
@@ -241,7 +242,39 @@ esac
 
 manifest=$FALLBACK_MANIFEST
 palette=$FALLBACK_PALETTE
-if [ -x "$ECL" ] && [ -r "$COMPILER" ] && [ -r "$CATALOG" ]; then
+catalog_cache_current=false
+if [ -r "$GENERATED_MANIFEST" ] && [ -s "$GENERATED_MANIFEST" ] &&
+	[ ! -L "$GENERATED_MANIFEST" ] &&
+	[ -r "$GENERATED_PALETTE" ] && [ -s "$GENERATED_PALETTE" ] &&
+	[ ! -L "$GENERATED_PALETTE" ]; then
+	catalog_cache_current=true
+	for input in "$CATALOG" "$COMPILER" "$SETTINGS_ICON_INDEX"; do
+		if [ -e "$input" ] &&
+			{ [ "$input" -nt "$GENERATED_MANIFEST" ] ||
+			  [ "$input" -nt "$GENERATED_PALETTE" ]; }; then
+			catalog_cache_current=false
+			break
+		fi
+	done
+	if [ "$catalog_cache_current" = true ] &&
+		[ -e "$PALETTE_OVERRIDE" ] &&
+		[ "$PALETTE_OVERRIDE" -nt "$GENERATED_PALETTE" ]; then
+		catalog_cache_current=false
+	fi
+	if [ "$catalog_cache_current" = true ] &&
+		{ ! "$MENU" --validate-manifest "$GENERATED_MANIFEST" \
+			>> "$LOG_FILE" 2>&1 ||
+		  ! "$MENU" --validate-palette "$GENERATED_PALETTE" \
+			>> "$LOG_FILE" 2>&1; }; then
+		catalog_cache_current=false
+	fi
+fi
+
+if [ "$catalog_cache_current" = true ]; then
+	manifest=$GENERATED_MANIFEST
+	palette=$GENERATED_PALETTE
+	log_message "using current generated manifest and dashboard palette"
+elif [ -x "$ECL" ] && [ -r "$COMPILER" ] && [ -r "$CATALOG" ]; then
 	log_message "validating menu catalog with ECL"
 	if "$ECL" --norc --shell "$COMPILER" "$CATALOG" \
 		"$GENERATED_MANIFEST" "$GENERATED_PALETTE" "$PALETTE_OVERRIDE" \
