@@ -786,9 +786,8 @@
             install -m644 COPYING $out/share/licenses/fbterm-deck/COPYING
             install -m644 ${./terminal/fonts/DejaVu-LICENSE} \
               $out/share/licenses/fbterm-deck/DejaVu-LICENSE
-            tar --extract --xz --to-stdout --file=${pkgs.kbd.src} \
-              --wildcards 'kbd-*/COPYING' \
-              > $out/share/licenses/fbterm-deck/kbd-COPYING
+            install -m644 ${pkgs.kbd.src}/LICENSE \
+              $out/share/licenses/fbterm-deck/kbd-COPYING
           '';
 
           postFixup = (old.postFixup or "") + ''
