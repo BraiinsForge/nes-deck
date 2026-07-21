@@ -16,21 +16,21 @@ tokei crates lisp
 
 | Component | Code lines | Share |
 | --- | ---: | ---: |
-| `retro-deck-apps` | 4,729 | 17.19% |
-| `retro-deck-audio` | 249 | 0.90% |
-| `retro-deck-config` | 1,500 | 5.45% |
-| `retro-deck-dashboard` | 3,163 | 11.49% |
-| `retro-deck-emulator` | 6,235 | 22.66% |
-| `retro-deck-platform` | 3,934 | 14.30% |
-| `retro-deck-policy` | 1,521 | 5.53% |
-| `retro-deck-ui` | 570 | 2.07% |
-| `retro-deck-uploader` | 4,962 | 18.03% |
-| Common Lisp policy | 655 | 2.38% |
-| **Total** | **27,518** | **100.00%** |
+| `retro-deck-apps` | 4,729 | 16.85% |
+| `retro-deck-audio` | 249 | 0.89% |
+| `retro-deck-config` | 1,500 | 5.35% |
+| `retro-deck-dashboard` | 3,685 | 13.13% |
+| `retro-deck-emulator` | 6,235 | 22.22% |
+| `retro-deck-platform` | 3,934 | 14.02% |
+| `retro-deck-policy` | 1,521 | 5.42% |
+| `retro-deck-ui` | 570 | 2.03% |
+| `retro-deck-uploader` | 4,962 | 17.69% |
+| Common Lisp policy | 672 | 2.40% |
+| **Total** | **28,057** | **100.00%** |
 
 The emulator row contains a 99-line first-party C adapter around c-octo. By
-language, the total is 26,764 Rust lines (97.26%), 655 Common Lisp lines
-(2.38%), and 99 C lines (0.36%). There is no selected first-party Go or C++.
+language, the total is 27,286 Rust lines (97.25%), 672 Common Lisp lines
+(2.40%), and 99 C lines (0.35%). There is no selected first-party Go or C++.
 
 The standalone uploader remains because it already uses established Axum,
 Serde, and Tokio libraries rather than implementing an HTTP stack. Its future
@@ -41,9 +41,9 @@ emulator, input, audio, and policy rewrite.
 
 - `vendor/emulators/**` and `terminal/fbterm/**` are marked
   `linguist-vendored` in `.gitattributes`.
-- Relative to `migration/rust-lisp`, this branch adds 6,235 and deletes 23,258
-  Rust, Lisp, C, header, and C++ source lines: a net reduction of 17,023.
-- The general BMC feature branch adds 4,041 and deletes 674 Rust source lines
-  relative to its upstream base: net 3,367. Those lines implement reusable BMC
+- Relative to `migration/rust-lisp`, this branch adds 6,871 and deletes 23,276
+  Rust, Lisp, C, header, and C++ source lines: a net reduction of 16,405.
+- The general BMC feature branch adds 4,086 and deletes 754 Rust source lines
+  relative to its upstream base: net 3,332. Those lines implement reusable BMC
   widget input, application supervision, and audio facilities and are not
   counted as Retro Deck code above.
