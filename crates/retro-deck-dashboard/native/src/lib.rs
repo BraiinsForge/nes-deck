@@ -39,7 +39,9 @@ pub use launch::{
 };
 pub use launch_options::{DEFAULT_VOLUME_PERCENT, Keymap, VolumeError, VolumeState};
 #[cfg(feature = "bmc-native")]
-pub use native_catalog::{NativeCatalogError, load_native_catalog};
+pub use native_catalog::{
+    NativeCatalogError, load_native_catalog, load_native_catalog_with_uploads,
+};
 #[cfg(feature = "bmc-native")]
 pub use native_cover::{NATIVE_COVER_SIZE, NativeCover, load_native_cover};
 #[cfg(feature = "bmc-native")]

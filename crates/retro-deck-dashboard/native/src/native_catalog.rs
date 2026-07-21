@@ -22,7 +22,54 @@ use crate::{DashboardCatalog, DashboardCatalogError};
 /// Returns [`NativeCatalogError`] for an unsafe path, filesystem failure,
 /// allocation failure, malformed catalog, or invalid combined dashboard view.
 pub fn load_native_catalog(path: impl AsRef<Path>) -> Result<DashboardCatalog, NativeCatalogError> {
-    let path = path.as_ref();
+    let catalog = load_catalog(path.as_ref())?;
+    if catalog.is_empty() {
+        return Err(NativeCatalogError::EmptyCatalog);
+    }
+    DashboardCatalog::from_catalog(&catalog).map_err(NativeCatalogError::Dashboard)
+}
+
+/// Load the required installed catalog plus an optional web-upload catalog.
+///
+/// A missing or malformed supplemental file is recoverable state and leaves
+/// the checked-in catalog usable. Valid supplemental rows still pass the
+/// combined identifier, path, and capacity checks.
+///
+/// # Errors
+///
+/// Returns [`NativeCatalogError`] when the required catalog cannot be loaded
+/// or when two individually valid sources violate a combined invariant.
+pub fn load_native_catalog_with_uploads(
+    base_path: impl AsRef<Path>,
+    upload_path: impl AsRef<Path>,
+) -> Result<DashboardCatalog, NativeCatalogError> {
+    let base = load_catalog(base_path.as_ref())?;
+    if base.is_empty() {
+        return Err(NativeCatalogError::EmptyCatalog);
+    }
+    let uploads = match load_catalog(upload_path.as_ref()) {
+        Ok(catalog) => Some(catalog),
+        Err(NativeCatalogError::Open { source, .. })
+            if source.kind() == io::ErrorKind::NotFound =>
+        {
+            None
+        }
+        Err(error) => {
+            tracing::warn!(?error, "ignoring invalid supplemental upload catalog");
+            None
+        }
+    };
+    DashboardCatalog::from_entries(
+        base.entries().iter().cloned().chain(
+            uploads
+                .iter()
+                .flat_map(|catalog| catalog.entries().iter().cloned()),
+        ),
+    )
+    .map_err(NativeCatalogError::Dashboard)
+}
+
+fn load_catalog(path: &Path) -> Result<Catalog, NativeCatalogError> {
     if !path.is_absolute() {
         return Err(NativeCatalogError::UnsafePath(path.to_path_buf()));
     }
@@ -65,11 +112,7 @@ pub fn load_native_catalog(path: impl AsRef<Path>) -> Result<DashboardCatalog, N
         });
     }
 
-    let catalog = Catalog::parse(&bytes).map_err(NativeCatalogError::Parse)?;
-    if catalog.is_empty() {
-        return Err(NativeCatalogError::EmptyCatalog);
-    }
-    DashboardCatalog::from_catalog(&catalog).map_err(NativeCatalogError::Dashboard)
+    Catalog::parse(&bytes).map_err(NativeCatalogError::Parse)
 }
 
 /// Failure while loading the BMC-native dashboard catalog.
@@ -206,5 +249,28 @@ mod tests {
             Err(NativeCatalogError::Oversized { .. })
         ));
         let _ignored = fs::remove_file(oversized);
+    }
+
+    #[test]
+    fn combines_valid_uploads_and_ignores_a_broken_optional_catalog() {
+        let base = fixture_path("base.tsv");
+        let uploads = fixture_path("uploads.tsv");
+        fs::write(&base, CATALOG).expect("base catalog is written");
+        fs::write(
+            &uploads,
+            b"uploaded\tUPLOADED\tnes\t/mnt/data/roms/nes/uploaded.nes\t#D78787\n",
+        )
+        .expect("upload catalog is written");
+        let combined =
+            load_native_catalog_with_uploads(&base, &uploads).expect("valid catalogs combine");
+        assert_eq!(combined.entries().len(), 16);
+        assert!(combined.find("uploaded").is_some());
+
+        fs::write(&uploads, b"broken\n").expect("broken upload catalog is written");
+        let fallback = load_native_catalog_with_uploads(&base, &uploads)
+            .expect("broken optional catalog falls back");
+        assert_eq!(fallback.entries().len(), 15);
+        let _ignored = fs::remove_file(base);
+        let _ignored = fs::remove_file(uploads);
     }
 }

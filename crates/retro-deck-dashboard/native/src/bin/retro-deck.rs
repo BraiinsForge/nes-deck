@@ -23,7 +23,7 @@ use retro_deck_dashboard::{
     ApplicationRequest, BMC_APPLICATION_ID, BmcNavigation, BmcScreen, BmcUiAction, DashboardModel,
     GamepadInput, Intent, Keymap, LaunchTarget, MenuCue, NATIVE_COVER_SIZE, VolumeState,
     bmc_action_for_navigation, bmc_action_for_touch, build_bmc_tree, dashboard_startup_from_policy,
-    load_native_catalog, load_native_cover, load_native_palette,
+    load_native_catalog, load_native_catalog_with_uploads, load_native_cover, load_native_palette,
 };
 use retro_deck_policy::{
     PolicyClient, PolicyEvent, PolicyEventPoll, PolicyResponse, PolicySubmit, Value, WorkerCommand,
@@ -32,6 +32,7 @@ use retro_deck_policy::{
 
 const MANIFEST_ENV: &str = "RETRO_DECK_MANIFEST";
 const DEFAULT_MANIFEST_PATH: &str = "/mnt/data/nes-deck/menu/games.tsv";
+const UPLOAD_MANIFEST_PATH: &str = "/mnt/data/nes-deck/uploads/games.tsv";
 const DEFAULT_PALETTE_PATH: &str = "/mnt/data/nes-deck/menu/palette.tsv";
 const PALETTE_OVERRIDE_PATH: &str = "/mnt/data/nes-deck/state/dashboard-palette.sexp";
 const COVER_DIRECTORY: &str = "/mnt/data/nes-deck/covers";
@@ -65,8 +66,13 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
-    let catalog = load_native_catalog(configured_path(MANIFEST_ENV, DEFAULT_MANIFEST_PATH))
-        .context("load Retro Deck catalog")?;
+    let configured_manifest = configured_path(MANIFEST_ENV, DEFAULT_MANIFEST_PATH);
+    let catalog = if env::var_os(MANIFEST_ENV).is_some() {
+        load_native_catalog(&configured_manifest)
+    } else {
+        load_native_catalog_with_uploads(&configured_manifest, Path::new(UPLOAD_MANIFEST_PATH))
+    }
+    .context("load Retro Deck catalog")?;
     let palette = load_native_palette(
         Path::new(DEFAULT_PALETTE_PATH),
         Path::new(PALETTE_OVERRIDE_PATH),
