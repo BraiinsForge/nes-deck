@@ -1,6 +1,6 @@
 //! Normalize compositor-routed raw gamepad reports without owning devices.
 
-use super::{AxisRange, ControllerTracker, InputEvent, PhysicalButton, Player};
+use super::{AxisRange, ButtonSet, ControllerTracker, InputEvent, PhysicalButton, Player};
 
 const ABS_X: u16 = 0;
 const ABS_Y: u16 = 1;
@@ -82,6 +82,13 @@ impl ControllerState {
         }
     }
 
+    fn buttons(self) -> ButtonSet {
+        match self.tracker {
+            Some(tracker) => tracker.state(),
+            None => ButtonSet::empty(),
+        }
+    }
+
     fn rebuild_tracker(&mut self) {
         let (Some(x_range), Some(y_range)) = (self.x_range, self.y_range) else {
             return;
@@ -127,10 +134,21 @@ impl WaylandControllers {
         self.player_mut(player).finish_report(player, output);
     }
 
+    pub(crate) fn buttons(&self, player: Player) -> ButtonSet {
+        self.player(player).buttons()
+    }
+
     const fn player_mut(&mut self, player: Player) -> &mut ControllerState {
         match player {
             Player::One => &mut self.one,
             Player::Two => &mut self.two,
+        }
+    }
+
+    const fn player(&self, player: Player) -> &ControllerState {
+        match player {
+            Player::One => &self.one,
+            Player::Two => &self.two,
         }
     }
 }
@@ -180,6 +198,9 @@ mod tests {
                 edge: ButtonEdge::Pressed,
             }]
         );
+        assert!(controllers.buttons(Player::Two).contains(Button::A));
+        controllers.disconnected(Player::Two);
+        assert_eq!(controllers.buttons(Player::Two), ButtonSet::empty());
     }
 
     #[test]

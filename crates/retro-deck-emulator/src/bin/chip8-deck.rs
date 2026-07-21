@@ -5,10 +5,9 @@ use std::error::Error;
 use std::ffi::OsStr;
 use std::fmt;
 use std::io;
-use std::os::fd::AsFd as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use retro_deck_audio::{SampleRate, Volume};
 use retro_deck_emulator::chip8::{
@@ -17,9 +16,7 @@ use retro_deck_emulator::chip8::{
 };
 use retro_deck_platform::audio::{SquareStream, SquareStreamWorker, StreamWorkerReport};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
-use retro_deck_platform::input::{
-    Button, ButtonSet, ControllerDevices, InputError, InputEvent, Player,
-};
+use retro_deck_platform::input::{Button, ButtonSet, Player};
 use retro_deck_platform::shutdown::ShutdownFlag;
 use retro_deck_platform::time::{FrameClock, FrameRate};
 use retro_deck_platform::wayland::{
@@ -32,7 +29,6 @@ const AUDIO_SAMPLE_RATE: u32 = 44_100;
 const AUDIO_FREQUENCY_HZ: u32 = 440;
 const EMULATED_FRAMES_PER_SECOND: u32 = 60;
 const DIAGNOSTIC_FRAME_INTERVAL: u64 = 60;
-const CONTROLLER_SCAN_INTERVAL: Duration = Duration::from_secs(1);
 
 const BUTTON_MAP: [(Button, ControllerButton); 10] = [
     (Button::A, ControllerButton::A),
@@ -72,8 +68,6 @@ fn main() -> ExitCode {
 #[derive(Debug)]
 struct Chip8Runtime {
     shutdown: ShutdownFlag,
-    controllers: ControllerDevices,
-    input_events: Vec<InputEvent>,
     controller_state: ControllerState,
     presentation: WaylandPresentation,
     source_dimensions: Dimensions,
@@ -82,7 +76,6 @@ struct Chip8Runtime {
     normalized_frame: NormalizedFrame,
     audio: Option<SquareStreamWorker>,
     clock: FrameClock,
-    next_controller_scan: Instant,
     diagnostics: Option<RuntimeDiagnostics>,
 }
 
@@ -97,23 +90,19 @@ impl Chip8Runtime {
         let presentation = WaylandPresentation::connect_gameplay(source_dimensions, background)
             .map_err(RuntimeError::Presentation)?;
         let shutdown = ShutdownFlag::install().map_err(RuntimeError::Signals)?;
-        let controllers = discover_controllers();
         let volume = configured_volume();
         let frame_rate =
             FrameRate::new(EMULATED_FRAMES_PER_SECOND).ok_or(RuntimeError::InvalidFrameRate)?;
 
         eprintln!(
-            "{APPLICATION}: {}-byte ROM, {} instructions/frame, {} controller(s), volume {}%",
+            "{APPLICATION}: {}-byte ROM, {} instructions/frame, compositor input, volume {}%",
             program.rom().len(),
             configuration.core().instructions_per_frame(),
-            controllers.controller_count(),
             volume.percent()
         );
 
         Ok(Self {
             shutdown,
-            controllers,
-            input_events: Vec::with_capacity(64),
             controller_state: ControllerState::default(),
             presentation,
             source_dimensions,
@@ -122,7 +111,6 @@ impl Chip8Runtime {
             normalized_frame: NormalizedFrame::new(),
             audio: start_audio(volume),
             clock: FrameClock::start(frame_rate),
-            next_controller_scan: Instant::now() + CONTROLLER_SCAN_INTERVAL,
             diagnostics: env::var_os("RETRO_DECK_RUNTIME_DIAGNOSTICS")
                 .is_some()
                 .then(RuntimeDiagnostics::start),
@@ -145,17 +133,13 @@ impl Chip8Runtime {
             && !self.presentation.shutdown_requested()
             && !self.core.halted()
         {
-            self.rescan_controllers();
-            self.controllers
-                .wait_readable_with(self.presentation.as_fd(), self.clock.wait_duration())
-                .map_err(RuntimeError::Input)?;
             self.presentation
-                .dispatch_nonblocking()
+                .dispatch_with_timeout(self.clock.wait_duration())
                 .map_err(RuntimeError::Presentation)?;
             if self.shutdown.requested() || self.presentation.shutdown_requested() {
                 break;
             }
-            self.drain_controllers();
+            self.sync_controller_input();
             if !self.clock.wait_duration().is_zero() {
                 continue;
             }
@@ -168,41 +152,14 @@ impl Chip8Runtime {
         Ok(())
     }
 
-    fn drain_controllers(&mut self) {
-        self.input_events.clear();
-        let stats = self.controllers.drain_into(&mut self.input_events);
-        if stats.dropped() != 0 {
+    fn sync_controller_input(&mut self) {
+        let dropped = self.presentation.discard_input_events();
+        if dropped != 0 {
             eprintln!(
-                "{APPLICATION}: discarded {} controller edge(s); complete state remains synchronized",
-                stats.dropped()
+                "{APPLICATION}: discarded {dropped} controller edge(s); complete state remains synchronized"
             );
         }
-        for player in [Player::One, Player::Two] {
-            if stats.disconnected(player) {
-                eprintln!("{APPLICATION}: controller {player:?} disconnected");
-            }
-        }
-        if stats.disconnected_count() != 0 {
-            self.next_controller_scan = Instant::now();
-        }
-        self.controller_state = controller_state(&self.controllers);
-    }
-
-    fn rescan_controllers(&mut self) {
-        let now = Instant::now();
-        if now < self.next_controller_scan {
-            return;
-        }
-        self.next_controller_scan = now + CONTROLLER_SCAN_INTERVAL;
-        match self.controllers.rescan() {
-            Ok(stats) if stats.attached() != 0 => eprintln!(
-                "{APPLICATION}: attached {} controller(s); {} ready",
-                stats.attached(),
-                stats.connected()
-            ),
-            Ok(_) => {}
-            Err(error) => eprintln!("{APPLICATION}: controller rescan failed: {error}"),
-        }
+        self.controller_state = controller_state(&self.presentation);
     }
 
     fn run_frame(&mut self) -> Result<LoopControl, RuntimeError> {
@@ -257,23 +214,17 @@ enum LoopControl {
     Exit,
 }
 
-fn discover_controllers() -> ControllerDevices {
-    match ControllerDevices::discover() {
-        Ok(controllers) => controllers,
-        Err(error) => {
-            eprintln!("{APPLICATION}: {error}; continuing without controller input");
-            ControllerDevices::default()
-        }
-    }
-}
-
-fn controller_state(devices: &ControllerDevices) -> ControllerState {
+fn controller_state(presentation: &WaylandPresentation) -> ControllerState {
     let mut output = ControllerState::default();
     for (player, controller) in [
         (Player::One, Controller::One),
         (Player::Two, Controller::Two),
     ] {
-        apply_buttons(&mut output, controller, devices.buttons(player));
+        apply_buttons(
+            &mut output,
+            controller,
+            presentation.controller_buttons(player),
+        );
     }
     output
 }
@@ -382,7 +333,6 @@ enum RuntimeError {
     Core(CoreError),
     CoreFrame(FrameError),
     Frame(DisplayError),
-    Input(InputError),
     Presentation(WaylandPresentationError),
     Signals(io::Error),
     InvalidDimensions,
@@ -396,7 +346,6 @@ impl fmt::Display for RuntimeError {
             Self::Core(source) => source.fmt(formatter),
             Self::CoreFrame(source) => source.fmt(formatter),
             Self::Frame(source) => source.fmt(formatter),
-            Self::Input(source) => source.fmt(formatter),
             Self::Presentation(source) => source.fmt(formatter),
             Self::Signals(source) => write!(formatter, "cannot install signal handlers: {source}"),
             Self::InvalidDimensions => formatter.write_str("CHIP-8 frame dimensions are invalid"),
@@ -412,7 +361,6 @@ impl Error for RuntimeError {
             Self::Core(source) => Some(source),
             Self::CoreFrame(source) => Some(source),
             Self::Frame(source) => Some(source),
-            Self::Input(source) => Some(source),
             Self::Presentation(source) => Some(source),
             Self::Signals(source) => Some(source),
             Self::InvalidDimensions | Self::InvalidFrameRate => None,

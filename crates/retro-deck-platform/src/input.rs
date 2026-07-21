@@ -1,19 +1,10 @@
-//! Device-independent input state and Linux evdev integration.
+//! Device-independent input state for compositor and console adapters.
 
-mod linux;
 mod tty;
 mod wayland;
 
-pub use linux::{
-    ControllerDevices, ControllerScanStats, DrainStats, InputDevices, InputError, TouchscreenDevice,
-};
 pub use tty::{MediumRawKeyboard, MediumRawKeyboardError};
 pub(crate) use wayland::WaylandControllers;
-
-/// Logical width reported by the Deck touchscreen.
-pub const LOGICAL_WIDTH: u16 = crate::DECK_LOGICAL_WIDTH;
-/// Logical height reported by the Deck touchscreen.
-pub const LOGICAL_HEIGHT: u16 = crate::DECK_LOGICAL_HEIGHT;
 
 /// Stable controller slot exposed to applications and emulators.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -191,7 +182,7 @@ impl KeyboardState {
 
 /// Raw button position in Retro Games' published `THEGamepad` mapping.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum PhysicalButton {
+pub(crate) enum PhysicalButton {
     /// Physical Y, Linux button zero.
     Y,
     /// Physical B, Linux button one.
@@ -236,9 +227,9 @@ impl PhysicalButton {
     }
 }
 
-/// Inclusive raw axis range advertised by an evdev device.
+/// Inclusive raw axis range advertised by a compositor-owned controller.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AxisRange {
+pub(crate) struct AxisRange {
     minimum: i32,
     maximum: i32,
 }
@@ -246,7 +237,7 @@ pub struct AxisRange {
 impl AxisRange {
     /// Construct a nonempty axis range.
     #[must_use]
-    pub const fn new(minimum: i32, maximum: i32) -> Option<Self> {
+    pub(crate) const fn new(minimum: i32, maximum: i32) -> Option<Self> {
         if maximum > minimum {
             Some(Self { minimum, maximum })
         } else {
@@ -268,7 +259,7 @@ impl AxisRange {
     }
 }
 
-/// Press or release edge committed by one complete evdev report.
+/// Press or release edge committed by one complete controller report.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ButtonEdge {
     /// The semantic button became active.
@@ -300,27 +291,6 @@ pub struct TouchPoint {
     y: u16,
 }
 
-/// Complete logical touchscreen state after one or more committed reports.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TouchState {
-    point: TouchPoint,
-    down: bool,
-}
-
-impl TouchState {
-    /// Latest clamped contact position.
-    #[must_use]
-    pub const fn point(self) -> TouchPoint {
-        self.point
-    }
-
-    /// Whether a contact is currently held.
-    #[must_use]
-    pub const fn down(self) -> bool {
-        self.down
-    }
-}
-
 impl TouchPoint {
     pub(crate) const fn new(x: u16, y: u16) -> Self {
         Self { x, y }
@@ -336,56 +306,6 @@ impl TouchPoint {
     #[must_use]
     pub const fn y(self) -> u16 {
         self.y
-    }
-}
-
-/// Nonzero logical touchscreen bounds.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TouchBounds {
-    maximum_x: u16,
-    maximum_y: u16,
-}
-
-impl TouchBounds {
-    /// Construct bounds from width and height.
-    #[must_use]
-    pub const fn new(width: u16, height: u16) -> Option<Self> {
-        if width == 0 || height == 0 {
-            None
-        } else {
-            Some(Self {
-                maximum_x: width - 1,
-                maximum_y: height - 1,
-            })
-        }
-    }
-
-    const fn clamp(self, x: i32, y: i32) -> TouchPoint {
-        TouchPoint {
-            x: clamp_coordinate(x, self.maximum_x),
-            y: clamp_coordinate(y, self.maximum_y),
-        }
-    }
-}
-
-const DECK_TOUCH_BOUNDS: TouchBounds = TouchBounds {
-    maximum_x: LOGICAL_WIDTH - 1,
-    maximum_y: LOGICAL_HEIGHT - 1,
-};
-
-const fn clamp_coordinate(value: i32, maximum: u16) -> u16 {
-    if value <= 0 {
-        0
-    } else if value >= maximum as i32 {
-        maximum
-    } else {
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "the preceding comparisons prove the value is within u16 bounds"
-        )]
-        let bounded = value as u16;
-        bounded
     }
 }
 
@@ -458,7 +378,7 @@ impl ControllerTracker {
         self.reported = current;
     }
 
-    fn state(self) -> ButtonSet {
+    pub(crate) fn state(self) -> ButtonSet {
         let mut state = ButtonSet::empty();
         for physical in [
             PhysicalButton::Y,
@@ -478,51 +398,6 @@ impl ControllerTracker {
         let vertical = self.y_range.direction(self.y, Button::Up, Button::Down);
         state.0 |= horizontal.0 | vertical.0;
         state
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TouchTracker {
-    bounds: TouchBounds,
-    point: TouchPoint,
-    down: bool,
-    reported_down: bool,
-}
-
-impl TouchTracker {
-    pub(crate) const fn deck(x: i32, y: i32, down: bool) -> Self {
-        Self {
-            bounds: DECK_TOUCH_BOUNDS,
-            point: DECK_TOUCH_BOUNDS.clamp(x, y),
-            down,
-            reported_down: down,
-        }
-    }
-
-    pub(crate) const fn set_x(&mut self, value: i32) {
-        self.point.x = clamp_coordinate(value, self.bounds.maximum_x);
-    }
-
-    pub(crate) const fn set_y(&mut self, value: i32) {
-        self.point.y = clamp_coordinate(value, self.bounds.maximum_y);
-    }
-
-    pub(crate) const fn set_down(&mut self, down: bool) {
-        self.down = down;
-    }
-
-    pub(crate) const fn state(self) -> TouchState {
-        TouchState {
-            point: self.point,
-            down: self.down,
-        }
-    }
-
-    pub(crate) fn finish_report(&mut self, emit: &mut impl FnMut(InputEvent)) {
-        if self.down && !self.reported_down {
-            emit(InputEvent::TouchPressed(self.point));
-        }
-        self.reported_down = self.down;
     }
 }
 
@@ -657,47 +532,5 @@ mod tests {
         let mut events = Vec::new();
         tracker.finish_report(Player::One, &mut |event| events.push(event));
         assert!(events.is_empty());
-    }
-
-    #[test]
-    fn touch_is_clamped_and_emitted_only_on_a_rising_report() {
-        let mut tracker = TouchTracker::deck(-20, 900, false);
-        let mut events = Vec::new();
-        tracker.set_down(true);
-        tracker.finish_report(&mut |event| events.push(event));
-        tracker.finish_report(&mut |event| events.push(event));
-        tracker.set_down(false);
-        tracker.finish_report(&mut |event| events.push(event));
-        assert_eq!(
-            tracker.state(),
-            TouchState {
-                point: TouchPoint {
-                    x: 0,
-                    y: LOGICAL_HEIGHT - 1,
-                },
-                down: false,
-            }
-        );
-        assert_eq!(
-            events,
-            [InputEvent::TouchPressed(TouchPoint {
-                x: 0,
-                y: LOGICAL_HEIGHT - 1,
-            })]
-        );
-    }
-
-    #[test]
-    fn touch_coordinates_commit_at_report_boundary() {
-        let mut tracker = TouchTracker::deck(0, 0, false);
-        let mut events = Vec::new();
-        tracker.set_down(true);
-        tracker.set_x(319);
-        tracker.set_y(127);
-        tracker.finish_report(&mut |event| events.push(event));
-        assert_eq!(
-            events,
-            [InputEvent::TouchPressed(TouchPoint { x: 319, y: 127 })]
-        );
     }
 }

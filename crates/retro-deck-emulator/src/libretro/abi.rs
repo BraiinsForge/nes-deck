@@ -48,9 +48,9 @@ pub(super) const ENVIRONMENT_SET_CORE_OPTIONS_V2: c_uint = 67;
 pub(super) const ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL: c_uint = 68;
 
 const ENVIRONMENT_EXPERIMENTAL: c_uint = 0x1_0000;
-pub(super) const ENVIRONMENT_SET_MEMORY_MAPS: c_uint = 36 | ENVIRONMENT_EXPERIMENTAL;
-pub(super) const ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS: c_uint = 42 | ENVIRONMENT_EXPERIMENTAL;
-pub(super) const ENVIRONMENT_GET_INPUT_BITMASKS: c_uint = 51 | ENVIRONMENT_EXPERIMENTAL;
+pub(super) const ENVIRONMENT_SET_MEMORY_MAPS: c_uint = 0x24 | ENVIRONMENT_EXPERIMENTAL;
+pub(super) const ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS: c_uint = 0x2a | ENVIRONMENT_EXPERIMENTAL;
+pub(super) const ENVIRONMENT_GET_INPUT_BITMASKS: c_uint = 0x33 | ENVIRONMENT_EXPERIMENTAL;
 
 pub(super) const fn device_subclass(base: c_uint, identifier: c_uint) -> c_uint {
     ((identifier + 1) << DEVICE_TYPE_SHIFT) | base

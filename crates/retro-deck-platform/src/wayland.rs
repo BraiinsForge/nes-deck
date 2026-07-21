@@ -29,7 +29,7 @@ use crate::display::{
     DECK_DIMENSIONS, Dimensions, DisplayError, Frame, PresentationSlots, ScalePlan, SlotError,
     SlotId, gameplay_dimensions,
 };
-use crate::input::{InputEvent, Player, TouchPoint, WaylandControllers};
+use crate::input::{ButtonSet, InputEvent, Player, TouchPoint, WaylandControllers};
 use crate::time::duration_timespec;
 
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -184,6 +184,11 @@ impl EventState {
 
     fn drain_input_into(&mut self, output: &mut Vec<InputEvent>) -> usize {
         output.append(&mut self.input_events);
+        std::mem::take(&mut self.dropped_input_events)
+    }
+
+    fn discard_input_events(&mut self) -> usize {
+        self.input_events.clear();
         std::mem::take(&mut self.dropped_input_events)
     }
 
@@ -754,6 +759,20 @@ impl WaylandPresentation {
     /// Returns the number of events discarded since the previous drain.
     pub fn drain_input_into(&mut self, output: &mut Vec<InputEvent>) -> usize {
         self.surface.state.drain_input_into(output)
+    }
+
+    /// Discard queued semantic edges while retaining complete controller state.
+    ///
+    /// Returns the number of events that overflowed the bounded queue since
+    /// the previous drain or discard.
+    pub fn discard_input_events(&mut self) -> usize {
+        self.surface.state.discard_input_events()
+    }
+
+    /// Return the latest complete semantic state for one compositor-assigned player.
+    #[must_use]
+    pub fn controller_buttons(&self, player: Player) -> ButtonSet {
+        self.surface.state.controllers.buttons(player)
     }
 
     /// Convert and commit one frame without waiting for a compositor release.

@@ -5,7 +5,6 @@ use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
-use std::os::fd::AsFd as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
@@ -16,9 +15,7 @@ use retro_deck_emulator::libretro::{
     LibretroCore, PersistenceIssue, VideoCallbackError,
 };
 use retro_deck_platform::audio::{AudioGate, PcmStreamWorker, PcmWorkerReport};
-use retro_deck_platform::input::{
-    ControllerDevices, InputError, InputEvent, KeyboardState, MediumRawKeyboard, Player,
-};
+use retro_deck_platform::input::{KeyboardState, MediumRawKeyboard, Player};
 use retro_deck_platform::shutdown::ShutdownFlag;
 use retro_deck_platform::time::FrameClock;
 use retro_deck_platform::wayland::{
@@ -26,7 +23,6 @@ use retro_deck_platform::wayland::{
 };
 
 const DEFAULT_VOLUME_PERCENT: u8 = 42;
-const CONTROLLER_SCAN_INTERVAL: Duration = Duration::from_secs(1);
 const SAVE_INTERVAL: Duration = Duration::from_secs(10);
 const AUDIO_REPORT_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -77,12 +73,9 @@ fn core_for_executable(executable: &OsStr) -> Option<LibretroCore> {
 struct Runtime {
     application: &'static str,
     shutdown: ShutdownFlag,
-    controllers: ControllerDevices,
-    controller_events: Vec<InputEvent>,
     keyboard: Option<MediumRawKeyboard>,
     session: CoreSession,
     clock: FrameClock,
-    next_controller_scan: Instant,
     next_save: Instant,
     next_audio_report: Instant,
     muted: bool,
@@ -117,7 +110,6 @@ impl Runtime {
         }
 
         let shutdown = ShutdownFlag::install().map_err(RuntimeError::Signals)?;
-        let controllers = discover_controllers(application);
         let keyboard = discover_keyboard(application);
         let clock = FrameClock::start_period(av_info.frame_period())
             .ok_or(RuntimeError::InvalidFramePeriod)?;
@@ -125,12 +117,11 @@ impl Runtime {
             eprintln!("{application}: native save not loaded: {issue}");
         }
         eprintln!(
-            "{application}: {} {}, {:.4} fps, {} Hz, {} controller(s), volume {}%",
+            "{application}: {} {}, {:.4} fps, {} Hz, compositor input, volume {}%",
             session.metadata().name(),
             session.metadata().version(),
             av_info.frames_per_second(),
             av_info.sample_rate().get(),
-            controllers.controller_count(),
             volume.percent()
         );
 
@@ -138,12 +129,9 @@ impl Runtime {
         Ok(Self {
             application,
             shutdown,
-            controllers,
-            controller_events: Vec::with_capacity(64),
             keyboard,
             session,
             clock,
-            next_controller_scan: now + CONTROLLER_SCAN_INTERVAL,
             next_save: now + SAVE_INTERVAL,
             next_audio_report: now + AUDIO_REPORT_INTERVAL,
             muted: volume.muted(),
@@ -161,17 +149,11 @@ impl Runtime {
 
     fn event_loop(&mut self) -> Result<(), RuntimeError> {
         while !self.shutdown.requested() && !self.presentation()?.shutdown_requested() {
-            self.rescan_controllers();
-            {
-                let presentation = self.presentation()?;
-                self.controllers
-                    .wait_readable_with(presentation.as_fd(), self.clock.wait_duration())
-                    .map_err(RuntimeError::Input)?;
-            }
+            let timeout = self.clock.wait_duration();
             if self.shutdown.requested() {
                 break;
             }
-            match self.presentation_mut()?.dispatch_nonblocking() {
+            match self.presentation_mut()?.dispatch_with_timeout(timeout) {
                 Ok(_) => {}
                 Err(WaylandPresentationError::SurfaceClosed) => break,
                 Err(error) => return Err(RuntimeError::Presentation(error)),
@@ -180,7 +162,7 @@ impl Runtime {
                 break;
             }
 
-            self.drain_controllers();
+            self.drain_controller_input()?;
             self.drain_keyboard();
             self.update_audio_gate();
             if !self.clock.wait_duration().is_zero() {
@@ -188,9 +170,11 @@ impl Runtime {
                 continue;
             }
 
+            let player_one = self.presentation()?.controller_buttons(Player::One);
+            let player_two = self.presentation()?.controller_buttons(Player::Two);
             self.session.set_input(
-                JoypadState::from_buttons(self.controllers.buttons(Player::One)),
-                JoypadState::from_buttons(self.controllers.buttons(Player::Two)),
+                JoypadState::from_buttons(player_one),
+                JoypadState::from_buttons(player_two),
                 self.keyboard
                     .as_ref()
                     .map_or_else(KeyboardState::empty, MediumRawKeyboard::state),
@@ -225,42 +209,15 @@ impl Runtime {
             .ok_or(RuntimeError::MissingResource("presentation"))
     }
 
-    fn rescan_controllers(&mut self) {
-        let now = Instant::now();
-        if now < self.next_controller_scan {
-            return;
-        }
-        self.next_controller_scan = now + CONTROLLER_SCAN_INTERVAL;
-        match self.controllers.rescan() {
-            Ok(stats) if stats.attached() != 0 => eprintln!(
-                "{}: attached {} controller(s); {} ready",
-                self.application,
-                stats.attached(),
-                stats.connected()
-            ),
-            Ok(_) => {}
-            Err(error) => eprintln!("{}: controller rescan failed: {error}", self.application),
-        }
-    }
-
-    fn drain_controllers(&mut self) {
-        self.controller_events.clear();
-        let stats = self.controllers.drain_into(&mut self.controller_events);
-        if stats.dropped() != 0 {
+    fn drain_controller_input(&mut self) -> Result<(), RuntimeError> {
+        let dropped = self.presentation_mut()?.discard_input_events();
+        if dropped != 0 {
             eprintln!(
                 "{}: discarded {} controller edge(s); complete state remains synchronized",
-                self.application,
-                stats.dropped()
+                self.application, dropped
             );
         }
-        for player in [Player::One, Player::Two] {
-            if stats.disconnected(player) {
-                eprintln!("{}: controller {player:?} disconnected", self.application);
-            }
-        }
-        if stats.disconnected_count() != 0 {
-            self.next_controller_scan = Instant::now();
-        }
+        Ok(())
     }
 
     fn drain_keyboard(&mut self) {
@@ -343,16 +300,6 @@ impl Runtime {
                 "{}: keyboard mode restoration failed: {error}",
                 self.application
             );
-        }
-    }
-}
-
-fn discover_controllers(application: &str) -> ControllerDevices {
-    match ControllerDevices::discover() {
-        Ok(controllers) => controllers,
-        Err(error) => {
-            eprintln!("{application}: {error}; continuing without controller input");
-            ControllerDevices::default()
         }
     }
 }
@@ -440,7 +387,6 @@ enum RuntimeError {
     Content(ContentError),
     Session(CoreSessionError),
     Signals(io::Error),
-    Input(InputError),
     Presentation(WaylandPresentationError),
     AudioCallback(AudioBatchError),
     VideoCallback(VideoCallbackError),
@@ -455,7 +401,6 @@ impl fmt::Display for RuntimeError {
             Self::Content(source) => source.fmt(formatter),
             Self::Session(source) => source.fmt(formatter),
             Self::Signals(source) => write!(formatter, "cannot install signal handlers: {source}"),
-            Self::Input(source) => source.fmt(formatter),
             Self::Presentation(source) => source.fmt(formatter),
             Self::AudioCallback(source) => source.fmt(formatter),
             Self::VideoCallback(source) => source.fmt(formatter),
@@ -476,7 +421,6 @@ impl Error for RuntimeError {
             Self::Content(source) => Some(source),
             Self::Session(source) => Some(source),
             Self::Signals(source) => Some(source),
-            Self::Input(source) => Some(source),
             Self::Presentation(source) => Some(source),
             Self::AudioCallback(source) => Some(source),
             Self::VideoCallback(source) => Some(source),

@@ -8,7 +8,6 @@ license.workspace = true
 
 [dependencies]
 deck-gamepad-v1 = { path = "../../vendor/bmc/deck-gamepad-v1" }
-evdev = "0.13.2"
 libc = "0.2.186"
 memmap2 = "0.9.11"
 retro-deck-audio = { path = "../retro-deck-audio" }
