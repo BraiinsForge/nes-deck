@@ -25,7 +25,7 @@ const UPLOAD_CATALOG: &str = "/mnt/data/nes-deck/uploads/games.tsv";
 const ACTIVE_PALETTE: &str = "/mnt/data/nes-deck/state/palette.tsv";
 const FALLBACK_PALETTE: &str = "/mnt/data/nes-deck/menu/palette.tsv";
 const PALETTE_OVERRIDE: &str = "/mnt/data/nes-deck/state/dashboard-palette.sexp";
-const DASHBOARD_SERVICE: &str = "/etc/init.d/nes-deck";
+const DASHBOARD_SERVICE: &str = "/usr/sbin/retro-deck-refresh";
 
 /// Load installed configuration and serve on every IPv4 interface.
 ///

@@ -1,0 +1,50 @@
+#!/bin/sh
+
+# Refresh persistent cover art off the request/input paths, then make BMC
+# restart the native widget against the new catalog and textures.
+
+set -u
+
+BASE=${RETRO_DECK_BASE:-/mnt/data/nes-deck}
+FETCHER=${RETRO_DECK_COVER_FETCHER:-$BASE/menu/fetch-covers}
+COVERS=${RETRO_DECK_COVER_DIRECTORY:-$BASE/covers}
+COMPOSITOR=${RETRO_DECK_COMPOSITOR_SERVICE:-/etc/init.d/bmc-compositor}
+LOCK=${RETRO_DECK_REFRESH_LOCK:-/var/run/retro-deck-refresh}
+LOG=${RETRO_DECK_REFRESH_LOG:-$BASE/log/cover-refresh.log}
+
+refresh() {
+	if ! mkdir "$LOCK" 2>/dev/null; then
+		: >"$LOCK/pending" 2>/dev/null || :
+		return 0
+	fi
+	worker() {
+		trap 'rm -rf "$LOCK"' EXIT INT TERM HUP
+		mkdir -p "$(dirname "$LOG")"
+		while :; do
+			rm -f "$LOCK/pending"
+			if [ -x "$FETCHER" ] && [ -r "$BASE/menu/games.tsv" ]; then
+				"$FETCHER" "$BASE/menu/games.tsv" "$COVERS" || :
+			fi
+			if [ -x "$FETCHER" ] && [ -r "$BASE/uploads/games.tsv" ]; then
+				"$FETCHER" "$BASE/uploads/games.tsv" "$COVERS" || :
+			fi
+			[ -e "$LOCK/pending" ] || break
+		done
+		if [ -x "$COMPOSITOR" ]; then
+			"$COMPOSITOR" restart
+		fi
+	}
+	if [ "${RETRO_DECK_REFRESH_FOREGROUND:-0}" = 1 ]; then
+		worker >>"$LOG" 2>&1
+	else
+		worker </dev/null >>"$LOG" 2>&1 &
+	fi
+}
+
+case ${1:-refresh} in
+	refresh|restart) refresh ;;
+	*)
+		echo "Usage: retro-deck-refresh [refresh|restart]" >&2
+		exit 2
+		;;
+esac
