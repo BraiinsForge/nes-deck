@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Fetch the exact freely licensed CHIP-8 builds used by the Deck menu.
-# Usage: ./ops/deck-menu/fetch-foss-games.sh [output-directory]
+# Usage: ./ops/content/fetch-foss-games.sh [output-directory]
 
 set -eu
 

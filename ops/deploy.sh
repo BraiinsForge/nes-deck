@@ -108,7 +108,7 @@ uploader_host=$(build_flake .#rom-uploader-host)
 runtime_licenses=$(build_flake .#runtime-licenses)
 ecl=$(nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix | tail -n 1)
 
-ops/deck-menu/fetch-foss-games.sh "$foss"
+ops/content/fetch-foss-games.sh "$foss"
 
 mkdir -p \
   "$payload/nes-deck/menu" \

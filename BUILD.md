@@ -250,7 +250,7 @@ retrodeck/
 ├── nix/                        ECL and runtime-specific Nix expressions
 ├── ops/
 │   ├── bmc/                    external BMC patch application
-│   ├── deck-menu/              covers, screenshots, and FOSS CHIP-8 fetcher
+│   ├── content/                reproducible freely licensed game intake
 │   ├── deck-wifi/              profile-only Wi-Fi helper
 │   ├── deploy/                 validated on-Deck activation transaction
 │   ├── lib/                    shared strict deployment configuration parser
