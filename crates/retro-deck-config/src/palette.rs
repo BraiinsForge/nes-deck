@@ -283,8 +283,8 @@ pub struct Palette {
 impl Palette {
     /// Parse the launcher's complete headerless TSV palette.
     ///
-    /// Blank lines and comments are ignored. A legacy `settings-icon` row is
-    /// validated and ignored. Every semantic role remains mandatory.
+    /// Blank lines and comments are ignored. Every semantic role remains
+    /// mandatory.
     ///
     /// # Errors
     ///
@@ -294,7 +294,6 @@ impl Palette {
         validate_size(contents)?;
         let text = std::str::from_utf8(contents).map_err(|_| PaletteError::InvalidUtf8)?;
         let mut builder = PaletteBuilder::new();
-        let mut legacy_icon_seen = false;
         for raw_line in text.split_terminator('\n') {
             let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
             if line.is_empty() || line.starts_with('#') {
@@ -306,19 +305,12 @@ impl Palette {
             if name.is_empty() || value.contains('\t') {
                 return Err(PaletteError::MalformedTsv);
             }
-            if name == "settings-icon" {
-                if legacy_icon_seen || !valid_legacy_icon(value) {
-                    return Err(PaletteError::InvalidLegacyIcon);
-                }
-                legacy_icon_seen = true;
-                continue;
-            }
             builder.insert(name, value)?;
         }
         builder.finish()
     }
 
-    /// Parse a complete version 2 or legacy version 3 S-expression override.
+    /// Parse a complete version 2 S-expression override.
     ///
     /// # Errors
     ///
@@ -347,7 +339,6 @@ impl Palette {
         }
 
         let mut version = None;
-        let mut legacy_icon = None;
         let mut palette = None;
         for pair in fields.chunks_exact(2) {
             let [key, value] = pair else {
@@ -362,9 +353,8 @@ impl Palette {
             };
             match key {
                 "version" if version.is_none() => version = Some(value),
-                "settings-icon" if legacy_icon.is_none() => legacy_icon = Some(value),
                 "palette" if palette.is_none() => palette = Some(value),
-                "version" | "settings-icon" | "palette" => {
+                "version" | "palette" => {
                     return Err(PaletteError::InvalidOverride(
                         "top-level property is repeated",
                     ));
@@ -377,8 +367,8 @@ impl Palette {
             }
         }
 
-        let version = match version {
-            Some(Value::Integer(version @ (2 | 3))) => *version,
+        match version {
+            Some(Value::Integer(2)) => {}
             Some(Value::Integer(_)) => {
                 return Err(PaletteError::InvalidOverride(
                     "schema version is unsupported",
@@ -390,26 +380,6 @@ impl Palette {
                 ));
             }
             None => return Err(PaletteError::InvalidOverride("schema version is missing")),
-        };
-        match (version, legacy_icon) {
-            (2, None) => {}
-            (2, Some(_)) => {
-                return Err(PaletteError::InvalidOverride(
-                    "version 2 cannot select a settings icon",
-                ));
-            }
-            (3, Some(Value::String(icon))) if valid_legacy_icon(icon) => {}
-            (3, Some(_)) => return Err(PaletteError::InvalidLegacyIcon),
-            (3, None) => {
-                return Err(PaletteError::InvalidOverride(
-                    "version 3 settings icon is missing",
-                ));
-            }
-            _ => {
-                return Err(PaletteError::InvalidOverride(
-                    "schema version is unsupported",
-                ));
-            }
         }
         let palette = palette.ok_or(PaletteError::InvalidOverride("palette is missing"))?;
         Self::parse_palette_value(palette)
@@ -595,14 +565,6 @@ const fn validate_size(contents: &[u8]) -> Result<(), PaletteError> {
     }
 }
 
-fn valid_legacy_icon(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-}
-
 /// Palette schema, color, or S-expression failure.
 #[derive(Debug)]
 pub enum PaletteError {
@@ -612,8 +574,6 @@ pub enum PaletteError {
     InvalidUtf8,
     /// A TSV row is missing exactly one tab-separated value.
     MalformedTsv,
-    /// A retired settings-icon value violates its compatibility contract.
-    InvalidLegacyIcon,
     /// A semantic role is unknown.
     UnknownRole(String),
     /// A semantic role appears more than once.
@@ -634,9 +594,6 @@ impl fmt::Display for PaletteError {
             Self::InvalidSize => formatter.write_str("palette has an invalid size"),
             Self::InvalidUtf8 => formatter.write_str("palette is not UTF-8"),
             Self::MalformedTsv => formatter.write_str("palette contains a malformed TSV row"),
-            Self::InvalidLegacyIcon => {
-                formatter.write_str("palette contains an invalid legacy settings icon")
-            }
             Self::UnknownRole(role) => write!(formatter, "palette contains unknown role {role}"),
             Self::DuplicateRole(role) => write!(formatter, "palette repeats role {role}"),
             Self::MissingRole(role) => write!(formatter, "palette is missing role {role}"),
@@ -700,7 +657,7 @@ mod tests {
 
     #[test]
     fn parses_complete_tsv_comments_and_full_rgb() {
-        let mut contents = String::from("# complete palette\r\n\r\nsettings-icon\tgear-rivet\r\n");
+        let mut contents = String::from("# complete palette\r\n\r\n");
         for (name, value) in pairs(0) {
             contents.push_str(name);
             contents.push('\t');
@@ -724,6 +681,10 @@ mod tests {
             Palette::parse_tsv(b"unknown\t#010203\n"),
             Err(PaletteError::UnknownRole(role)) if role == "unknown"
         ));
+        assert!(matches!(
+            Palette::parse_tsv(b"settings-icon\tgear-rivet\n"),
+            Err(PaletteError::UnknownRole(role)) if role == "settings-icon"
+        ));
     }
 
     #[test]
@@ -737,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn override_round_trips_and_accepts_the_retired_version_three_icon() {
+    fn override_round_trips_and_rejects_retired_schemas() {
         let palette = Palette::from_pairs(pairs(0));
         assert!(palette.is_ok(), "fixture palette should be valid");
         let Some(palette) = palette.ok() else {
@@ -746,18 +707,8 @@ mod tests {
         let encoded = palette.encode_override();
         assert_eq!(Palette::parse_override(&encoded).ok(), Some(palette));
 
-        let encoded = String::from_utf8(encoded);
-        assert!(encoded.is_ok());
-        let encoded = encoded.unwrap_or_default().replacen(
-            "(:version 2\n",
-            "(:version 3\n :settings-icon \"gear-rivet\"\n",
-            1,
-        );
-        assert_eq!(
-            Palette::parse_override(encoded.as_bytes()).ok(),
-            Some(palette)
-        );
         assert!(Palette::parse_override(b"(:version 2 :version 2 :palette ())").is_err());
+        assert!(Palette::parse_override(b"(:version 3 :palette ())").is_err());
         assert!(
             Palette::parse_override(b"(:version 2 :settings-icon \"gear\" :palette ())").is_err()
         );

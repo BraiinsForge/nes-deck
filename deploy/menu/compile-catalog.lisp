@@ -8,7 +8,7 @@
 (in-package #:nes-deck-catalog)
 
 (defconstant +schema-version+ 7)
-(defconstant +appearance-override-version+ 3)
+(defconstant +appearance-override-version+ 2)
 (defconstant +maximum-games+ 64)
 (defconstant +maximum-catalog-bytes+ 65536)
 (defconstant +console-rom-root+ "/mnt/data/roms/")
@@ -22,8 +22,7 @@
     :volume-off :volume-on :selected :wifi-active :wifi-focus
     :wifi-active-border :field-label :accent :active :control-surface
     :muted))
-(defparameter +appearance-override-keys+
-  '(:version :settings-icon :palette))
+(defparameter +appearance-override-keys+ '(:version :palette))
 
 (defun catalog-error (control &rest arguments)
   (error "Catalog error: ~?" control arguments))
@@ -215,18 +214,6 @@
           (list (string-downcase (symbol-name key))
                 (validate-rgb-color (required-value key pairs) key)))))
 
-(defun validate-legacy-settings-icon (value context)
-  (unless
-      (and (stringp value)
-           (<= 1 (length value) 64)
-           (every
-            (lambda (character)
-              (or (char= character #\-)
-                  (char<= #\a character #\z)
-                  (char<= #\0 character #\9)))
-            value))
-    (catalog-error "~A is not a valid legacy cog name" context)))
-
 (defun validate-game (form position)
   (let* ((context (format nil "game ~D" position))
          (pairs (decode-plist form +game-keys+ context))
@@ -270,24 +257,14 @@
 
 (defun validate-appearance-override (form)
   (let* ((pairs (decode-plist form +appearance-override-keys+
-                              "appearance override"
-                              '(:version :palette)))
+                              "appearance override"))
          (version (required-value :version pairs)))
-    (unless (member version '(2 3) :test #'eql)
+    (unless (eql version +appearance-override-version+)
       (catalog-error
-       "unsupported appearance override :version ~S; expected 2 or ~D"
+       "unsupported appearance override :version ~S; expected ~D"
        version +appearance-override-version+))
-    (let ((settings-pair (assoc :settings-icon pairs :test #'eq)))
-      (when (and (eql version 2) settings-pair)
-        (catalog-error "appearance override version 2 cannot set an icon"))
-      (when (and (eql version +appearance-override-version+)
-                 (null settings-pair))
-        (catalog-error "appearance override version 3 is missing :settings-icon"))
-      (when settings-pair
-        (validate-legacy-settings-icon
-         (cdr settings-pair) "appearance override :settings-icon"))
-      (validate-palette (required-value :palette pairs)
-                        "appearance override :palette"))))
+    (validate-palette (required-value :palette pairs)
+                      "appearance override :palette")))
 
 (defun read-catalog (source)
   (with-open-file (stream source :direction :input)

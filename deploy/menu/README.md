@@ -59,9 +59,8 @@ ignored without preventing startup. Cover files are decoded from the cache at
 ## Palette contract
 
 `palette.tsv` contains one full-RGB value for each semantic role. A complete
-version-2 or version-3 override at
-`/mnt/data/nes-deck/state/dashboard-palette.sexp` may replace it. The retired
-version-3 cog choice is ignored.
+version-2 override at `/mnt/data/nes-deck/state/dashboard-palette.sexp` may
+replace it. Icon selection is not part of the appearance schema.
 
 The native dashboard validates a complete palette before applying it. A
 missing or malformed override falls back to the checked-in palette, and a

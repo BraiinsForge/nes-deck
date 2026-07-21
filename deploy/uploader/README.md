@@ -18,9 +18,8 @@ restarted.
 The authenticated page also edits all semantic dashboard colors as full
 `#RRGGBB` values. It writes one complete, strictly validated version-2
 S-expression to `/mnt/data/nes-deck/state/dashboard-palette.sexp` and restarts
-the dashboard. Existing version-3 overrides remain readable: their colors are
-preserved and their retired settings-icon choice is ignored. Built-in defaults
-remain available when the optional override is malformed.
+the dashboard. Built-in defaults remain available when the optional override
+is malformed.
 
 `ops/configure-deck.sh` asks for the uploader password during setup and stores
 it in a mode-`0600` per-Deck file under the operator's configuration directory,
