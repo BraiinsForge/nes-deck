@@ -39,7 +39,7 @@ impl VideoFrameLayout {
             PixelFormat::Xrgb8888 => size_of::<u32>(),
             PixelFormat::Rgb565 => size_of::<u16>(),
         };
-        if pitch_bytes % bytes_per_pixel != 0 {
+        if !pitch_bytes.is_multiple_of(bytes_per_pixel) {
             return Err(VideoFrameError::InvalidPitch);
         }
         let stride = pitch_bytes / bytes_per_pixel;

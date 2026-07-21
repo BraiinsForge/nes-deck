@@ -120,10 +120,11 @@ impl Chip8Runtime {
     fn run(mut self) -> Result<(), RuntimeError> {
         let result = self.event_loop();
         self.finish_audio();
-        if result.is_ok() && self.core.halted() {
-            if let Some(message) = self.core.halt_message() {
-                eprintln!("{APPLICATION}: halted: {message}");
-            }
+        if result.is_ok()
+            && self.core.halted()
+            && let Some(message) = self.core.halt_message()
+        {
+            eprintln!("{APPLICATION}: halted: {message}");
         }
         result
     }
@@ -192,10 +193,10 @@ impl Chip8Runtime {
     }
 
     fn report_audio_errors(&self) {
-        if let Some(audio) = &self.audio {
-            if let Some(error) = audio.take_error() {
-                eprintln!("{APPLICATION}: sound disabled for now: {error}");
-            }
+        if let Some(audio) = &self.audio
+            && let Some(error) = audio.take_error()
+        {
+            eprintln!("{APPLICATION}: sound disabled for now: {error}");
         }
     }
 

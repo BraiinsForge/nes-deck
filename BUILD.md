@@ -17,9 +17,13 @@ details for development.
 
 ## Prerequisites
 
-Install Nix with flakes enabled. Host tests also require Rust 1.86 or newer
+Install Nix with flakes enabled. Host tests also require Rust 1.94 or newer
 with Cargo, rustfmt, and Clippy; a C++ compiler; `pkg-config`; libpng; and
 ImageMagick.
+
+All first-party Rust uses the same 1.94 language level as BMC. The flake follows
+BMC's nixpkgs input, so native widget and ARM runtime builds use the same Rust
+package set instead of maintaining a second compiler boundary.
 
 On Debian or Ubuntu:
 

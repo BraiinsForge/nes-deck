@@ -171,7 +171,7 @@ impl ApplicationPcm {
 
     /// Current producer-side counters.
     #[must_use]
-    pub fn stats(&self) -> ApplicationPcmStats {
+    pub const fn stats(&self) -> ApplicationPcmStats {
         self.stats.get()
     }
 

@@ -318,13 +318,8 @@ impl GamepadInput {
     }
 }
 
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "the midpoint of two i32 endpoints is necessarily representable as i32"
-)]
 const fn midpoint(minimum: i32, maximum: i32) -> i32 {
-    let value = (minimum as i64 + maximum as i64) / 2;
-    value as i32
+    i32::midpoint(minimum, maximum)
 }
 
 fn axis_navigation(axis: RawAxis, binding: AxisBinding) -> u8 {

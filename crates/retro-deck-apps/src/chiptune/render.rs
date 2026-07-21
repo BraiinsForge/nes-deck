@@ -202,7 +202,7 @@ fn draw_track(canvas: &mut Canvas<'_>, track: TrackView<'_>) {
             let Some(samples) = track.waveform.get(frame) else {
                 continue;
             };
-            let mixed = (i32::from(samples[0]) + i32::from(samples[1])) / 2;
+            let mixed = i32::midpoint(i32::from(samples[0]), i32::from(samples[1]));
             let height = (mixed.unsigned_abs() / 1_050).min(20) as usize;
             let height = height.max(1);
             let y = if mixed < 0 {

@@ -1019,10 +1019,10 @@ impl Dispatch<wl_seat::WlSeat, ()> for EventState {
             state.touch = Some(seat.get_touch(handle, ()));
         } else if !available {
             state.active_touch = None;
-            if let Some(touch) = state.touch.take() {
-                if touch.version() >= 3 {
-                    touch.release();
-                }
+            if let Some(touch) = state.touch.take()
+                && touch.version() >= 3
+            {
+                touch.release();
             }
         }
     }
@@ -1162,10 +1162,10 @@ impl Dispatch<wl_buffer::WlBuffer, BufferRole> for EventState {
         _connection: &Connection,
         _handle: &QueueHandle<Self>,
     ) {
-        if let (wl_buffer::Event::Release, BufferRole::Frame(slot)) = (event, role) {
-            if let Err(error) = state.presentation_slots.release(*slot) {
-                state.slot_error = Some(error);
-            }
+        if let (wl_buffer::Event::Release, BufferRole::Frame(slot)) = (event, role)
+            && let Err(error) = state.presentation_slots.release(*slot)
+        {
+            state.slot_error = Some(error);
         }
     }
 }

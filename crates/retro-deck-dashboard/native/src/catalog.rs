@@ -64,13 +64,13 @@ impl Category {
 
     /// Number of entries in this category.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.entry_indices.len()
     }
 
     /// Categories exposed by this type are always nonempty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entry_indices.is_empty()
     }
 }

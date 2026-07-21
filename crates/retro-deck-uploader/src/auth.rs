@@ -172,15 +172,15 @@ impl AuthManager {
             state.attempts.remove(&source);
             return Ok(());
         }
-        if !state.attempts.contains_key(&source) && state.attempts.len() >= MAXIMUM_LOGIN_SOURCES {
-            if let Some(oldest) = state
+        if !state.attempts.contains_key(&source)
+            && state.attempts.len() >= MAXIMUM_LOGIN_SOURCES
+            && let Some(oldest) = state
                 .attempts
                 .iter()
                 .min_by_key(|(_, attempt)| attempt.last_seen)
                 .map(|(address, _)| *address)
-            {
-                state.attempts.remove(&oldest);
-            }
+        {
+            state.attempts.remove(&oldest);
         }
         let attempt = state.attempts.entry(source).or_insert(LoginAttempt {
             failures: 0,
@@ -208,15 +208,14 @@ impl AuthManager {
             .ok_or(AuthError::TimeOverflow)?;
         let mut state = self.state.lock().map_err(|_| AuthError::LockPoisoned)?;
         state.sessions.retain(|_, session| session.expires_at > now);
-        if state.sessions.len() >= MAXIMUM_SESSIONS {
-            if let Some(oldest) = state
+        if state.sessions.len() >= MAXIMUM_SESSIONS
+            && let Some(oldest) = state
                 .sessions
                 .iter()
                 .min_by_key(|(_, session)| session.expires_at)
                 .map(|(key, _)| *key)
-            {
-                state.sessions.remove(&oldest);
-            }
+        {
+            state.sessions.remove(&oldest);
         }
         state
             .sessions

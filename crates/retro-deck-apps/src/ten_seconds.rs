@@ -267,10 +267,10 @@ impl TimerGame {
     pub const fn policy_submitted(&mut self, submission: PolicySubmit) -> TimerEffect {
         match submission {
             PolicySubmit::Queued(request_id) => {
-                if let Some(pending) = &mut self.pending {
-                    if pending.request_id.is_none() {
-                        pending.request_id = Some(request_id);
-                    }
+                if let Some(pending) = &mut self.pending
+                    && pending.request_id.is_none()
+                {
+                    pending.request_id = Some(request_id);
                 }
                 TimerEffect::None
             }

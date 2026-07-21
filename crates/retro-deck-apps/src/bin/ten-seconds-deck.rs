@@ -264,10 +264,10 @@ impl TimerRuntime {
     }
 
     fn report_audio_errors(&self) {
-        if let Some(audio) = &self.audio {
-            if let Some(error) = audio.take_error() {
-                eprintln!("{APPLICATION}: {error}");
-            }
+        if let Some(audio) = &self.audio
+            && let Some(error) = audio.take_error()
+        {
+            eprintln!("{APPLICATION}: {error}");
         }
     }
 

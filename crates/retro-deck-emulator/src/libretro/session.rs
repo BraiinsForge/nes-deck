@@ -1403,10 +1403,10 @@ mod tests {
     unsafe extern "C" fn fake_get_memory_size(identifier: c_uint) -> usize {
         let state = fake();
         let kind = memory_kind(identifier);
-        if let Some((reported_kind, bytes)) = state.reported_memory_size {
-            if Some(reported_kind) == kind {
-                return bytes;
-            }
+        if let Some((reported_kind, bytes)) = state.reported_memory_size
+            && Some(reported_kind) == kind
+        {
+            return bytes;
         }
         match kind {
             Some(MemoryKind::SaveRam) => state.save_ram.len(),

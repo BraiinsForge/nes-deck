@@ -25,10 +25,10 @@ bmc-native = [
 
 [dependencies]
 anyhow = { version = "1.0.98", optional = true }
-bmc-gpu-render-lock = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "89ca1aefe8c28a6c3f2002c7fe0990453a096a02", optional = true }
-bmc-log = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "89ca1aefe8c28a6c3f2002c7fe0990453a096a02", optional = true }
-bmc-render = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "89ca1aefe8c28a6c3f2002c7fe0990453a096a02", optional = true }
-bmc-widget = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "89ca1aefe8c28a6c3f2002c7fe0990453a096a02", features = ["gpu"], optional = true }
+bmc-gpu-render-lock = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "2484d1fd84259a29e5aaf574034110dedb6ea4b7", optional = true }
+bmc-log = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "2484d1fd84259a29e5aaf574034110dedb6ea4b7", optional = true }
+bmc-render = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "2484d1fd84259a29e5aaf574034110dedb6ea4b7", optional = true }
+bmc-widget = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "2484d1fd84259a29e5aaf574034110dedb6ea4b7", features = ["gpu"], optional = true }
 glow = { version = "0.16.0", optional = true }
 retro-deck-config = { path = "../../retro-deck-config" }
 retro-deck-policy = { path = "../../retro-deck-policy", optional = true }
