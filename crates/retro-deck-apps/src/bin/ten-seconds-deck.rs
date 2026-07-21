@@ -24,7 +24,6 @@ use retro_deck_platform::wayland::{
 };
 use retro_deck_policy::{
     PolicyClient, PolicyEvent, PolicyEventPoll, PolicySubmit, WorkerCommand, WorkerConfig,
-    WorkerStatus,
 };
 
 const APPLICATION: &str = "ten-seconds-deck";
@@ -69,7 +68,6 @@ struct TimerRuntime {
     frame: TimerFrame,
     audio: Option<ToneCueWorker<Cue>>,
     policy: Option<PolicyClient>,
-    policy_disconnected: bool,
     dirty: bool,
 }
 
@@ -96,7 +94,6 @@ impl TimerRuntime {
             frame,
             audio: start_audio(volume),
             policy: start_policy(),
-            policy_disconnected: false,
             dirty: true,
         })
     }
@@ -197,50 +194,34 @@ impl TimerRuntime {
     }
 
     fn handle_policy_events(&mut self) {
-        loop {
-            let event = match &self.policy {
-                Some(policy) => policy.try_event(),
-                None => return,
-            };
-            match event {
-                PolicyEventPoll::Event(PolicyEvent::Ready) => {
-                    eprintln!("{APPLICATION}: Common Lisp policy worker ready");
-                }
-                PolicyEventPoll::Event(PolicyEvent::Response(response)) => {
-                    let before = self.game.view();
-                    let effect = self.game.apply_policy_response(&response);
-                    self.dirty |= self.game.view() != before;
-                    self.apply_effect(effect);
-                }
-                PolicyEventPoll::Event(PolicyEvent::Unavailable(failure)) => {
-                    eprintln!(
-                        "{APPLICATION}: Common Lisp policy unavailable: {failure}; using built-in behavior"
-                    );
-                    self.policy_disconnected = true;
-                    self.resolve_unavailable_policy();
-                }
-                PolicyEventPoll::Empty => break,
-                PolicyEventPoll::Disconnected => {
-                    if !self.policy_disconnected {
-                        eprintln!(
-                            "{APPLICATION}: Common Lisp policy supervisor ended; using built-in behavior"
-                        );
-                    }
-                    self.policy_disconnected = true;
-                    self.resolve_unavailable_policy();
-                    break;
-                }
+        let event = match &self.policy {
+            Some(policy) => policy.try_event(),
+            None => return,
+        };
+        match event {
+            PolicyEventPoll::Event(PolicyEvent::Response(response)) => {
+                self.policy.take();
+                let before = self.game.view();
+                let effect = self.game.apply_policy_response(&response);
+                self.dirty |= self.game.view() != before;
+                self.apply_effect(effect);
+                self.policy = start_policy();
             }
-        }
-
-        if !self.policy_disconnected
-            && self
-                .policy
-                .as_ref()
-                .is_some_and(|policy| policy.status() == WorkerStatus::Unavailable)
-        {
-            self.policy_disconnected = true;
-            self.resolve_unavailable_policy();
+            PolicyEventPoll::Event(PolicyEvent::Unavailable(failure)) => {
+                self.policy.take();
+                eprintln!(
+                    "{APPLICATION}: Common Lisp policy unavailable: {failure}; using built-in behavior"
+                );
+                self.resolve_unavailable_policy();
+            }
+            PolicyEventPoll::Disconnected => {
+                self.policy.take();
+                eprintln!(
+                    "{APPLICATION}: Common Lisp policy supervisor ended; using built-in behavior"
+                );
+                self.resolve_unavailable_policy();
+            }
+            PolicyEventPoll::Empty => {}
         }
     }
 
@@ -256,13 +237,16 @@ impl TimerRuntime {
             effect = match effect {
                 TimerEffect::None => return,
                 TimerEffect::PlayCue(cue) => {
+                    if cue == Cue::Start && self.policy.is_none() {
+                        self.policy = start_policy();
+                    }
                     if let Some(audio) = &self.audio {
                         let _ = audio.try_play(cue);
                     }
                     return;
                 }
                 TimerEffect::SubmitPolicy(arguments) => {
-                    let submission = match &self.policy {
+                    let submission = match &mut self.policy {
                         Some(policy) => policy.try_submit(POLICY_HOOK, arguments),
                         None => Ok(PolicySubmit::Unavailable),
                     };

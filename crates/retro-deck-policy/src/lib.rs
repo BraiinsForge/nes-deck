@@ -11,7 +11,7 @@ mod supervisor;
 pub use message::{MessageError, PolicyRequest, PolicyResponse, RequestId, decode_ready};
 pub use supervisor::{
     PolicyClient, PolicyEvent, PolicyEventPoll, PolicySubmit, WorkerCommand, WorkerConfig,
-    WorkerFailure, WorkerStatus,
+    WorkerFailure,
 };
 
 use std::fmt::{self, Write as _};

@@ -5,9 +5,12 @@ runtime will load in a supervised child process. It is deliberately not a
 device runtime: display buffers, input descriptors, clocks, audio devices,
 processes, and filesystem authority stay in Rust.
 
-Rust supervises the Lisp child on one asynchronous worker thread. Product
-event loops only try bounded request and event queues; they never wait for
-Lisp startup, file loading, evaluation, or pipe I/O.
+Rust supervises the Lisp child on one asynchronous worker thread. Each child
+is preloaded for one policy decision and then exits; the timer immediately
+preloads a replacement after each successful decision and retries on the next
+round after a failure. Product event loops only hand off one bounded request
+and poll one terminal outcome, so they never wait for Lisp startup, file
+loading, evaluation, or pipe I/O.
 
 The worker loads the tracked `retro-deck` ASDF system, installs its default
 hooks, and then loads root-owned local files from
@@ -32,8 +35,9 @@ Local files use the same package and replace behavior by registering a hook:
 The site directory is persistent local state. It is excluded from Git,
 preserved by deployment, and never exposed through the ROM uploader.
 
-The native dashboard requests `:dashboard/startup` once after the worker
-becomes ready, then terminates the worker. The hook returns ordered
+The native dashboard queues `:dashboard/startup` as soon as the worker starts;
+the supervisor delivers it after Lisp has loaded the tracked and site files,
+then terminates the worker. The hook returns ordered
 `(kind title color)` rows and a bounded raw gamepad profile. A local file can
 patch product behavior without gaining executable, device, or path authority:
 

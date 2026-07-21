@@ -25,8 +25,8 @@ use retro_deck_dashboard::{
     bmc_action_for_touch, build_bmc_tree, dashboard_startup_from_policy, load_native_catalog,
 };
 use retro_deck_policy::{
-    PolicyClient, PolicyEvent, PolicyEventPoll, PolicyResponse, PolicySubmit, RequestId, Value,
-    WorkerCommand, WorkerConfig,
+    PolicyClient, PolicyEvent, PolicyEventPoll, PolicyResponse, PolicySubmit, Value, WorkerCommand,
+    WorkerConfig,
 };
 
 const MANIFEST_ENV: &str = "RETRO_DECK_MANIFEST";
@@ -86,7 +86,6 @@ struct NativeRuntime {
     active_touch: Option<i32>,
     gamepad: GamepadInput,
     policy: Option<PolicyClient>,
-    policy_request: Option<RequestId>,
     last_frame_at: Option<Instant>,
 }
 
@@ -109,7 +108,6 @@ impl NativeRuntime {
             active_touch: None,
             gamepad: GamepadInput::default(),
             policy,
-            policy_request: None,
             last_frame_at: None,
         }
     }
@@ -157,24 +155,6 @@ impl NativeRuntime {
                     self.policy.take();
                     return;
                 }
-                PolicyEventPoll::Event(PolicyEvent::Ready) => {
-                    let submission = policy.try_submit(DASHBOARD_POLICY_HOOK, Value::Nil);
-                    match submission {
-                        Ok(PolicySubmit::Queued(identifier)) => {
-                            self.policy_request = Some(identifier);
-                        }
-                        Ok(PolicySubmit::DroppedFull | PolicySubmit::Unavailable) => {
-                            tracing::warn!("Common Lisp dashboard policy rejected startup work");
-                            self.policy.take();
-                            return;
-                        }
-                        Err(error) => {
-                            tracing::warn!(?error, "cannot encode dashboard startup policy");
-                            self.policy.take();
-                            return;
-                        }
-                    }
-                }
                 PolicyEventPoll::Event(PolicyEvent::Response(response)) => {
                     self.apply_policy_response(response);
                     self.policy.take();
@@ -190,14 +170,10 @@ impl NativeRuntime {
     }
 
     fn apply_policy_response(&mut self, response: PolicyResponse) {
-        let PolicyResponse::Ok { id, value } = response else {
+        let PolicyResponse::Ok { value, .. } = response else {
             tracing::warn!(?response, "Common Lisp dashboard policy rejected startup");
             return;
         };
-        if self.policy_request != Some(id) {
-            tracing::warn!(?id, "ignored stale Common Lisp dashboard policy response");
-            return;
-        }
         let (applications, gamepad) = match dashboard_startup_from_policy(&value) {
             Ok(startup) => startup,
             Err(error) => {
@@ -481,7 +457,17 @@ fn spawn_dashboard_policy() -> Option<PolicyClient> {
         .env("RETRO_DECK_LISP_SITE_DIR", LISP_SITE_DIRECTORY)
         .current_dir(LISP_DIRECTORY);
     match PolicyClient::spawn(WorkerConfig::new(command)) {
-        Ok(policy) => Some(policy),
+        Ok(mut policy) => match policy.try_submit(DASHBOARD_POLICY_HOOK, Value::Nil) {
+            Ok(PolicySubmit::Queued(_)) => Some(policy),
+            Ok(PolicySubmit::Unavailable) => {
+                tracing::warn!("Common Lisp dashboard policy rejected startup work");
+                None
+            }
+            Err(error) => {
+                tracing::warn!(?error, "cannot encode dashboard startup policy");
+                None
+            }
+        },
         Err(error) => {
             tracing::warn!(?error, "cannot start Common Lisp dashboard supervisor");
             None

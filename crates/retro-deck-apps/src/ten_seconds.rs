@@ -262,8 +262,8 @@ impl TimerGame {
 
     /// Record the result of a nonblocking policy submission.
     ///
-    /// A full or unavailable queue immediately selects the safe built-in cue.
-    /// A queued request leaves sound pending while the UI remains responsive.
+    /// An unavailable worker immediately selects the safe built-in cue. A
+    /// queued request leaves sound pending while the UI remains responsive.
     pub const fn policy_submitted(&mut self, submission: PolicySubmit) -> TimerEffect {
         match submission {
             PolicySubmit::Queued(request_id) => {
@@ -274,7 +274,7 @@ impl TimerGame {
                 }
                 TimerEffect::None
             }
-            PolicySubmit::DroppedFull | PolicySubmit::Unavailable => self.resolve_with_fallback(),
+            PolicySubmit::Unavailable => self.resolve_with_fallback(),
         }
     }
 
@@ -486,21 +486,19 @@ mod tests {
 
     #[test]
     fn unavailable_policy_uses_the_built_in_cue_without_waiting() {
-        for submission in [PolicySubmit::DroppedFull, PolicySubmit::Unavailable] {
-            let mut exact = TimerGame::new();
-            let _ = stop(&mut exact, 1_000, InputSource::Touch);
-            assert_eq!(
-                exact.policy_submitted(submission),
-                TimerEffect::PlayCue(Cue::Exact)
-            );
+        let mut exact = TimerGame::new();
+        let _ = stop(&mut exact, 1_000, InputSource::Touch);
+        assert_eq!(
+            exact.policy_submitted(PolicySubmit::Unavailable),
+            TimerEffect::PlayCue(Cue::Exact)
+        );
 
-            let mut miss = TimerGame::new();
-            let _ = stop(&mut miss, 999, InputSource::Touch);
-            assert_eq!(
-                miss.policy_submitted(submission),
-                TimerEffect::PlayCue(Cue::Miss)
-            );
-        }
+        let mut miss = TimerGame::new();
+        let _ = stop(&mut miss, 999, InputSource::Touch);
+        assert_eq!(
+            miss.policy_submitted(PolicySubmit::Unavailable),
+            TimerEffect::PlayCue(Cue::Miss)
+        );
     }
 
     #[test]

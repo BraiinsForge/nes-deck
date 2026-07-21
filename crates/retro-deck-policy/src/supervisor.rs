@@ -1,40 +1,26 @@
-//! Nonblocking client and process supervisor for the Common Lisp worker.
+//! One-decision process boundary for the Common Lisp policy worker.
 
 use std::{
     ffi::OsString,
     fmt, io,
-    num::NonZeroUsize,
     path::PathBuf,
     process::Stdio,
-    sync::{
-        Arc,
-        atomic::{AtomicI64, AtomicU8, Ordering},
-        mpsc::{self as std_mpsc, Receiver, SyncSender, TryRecvError},
-    },
+    sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
     thread::{self, JoinHandle},
     time::Duration,
 };
+
 use tokio::{
     io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader},
     process::{Child, ChildStdout, Command},
     runtime::Builder,
-    sync::{
-        mpsc::{self as tokio_mpsc, error::TrySendError},
-        oneshot,
-    },
+    sync::oneshot,
     time,
 };
 
 use crate::{
     DEFAULT_MAX_BYTES, MessageError, PolicyRequest, PolicyResponse, RequestId, Value, decode_ready,
 };
-
-const FIRST_REQUEST_ID: i64 = 1;
-
-const STATUS_STARTING: u8 = 0;
-const STATUS_READY: u8 = 1;
-const STATUS_UNAVAILABLE: u8 = 2;
-const STATUS_STOPPED: u8 = 3;
 
 /// Process invocation for the trusted Common Lisp worker.
 ///
@@ -113,26 +99,22 @@ impl WorkerCommand {
     }
 }
 
-/// Resource and deadline policy for one worker process.
+/// Deadlines for one worker process and its single decision.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkerConfig {
     command: WorkerCommand,
     startup_timeout: Duration,
     request_timeout: Duration,
-    request_capacity: NonZeroUsize,
-    event_capacity: NonZeroUsize,
 }
 
 impl WorkerConfig {
     /// Construct production-oriented defaults for `command`.
     #[must_use]
-    pub fn new(command: WorkerCommand) -> Self {
+    pub const fn new(command: WorkerCommand) -> Self {
         Self {
             command,
             startup_timeout: Duration::from_secs(3),
             request_timeout: Duration::from_millis(250),
-            request_capacity: nonzero(8),
-            event_capacity: nonzero(16),
         }
     }
 
@@ -143,91 +125,40 @@ impl WorkerConfig {
         self
     }
 
-    /// Replace the deadline for one request and response exchange.
+    /// Replace the deadline for the request and response exchange.
     #[must_use]
     pub const fn request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = timeout;
         self
-    }
-
-    /// Replace the number of policy calls that may wait behind the worker.
-    #[must_use]
-    pub const fn request_capacity(mut self, capacity: NonZeroUsize) -> Self {
-        self.request_capacity = capacity;
-        self
-    }
-
-    /// Replace the number of unconsumed worker events retained for the host.
-    #[must_use]
-    pub const fn event_capacity(mut self, capacity: NonZeroUsize) -> Self {
-        self.event_capacity = capacity;
-        self
-    }
-}
-
-/// Current coarse worker state, available even if an event was dropped.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum WorkerStatus {
-    /// The child has not produced a valid readiness message yet.
-    Starting,
-    /// The child is ready and accepting queued requests.
-    Ready,
-    /// Startup or request processing failed. Built-in behavior must be used.
-    Unavailable,
-    /// The client deliberately shut the worker down.
-    Stopped,
-}
-
-impl WorkerStatus {
-    const fn from_wire(value: u8) -> Self {
-        match value {
-            STATUS_STARTING => Self::Starting,
-            STATUS_READY => Self::Ready,
-            STATUS_UNAVAILABLE => Self::Unavailable,
-            _ => Self::Stopped,
-        }
-    }
-
-    const fn to_wire(self) -> u8 {
-        match self {
-            Self::Starting => STATUS_STARTING,
-            Self::Ready => STATUS_READY,
-            Self::Unavailable => STATUS_UNAVAILABLE,
-            Self::Stopped => STATUS_STOPPED,
-        }
     }
 }
 
 /// Result of nonblocking policy submission from an application event path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PolicySubmit {
-    /// The request is queued and may later yield a [`PolicyEvent::Response`].
+    /// The only request was handed to the supervisor.
     Queued(RequestId),
-    /// The bounded request queue is full. The caller must use built-in policy.
-    DroppedFull,
-    /// The worker is unavailable or shutting down. Use built-in policy.
+    /// The request was already submitted or the worker has stopped.
     Unavailable,
 }
 
-/// Best-effort event emitted by the policy supervisor.
+/// Terminal event emitted by a one-decision policy worker.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PolicyEvent {
-    /// The child loaded all tracked and local startup files successfully.
-    Ready,
-    /// A validated response arrived for the only in-flight request.
+    /// The worker returned one validated response.
     Response(PolicyResponse),
-    /// The child failed and was terminated.
+    /// Startup or request processing failed and built-in behavior must be used.
     Unavailable(WorkerFailure),
 }
 
-/// Result of polling the bounded supervisor event queue.
+/// Result of polling the supervisor without waiting.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PolicyEventPoll {
-    /// One event was waiting.
+    /// One terminal event was waiting.
     Event(PolicyEvent),
     /// The worker remains connected but no event is waiting.
     Empty,
-    /// The supervisor thread has ended and no event remains.
+    /// The supervisor ended and no event remains.
     Disconnected,
 }
 
@@ -242,7 +173,7 @@ pub enum WorkerFailure {
     Runtime(String),
     /// No valid readiness line arrived before the startup deadline.
     StartupTimeout,
-    /// No response arrived before this request's deadline.
+    /// No response arrived before the request deadline.
     RequestTimeout(RequestId),
     /// The child closed stdout before the expected protocol line.
     OutputEnded,
@@ -258,14 +189,14 @@ pub enum WorkerFailure {
     InvalidReady(MessageError),
     /// A response line violated the typed message schema.
     InvalidResponse(MessageError),
-    /// A response did not match the only in-flight request.
+    /// A response did not match the one request.
     UnexpectedResponse {
-        /// ID of the in-flight request.
+        /// ID of the request.
         expected: RequestId,
         /// ID returned by the child.
         received: RequestId,
     },
-    /// The child emitted a line while no request was in flight.
+    /// The child emitted a line before receiving its request.
     UnsolicitedOutput,
     /// The child exited before orderly client shutdown.
     ProcessExited(Option<i32>),
@@ -313,110 +244,75 @@ impl fmt::Display for WorkerFailure {
 
 impl std::error::Error for WorkerFailure {}
 
-/// Asynchronous policy client safe to call from application event handling.
+/// Preloaded policy process accepting one nonblocking decision request.
 #[derive(Debug)]
 pub struct PolicyClient {
-    request_sender: Option<tokio_mpsc::Sender<WireRequest>>,
+    request_sender: Option<oneshot::Sender<WireRequest>>,
     event_receiver: Receiver<PolicyEvent>,
     shutdown_sender: Option<oneshot::Sender<()>>,
-    status: Arc<AtomicU8>,
-    next_request_id: AtomicI64,
     supervisor: Option<JoinHandle<()>>,
 }
 
 impl PolicyClient {
-    /// Start a process supervisor and return without waiting for Lisp startup.
+    /// Start loading policy in a child and return without waiting for Lisp.
+    ///
+    /// The client accepts exactly one request. A caller that needs another
+    /// decision starts another worker while the next interaction is underway.
     ///
     /// # Errors
     ///
     /// Returns an I/O error only if the Rust supervisor thread itself cannot
-    /// be created. Child startup failures arrive asynchronously as
-    /// [`PolicyEvent::Unavailable`] and [`WorkerStatus::Unavailable`].
+    /// be created. Child failures arrive as [`PolicyEvent::Unavailable`].
     pub fn spawn(config: WorkerConfig) -> io::Result<Self> {
-        let (request_sender, request_receiver) = tokio_mpsc::channel(config.request_capacity.get());
-        let (event_sender, event_receiver) = std_mpsc::sync_channel(config.event_capacity.get());
+        let (request_sender, request_receiver) = oneshot::channel();
+        let (event_sender, event_receiver) = mpsc::sync_channel(1);
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let status = Arc::new(AtomicU8::new(STATUS_STARTING));
-        let supervisor_status = Arc::clone(&status);
         let supervisor = thread::Builder::new()
             .name("retro-deck-policy".to_owned())
             .spawn(move || {
-                supervise(
-                    &config,
-                    request_receiver,
-                    &event_sender,
-                    shutdown_receiver,
-                    &supervisor_status,
-                );
+                supervise(&config, request_receiver, &event_sender, shutdown_receiver);
             })?;
         Ok(Self {
             request_sender: Some(request_sender),
             event_receiver,
             shutdown_sender: Some(shutdown_sender),
-            status,
-            next_request_id: AtomicI64::new(FIRST_REQUEST_ID),
             supervisor: Some(supervisor),
         })
     }
 
-    /// Return the worker state without waiting for the supervisor.
-    #[must_use]
-    pub fn status(&self) -> WorkerStatus {
-        WorkerStatus::from_wire(self.status.load(Ordering::Acquire))
-    }
-
-    /// Encode and try to queue one policy call without waiting for Lisp.
-    ///
-    /// Encoding is bounded by the wire limits. Queue saturation or worker
-    /// failure is reported as a normal fallback outcome.
+    /// Encode and hand off the worker's only policy call without waiting.
     ///
     /// # Errors
     ///
     /// Returns [`MessageError`] if the hook or arguments cannot be encoded.
-    pub fn try_submit(&self, hook: &str, arguments: Value) -> Result<PolicySubmit, MessageError> {
-        if matches!(
-            self.status(),
-            WorkerStatus::Unavailable | WorkerStatus::Stopped
-        ) {
-            return Ok(PolicySubmit::Unavailable);
-        }
-        let id = self.allocate_request_id();
-        let line = PolicyRequest::new(id, hook, arguments)?.encode()?;
-        let Some(sender) = &self.request_sender else {
+    pub fn try_submit(
+        &mut self,
+        hook: &str,
+        arguments: Value,
+    ) -> Result<PolicySubmit, MessageError> {
+        let request_id = policy_request_id();
+        let request = PolicyRequest::new(request_id, hook, arguments)?;
+        let line = request.encode()?;
+        let Some(sender) = self.request_sender.take() else {
             return Ok(PolicySubmit::Unavailable);
         };
-        match sender.try_send(WireRequest { id, line }) {
-            Ok(()) => Ok(PolicySubmit::Queued(id)),
-            Err(TrySendError::Full(_)) => Ok(PolicySubmit::DroppedFull),
-            Err(TrySendError::Closed(_)) => Ok(PolicySubmit::Unavailable),
-        }
+        sender
+            .send(WireRequest {
+                id: request_id,
+                line,
+            })
+            .map_or(Ok(PolicySubmit::Unavailable), |()| {
+                Ok(PolicySubmit::Queued(request_id))
+            })
     }
 
-    /// Poll one supervisor event without waiting.
+    /// Poll the worker's terminal event without waiting.
     #[must_use]
     pub fn try_event(&self) -> PolicyEventPoll {
         match self.event_receiver.try_recv() {
             Ok(event) => PolicyEventPoll::Event(event),
             Err(TryRecvError::Empty) => PolicyEventPoll::Empty,
             Err(TryRecvError::Disconnected) => PolicyEventPoll::Disconnected,
-        }
-    }
-
-    fn allocate_request_id(&self) -> RequestId {
-        loop {
-            let current = self.next_request_id.load(Ordering::Relaxed);
-            let next = if current == i64::MAX {
-                FIRST_REQUEST_ID
-            } else {
-                current + 1
-            };
-            if self
-                .next_request_id
-                .compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed)
-                .is_ok()
-            {
-                return RequestId::new(current).unwrap_or(RequestId::ZERO);
-            }
         }
     }
 }
@@ -439,16 +335,6 @@ struct WireRequest {
     line: String,
 }
 
-#[derive(Debug)]
-enum ReaderEvent {
-    Line(String),
-    Ended,
-    Truncated,
-    Oversized,
-    Failed(String),
-}
-
-#[derive(Debug)]
 enum WaitResult {
     Line(String),
     Shutdown,
@@ -458,43 +344,32 @@ enum WaitResult {
 
 fn supervise(
     config: &WorkerConfig,
-    request_receiver: tokio_mpsc::Receiver<WireRequest>,
+    request_receiver: oneshot::Receiver<WireRequest>,
     event_sender: &SyncSender<PolicyEvent>,
     shutdown_receiver: oneshot::Receiver<()>,
-    status: &AtomicU8,
 ) {
     let runtime = match Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(error) => {
-            fail(
-                status,
+            publish(
                 event_sender,
-                WorkerFailure::Runtime(error.to_string()),
+                PolicyEvent::Unavailable(WorkerFailure::Runtime(error.to_string())),
             );
             return;
         }
     };
-    let outcome = runtime.block_on(run_worker(
-        config,
-        request_receiver,
-        event_sender,
-        shutdown_receiver,
-        status,
-    ));
-
-    match outcome {
-        Ok(()) => status.store(WorkerStatus::Stopped.to_wire(), Ordering::Release),
-        Err(failure) => fail(status, event_sender, failure),
+    match runtime.block_on(run_worker(config, request_receiver, shutdown_receiver)) {
+        Ok(Some(response)) => publish(event_sender, PolicyEvent::Response(response)),
+        Ok(None) => {}
+        Err(failure) => publish(event_sender, PolicyEvent::Unavailable(failure)),
     }
 }
 
 async fn run_worker(
     config: &WorkerConfig,
-    request_receiver: tokio_mpsc::Receiver<WireRequest>,
-    event_sender: &SyncSender<PolicyEvent>,
+    request_receiver: oneshot::Receiver<WireRequest>,
     shutdown_receiver: oneshot::Receiver<()>,
-    status: &AtomicU8,
-) -> Result<(), WorkerFailure> {
+) -> Result<Option<PolicyResponse>, WorkerFailure> {
     let mut child = config
         .command
         .build()
@@ -509,41 +384,30 @@ async fn run_worker(
         return Err(WorkerFailure::MissingPipe("stdout"));
     };
 
-    let (line_sender, line_receiver) = tokio_mpsc::channel(2);
-    let reader = tokio::spawn(read_lines(stdout, line_sender));
     let result = serve_worker(
         config,
         request_receiver,
-        event_sender,
         shutdown_receiver,
-        status,
         &mut child,
         stdin,
-        line_receiver,
+        stdout,
     )
     .await;
     terminate_child(&mut child).await;
-    reader.abort();
-    let _ = reader.await;
     result
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the loop explicitly owns the child and each bounded channel"
-)]
 async fn serve_worker(
     config: &WorkerConfig,
-    mut request_receiver: tokio_mpsc::Receiver<WireRequest>,
-    event_sender: &SyncSender<PolicyEvent>,
+    mut request_receiver: oneshot::Receiver<WireRequest>,
     mut shutdown_receiver: oneshot::Receiver<()>,
-    status: &AtomicU8,
     child: &mut Child,
     mut stdin: tokio::process::ChildStdin,
-    mut line_receiver: tokio_mpsc::Receiver<ReaderEvent>,
-) -> Result<(), WorkerFailure> {
+    stdout: ChildStdout,
+) -> Result<Option<PolicyResponse>, WorkerFailure> {
+    let mut stdout = BufReader::new(stdout);
     match wait_for_line(
-        &mut line_receiver,
+        &mut stdout,
         &mut shutdown_receiver,
         child,
         config.startup_timeout,
@@ -551,55 +415,53 @@ async fn serve_worker(
     .await
     {
         WaitResult::Line(line) => decode_ready(&line).map_err(WorkerFailure::InvalidReady)?,
-        WaitResult::Shutdown => return Ok(()),
+        WaitResult::Shutdown => return Ok(None),
         WaitResult::TimedOut => return Err(WorkerFailure::StartupTimeout),
         WaitResult::Failed(failure) => return Err(failure),
     }
 
-    status.store(WorkerStatus::Ready.to_wire(), Ordering::Release);
-    publish(event_sender, PolicyEvent::Ready);
-
-    loop {
-        let request = tokio::select! {
-            biased;
-            _ = &mut shutdown_receiver => return Ok(()),
-            event = line_receiver.recv() => return Err(idle_failure(event)),
-            exit = child.wait() => return Err(process_failure(exit)),
-            request = request_receiver.recv() => match request {
-                Some(request) => request,
-                None => return Ok(()),
-            },
-        };
-        match exchange(
-            &mut stdin,
-            &mut line_receiver,
-            &mut shutdown_receiver,
-            child,
-            &request.line,
-            config.request_timeout,
-        )
-        .await
-        {
-            WaitResult::Line(line) => {
-                let response =
-                    PolicyResponse::decode(&line).map_err(WorkerFailure::InvalidResponse)?;
-                if response.id() != request.id {
-                    return Err(WorkerFailure::UnexpectedResponse {
-                        expected: request.id,
-                        received: response.id(),
-                    });
-                }
-                publish(event_sender, PolicyEvent::Response(response));
-            }
-            WaitResult::Shutdown => return Ok(()),
-            WaitResult::TimedOut => return Err(WorkerFailure::RequestTimeout(request.id)),
-            WaitResult::Failed(failure) => return Err(failure),
+    let request = tokio::select! {
+        biased;
+        _ = &mut shutdown_receiver => return Ok(None),
+        exit = child.wait() => return Err(process_failure(exit)),
+        output = read_line(&mut stdout) => {
+            output?;
+            return Err(WorkerFailure::UnsolicitedOutput);
         }
+        request = &mut request_receiver => match request {
+            Ok(request) => request,
+            Err(_) => return Ok(None),
+        },
+    };
+
+    match exchange(
+        &mut stdin,
+        &mut stdout,
+        &mut shutdown_receiver,
+        child,
+        &request.line,
+        config.request_timeout,
+    )
+    .await
+    {
+        WaitResult::Line(line) => {
+            let response = PolicyResponse::decode(&line).map_err(WorkerFailure::InvalidResponse)?;
+            if response.id() != request.id {
+                return Err(WorkerFailure::UnexpectedResponse {
+                    expected: request.id,
+                    received: response.id(),
+                });
+            }
+            Ok(Some(response))
+        }
+        WaitResult::Shutdown => Ok(None),
+        WaitResult::TimedOut => Err(WorkerFailure::RequestTimeout(request.id)),
+        WaitResult::Failed(failure) => Err(failure),
     }
 }
 
 async fn wait_for_line(
-    line_receiver: &mut tokio_mpsc::Receiver<ReaderEvent>,
+    stdout: &mut BufReader<ChildStdout>,
     shutdown_receiver: &mut oneshot::Receiver<()>,
     child: &mut Child,
     timeout: Duration,
@@ -607,7 +469,7 @@ async fn wait_for_line(
     tokio::select! {
         biased;
         _ = shutdown_receiver => WaitResult::Shutdown,
-        event = line_receiver.recv() => reader_wait_result(event),
+        line = read_line(stdout) => line.map_or_else(WaitResult::Failed, WaitResult::Line),
         exit = child.wait() => WaitResult::Failed(process_failure(exit)),
         () = time::sleep(timeout) => WaitResult::TimedOut,
     }
@@ -615,52 +477,69 @@ async fn wait_for_line(
 
 async fn exchange(
     stdin: &mut tokio::process::ChildStdin,
-    line_receiver: &mut tokio_mpsc::Receiver<ReaderEvent>,
+    stdout: &mut BufReader<ChildStdout>,
     shutdown_receiver: &mut oneshot::Receiver<()>,
     child: &mut Child,
     line: &str,
     timeout: Duration,
 ) -> WaitResult {
     let operation = async {
-        if let Err(error) = stdin.write_all(line.as_bytes()).await {
-            return WaitResult::Failed(WorkerFailure::Input(error.to_string()));
-        }
-        if let Err(error) = stdin.write_all(b"\n").await {
-            return WaitResult::Failed(WorkerFailure::Input(error.to_string()));
-        }
-        if let Err(error) = stdin.flush().await {
-            return WaitResult::Failed(WorkerFailure::Input(error.to_string()));
-        }
-        reader_wait_result(line_receiver.recv().await)
+        stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|error| WorkerFailure::Input(error.to_string()))?;
+        stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|error| WorkerFailure::Input(error.to_string()))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|error| WorkerFailure::Input(error.to_string()))?;
+        read_line(stdout).await
     };
     tokio::select! {
         biased;
         _ = shutdown_receiver => WaitResult::Shutdown,
         result = time::timeout(timeout, operation) => match result {
-            Ok(result) => result,
+            Ok(Ok(line)) => WaitResult::Line(line),
+            Ok(Err(failure)) => WaitResult::Failed(failure),
             Err(_) => WaitResult::TimedOut,
         },
         exit = child.wait() => WaitResult::Failed(process_failure(exit)),
     }
 }
 
-fn reader_wait_result(event: Option<ReaderEvent>) -> WaitResult {
-    match event {
-        Some(ReaderEvent::Line(line)) => WaitResult::Line(line),
-        Some(ReaderEvent::Ended) | None => WaitResult::Failed(WorkerFailure::OutputEnded),
-        Some(ReaderEvent::Truncated) => WaitResult::Failed(WorkerFailure::TruncatedOutput),
-        Some(ReaderEvent::Oversized) => WaitResult::Failed(WorkerFailure::OversizedOutput),
-        Some(ReaderEvent::Failed(error)) => WaitResult::Failed(WorkerFailure::Output(error)),
-    }
-}
-
-fn idle_failure(event: Option<ReaderEvent>) -> WorkerFailure {
-    match event {
-        Some(ReaderEvent::Line(_)) => WorkerFailure::UnsolicitedOutput,
-        Some(ReaderEvent::Ended) | None => WorkerFailure::OutputEnded,
-        Some(ReaderEvent::Truncated) => WorkerFailure::TruncatedOutput,
-        Some(ReaderEvent::Oversized) => WorkerFailure::OversizedOutput,
-        Some(ReaderEvent::Failed(error)) => WorkerFailure::Output(error),
+async fn read_line(reader: &mut BufReader<ChildStdout>) -> Result<String, WorkerFailure> {
+    let mut bytes = Vec::with_capacity(256);
+    loop {
+        let available = reader
+            .fill_buf()
+            .await
+            .map_err(|error| WorkerFailure::Output(error.to_string()))?;
+        if available.is_empty() {
+            return Err(if bytes.is_empty() {
+                WorkerFailure::OutputEnded
+            } else {
+                WorkerFailure::TruncatedOutput
+            });
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let amount = newline.unwrap_or(available.len());
+        if bytes.len().saturating_add(amount) > DEFAULT_MAX_BYTES {
+            return Err(WorkerFailure::OversizedOutput);
+        }
+        let Some(chunk) = available.get(..amount) else {
+            return Err(WorkerFailure::Output(
+                "policy reader produced invalid bounds".to_owned(),
+            ));
+        };
+        bytes.extend_from_slice(chunk);
+        reader.consume(amount.saturating_add(usize::from(newline.is_some())));
+        if newline.is_some() {
+            return String::from_utf8(bytes)
+                .map_err(|error| WorkerFailure::Output(error.to_string()));
+        }
     }
 }
 
@@ -671,57 +550,12 @@ fn process_failure(result: io::Result<std::process::ExitStatus>) -> WorkerFailur
     }
 }
 
-async fn read_lines(stdout: ChildStdout, sender: tokio_mpsc::Sender<ReaderEvent>) {
-    let mut reader = BufReader::new(stdout);
-    loop {
-        let event = read_line(&mut reader).await;
-        let terminal = !matches!(event, ReaderEvent::Line(_));
-        if sender.send(event).await.is_err() || terminal {
-            return;
-        }
-    }
-}
-
-async fn read_line(reader: &mut BufReader<ChildStdout>) -> ReaderEvent {
-    let mut bytes = Vec::with_capacity(256);
-    loop {
-        let available = match reader.fill_buf().await {
-            Ok(available) => available,
-            Err(error) => return ReaderEvent::Failed(error.to_string()),
-        };
-        if available.is_empty() {
-            return if bytes.is_empty() {
-                ReaderEvent::Ended
-            } else {
-                ReaderEvent::Truncated
-            };
-        }
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let amount = newline.unwrap_or(available.len());
-        if bytes.len().saturating_add(amount) > DEFAULT_MAX_BYTES {
-            return ReaderEvent::Oversized;
-        }
-        let Some(chunk) = available.get(..amount) else {
-            return ReaderEvent::Failed("policy reader produced invalid bounds".to_owned());
-        };
-        bytes.extend_from_slice(chunk);
-        reader.consume(amount.saturating_add(usize::from(newline.is_some())));
-        if newline.is_some() {
-            return match String::from_utf8(bytes) {
-                Ok(line) => ReaderEvent::Line(line),
-                Err(error) => ReaderEvent::Failed(error.to_string()),
-            };
-        }
-    }
-}
-
 fn publish(sender: &SyncSender<PolicyEvent>, event: PolicyEvent) {
     let _ = sender.try_send(event);
 }
 
-fn fail(status: &AtomicU8, sender: &SyncSender<PolicyEvent>, failure: WorkerFailure) {
-    status.store(WorkerStatus::Unavailable.to_wire(), Ordering::Release);
-    publish(sender, PolicyEvent::Unavailable(failure));
+fn policy_request_id() -> RequestId {
+    RequestId::new(1).unwrap_or(RequestId::ZERO)
 }
 
 async fn terminate_child(child: &mut Child) {
@@ -734,15 +568,11 @@ async fn terminate_child(child: &mut Child) {
     let _ = child.wait().await;
 }
 
-fn nonzero(value: usize) -> NonZeroUsize {
-    NonZeroUsize::new(value).unwrap_or(NonZeroUsize::MIN)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         PolicyClient, PolicyEvent, PolicyEventPoll, PolicySubmit, WorkerCommand, WorkerConfig,
-        WorkerFailure, WorkerStatus, nonzero,
+        WorkerFailure,
     };
     use crate::{PolicyResponse, Value};
     use std::{
@@ -760,8 +590,6 @@ mod tests {
         WorkerConfig::new(command)
             .startup_timeout(Duration::from_millis(500))
             .request_timeout(Duration::from_millis(150))
-            .request_capacity(nonzero(2))
-            .event_capacity(nonzero(8))
     }
 
     fn spawn_test_client(command: WorkerCommand) -> Option<PolicyClient> {
@@ -785,28 +613,15 @@ mod tests {
         }
     }
 
-    fn wait_ready(client: &PolicyClient) -> bool {
-        matches!(
-            wait_event(client, Duration::from_secs(1)),
-            Some(PolicyEvent::Ready)
-        )
-    }
-
     fn exercise_common_lisp_worker(command: WorkerCommand) {
         let config = WorkerConfig::new(command)
             .startup_timeout(Duration::from_secs(5))
-            .request_timeout(Duration::from_secs(1))
-            .request_capacity(nonzero(2))
-            .event_capacity(nonzero(8));
+            .request_timeout(Duration::from_secs(1));
         let result = PolicyClient::spawn(config);
         assert!(result.is_ok(), "cannot spawn Common Lisp test worker");
-        let Some(client) = result.ok() else {
+        let Some(mut client) = result.ok() else {
             return;
         };
-        assert!(matches!(
-            wait_event(&client, Duration::from_secs(5)),
-            Some(PolicyEvent::Ready)
-        ));
         let arguments = Value::List(vec![
             Value::Keyword("elapsed-centiseconds".to_owned()),
             Value::Integer(1_000),
@@ -818,7 +633,7 @@ mod tests {
             Ok(PolicySubmit::Queued(_))
         ));
         assert!(matches!(
-            wait_event(&client, Duration::from_secs(2)),
+            wait_event(&client, Duration::from_secs(6)),
             Some(PolicyEvent::Response(PolicyResponse::Ok {
                 value: Value::List(values),
                 ..
@@ -835,12 +650,10 @@ mod tests {
     fn valid_worker_round_trip_is_typed() {
         let script = "printf '(:ready :version 1)\\n'; \
                       IFS= read -r request; \
-                      printf '(:response :version 1 :id 1 :status :ok :value (:answer 42))\\n'; \
-                      IFS= read -r rest";
-        let Some(client) = spawn_test_client(shell_worker(script)) else {
+                      printf '(:response :version 1 :id 1 :status :ok :value (:answer 42))\\n'";
+        let Some(mut client) = spawn_test_client(shell_worker(script)) else {
             return;
         };
-        assert!(wait_ready(&client));
         assert_eq!(
             client.try_submit("test", Value::Nil),
             Ok(PolicySubmit::Queued(
@@ -858,7 +671,7 @@ mod tests {
 
     #[test]
     fn malformed_readiness_fails_closed() {
-        let Some(client) = spawn_test_client(shell_worker(
+        let Some(mut client) = spawn_test_client(shell_worker(
             "printf '(:ready :version 2)\\n'; IFS= read -r rest",
         )) else {
             return;
@@ -867,7 +680,6 @@ mod tests {
             wait_event(&client, Duration::from_secs(1)),
             Some(PolicyEvent::Unavailable(WorkerFailure::InvalidReady(_)))
         ));
-        assert_eq!(client.status(), WorkerStatus::Unavailable);
         assert_eq!(
             client.try_submit("test", Value::Nil),
             Ok(PolicySubmit::Unavailable)
@@ -876,12 +688,11 @@ mod tests {
 
     #[test]
     fn unresponsive_request_is_killed_at_its_deadline() {
-        let Some(client) = spawn_test_client(shell_worker(
+        let Some(mut client) = spawn_test_client(shell_worker(
             "printf '(:ready :version 1)\\n'; IFS= read -r request; IFS= read -r rest",
         )) else {
             return;
         };
-        assert!(wait_ready(&client));
         assert!(matches!(
             client.try_submit("test", Value::Nil),
             Ok(PolicySubmit::Queued(_))
@@ -890,17 +701,13 @@ mod tests {
             wait_event(&client, Duration::from_secs(1)),
             Some(PolicyEvent::Unavailable(WorkerFailure::RequestTimeout(_)))
         ));
-        assert_eq!(client.status(), WorkerStatus::Unavailable);
     }
 
     #[test]
-    fn request_submission_is_bounded_during_startup() {
-        let config = test_config(shell_worker("IFS= read -r rest"))
-            .request_capacity(nonzero(1))
-            .startup_timeout(Duration::from_secs(1));
-        let result = PolicyClient::spawn(config);
-        assert!(result.is_ok(), "cannot spawn bounded-queue test supervisor");
-        let Some(client) = result.ok() else {
+    fn one_worker_accepts_exactly_one_request() {
+        let Some(mut client) = spawn_test_client(shell_worker(
+            "printf '(:ready :version 1)\\n'; IFS= read -r request; IFS= read -r rest",
+        )) else {
             return;
         };
         assert!(matches!(
@@ -909,7 +716,7 @@ mod tests {
         ));
         assert_eq!(
             client.try_submit("two", Value::Nil),
-            Ok(PolicySubmit::DroppedFull)
+            Ok(PolicySubmit::Unavailable)
         );
     }
 
