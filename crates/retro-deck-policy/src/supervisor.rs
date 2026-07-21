@@ -2,18 +2,27 @@
 
 use std::{
     ffi::OsString,
-    fmt,
-    io::{self, BufReader, Read as _, Write as _},
+    fmt, io,
     num::NonZeroUsize,
     path::PathBuf,
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    process::Stdio,
     sync::{
         Arc,
         atomic::{AtomicI64, AtomicU8, Ordering},
-        mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError},
+        mpsc::{self as std_mpsc, Receiver, SyncSender, TryRecvError},
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Duration,
+};
+use tokio::{
+    io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader},
+    process::{Child, ChildStdout, Command},
+    runtime::Builder,
+    sync::{
+        mpsc::{self as tokio_mpsc, error::TrySendError},
+        oneshot,
+    },
+    time,
 };
 
 use crate::{
@@ -21,7 +30,6 @@ use crate::{
 };
 
 const FIRST_REQUEST_ID: i64 = 1;
-const SUPERVISOR_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 const STATUS_STARTING: u8 = 0;
 const STATUS_READY: u8 = 1;
@@ -230,8 +238,8 @@ pub enum WorkerFailure {
     Spawn(String),
     /// A required standard-I/O pipe was absent.
     MissingPipe(&'static str),
-    /// A dedicated I/O thread could not be created.
-    IoThread(String),
+    /// The asynchronous supervisor runtime could not be created.
+    Runtime(String),
     /// No valid readiness line arrived before the startup deadline.
     StartupTimeout,
     /// No response arrived before this request's deadline.
@@ -270,7 +278,7 @@ impl fmt::Display for WorkerFailure {
         match self {
             Self::Spawn(error) => write!(formatter, "cannot spawn policy worker: {error}"),
             Self::MissingPipe(name) => write!(formatter, "policy worker has no {name} pipe"),
-            Self::IoThread(error) => write!(formatter, "cannot start policy I/O thread: {error}"),
+            Self::Runtime(error) => write!(formatter, "cannot start policy runtime: {error}"),
             Self::StartupTimeout => formatter.write_str("policy worker startup timed out"),
             Self::RequestTimeout(id) => {
                 write!(formatter, "policy request {} timed out", id.get())
@@ -308,9 +316,9 @@ impl std::error::Error for WorkerFailure {}
 /// Asynchronous policy client safe to call from application event handling.
 #[derive(Debug)]
 pub struct PolicyClient {
-    request_sender: Option<SyncSender<WireRequest>>,
+    request_sender: Option<tokio_mpsc::Sender<WireRequest>>,
     event_receiver: Receiver<PolicyEvent>,
-    shutdown_sender: mpsc::Sender<()>,
+    shutdown_sender: Option<oneshot::Sender<()>>,
     status: Arc<AtomicU8>,
     next_request_id: AtomicI64,
     supervisor: Option<JoinHandle<()>>,
@@ -325,9 +333,9 @@ impl PolicyClient {
     /// be created. Child startup failures arrive asynchronously as
     /// [`PolicyEvent::Unavailable`] and [`WorkerStatus::Unavailable`].
     pub fn spawn(config: WorkerConfig) -> io::Result<Self> {
-        let (request_sender, request_receiver) = mpsc::sync_channel(config.request_capacity.get());
-        let (event_sender, event_receiver) = mpsc::sync_channel(config.event_capacity.get());
-        let (shutdown_sender, shutdown_receiver) = mpsc::channel();
+        let (request_sender, request_receiver) = tokio_mpsc::channel(config.request_capacity.get());
+        let (event_sender, event_receiver) = std_mpsc::sync_channel(config.event_capacity.get());
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let status = Arc::new(AtomicU8::new(STATUS_STARTING));
         let supervisor_status = Arc::clone(&status);
         let supervisor = thread::Builder::new()
@@ -335,16 +343,16 @@ impl PolicyClient {
             .spawn(move || {
                 supervise(
                     &config,
-                    &request_receiver,
+                    request_receiver,
                     &event_sender,
-                    &shutdown_receiver,
+                    shutdown_receiver,
                     &supervisor_status,
                 );
             })?;
         Ok(Self {
             request_sender: Some(request_sender),
             event_receiver,
-            shutdown_sender,
+            shutdown_sender: Some(shutdown_sender),
             status,
             next_request_id: AtomicI64::new(FIRST_REQUEST_ID),
             supervisor: Some(supervisor),
@@ -380,7 +388,7 @@ impl PolicyClient {
         match sender.try_send(WireRequest { id, line }) {
             Ok(()) => Ok(PolicySubmit::Queued(id)),
             Err(TrySendError::Full(_)) => Ok(PolicySubmit::DroppedFull),
-            Err(TrySendError::Disconnected(_)) => Ok(PolicySubmit::Unavailable),
+            Err(TrySendError::Closed(_)) => Ok(PolicySubmit::Unavailable),
         }
     }
 
@@ -415,7 +423,9 @@ impl PolicyClient {
 
 impl Drop for PolicyClient {
     fn drop(&mut self) {
-        let _ = self.shutdown_sender.send(());
+        if let Some(sender) = self.shutdown_sender.take() {
+            let _ = sender.send(());
+        }
         self.request_sender.take();
         if let Some(supervisor) = self.supervisor.take() {
             let _ = supervisor.join();
@@ -448,70 +458,29 @@ enum WaitResult {
 
 fn supervise(
     config: &WorkerConfig,
-    request_receiver: &Receiver<WireRequest>,
+    request_receiver: tokio_mpsc::Receiver<WireRequest>,
     event_sender: &SyncSender<PolicyEvent>,
-    shutdown_receiver: &Receiver<()>,
+    shutdown_receiver: oneshot::Receiver<()>,
     status: &AtomicU8,
 ) {
-    let mut child = match config.command.build().spawn() {
-        Ok(child) => child,
+    let runtime = match Builder::new_current_thread().enable_all().build() {
+        Ok(runtime) => runtime,
         Err(error) => {
             fail(
                 status,
                 event_sender,
-                WorkerFailure::Spawn(error.to_string()),
+                WorkerFailure::Runtime(error.to_string()),
             );
             return;
         }
     };
-    let Some(stdin) = child.stdin.take() else {
-        fail(status, event_sender, WorkerFailure::MissingPipe("stdin"));
-        terminate_child(&mut child);
-        return;
-    };
-    let Some(stdout) = child.stdout.take() else {
-        fail(status, event_sender, WorkerFailure::MissingPipe("stdout"));
-        terminate_child(&mut child);
-        return;
-    };
-
-    let (line_sender, line_receiver) = mpsc::sync_channel(2);
-    let reader = match spawn_reader(stdout, line_sender) {
-        Ok(reader) => reader,
-        Err(error) => {
-            fail(status, event_sender, WorkerFailure::IoThread(error));
-            terminate_child(&mut child);
-            return;
-        }
-    };
-    let (write_sender, write_receiver) = mpsc::sync_channel(1);
-    let (write_error_sender, write_error_receiver) = mpsc::sync_channel(1);
-    let writer = match spawn_writer(stdin, write_receiver, write_error_sender) {
-        Ok(writer) => writer,
-        Err(error) => {
-            fail(status, event_sender, WorkerFailure::IoThread(error));
-            terminate_child(&mut child);
-            let _ = reader.join();
-            return;
-        }
-    };
-
-    let outcome = run_ready_worker(
+    let outcome = runtime.block_on(run_worker(
         config,
         request_receiver,
         event_sender,
         shutdown_receiver,
         status,
-        &mut child,
-        &line_receiver,
-        &write_sender,
-        &write_error_receiver,
-    );
-
-    drop(write_sender);
-    terminate_child(&mut child);
-    let _ = writer.join();
-    let _ = reader.join();
+    ));
 
     match outcome {
         Ok(()) => status.store(WorkerStatus::Stopped.to_wire(), Ordering::Release),
@@ -519,28 +488,68 @@ fn supervise(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the supervisor loop keeps each owned channel and child explicit"
-)]
-fn run_ready_worker(
+async fn run_worker(
     config: &WorkerConfig,
-    request_receiver: &Receiver<WireRequest>,
+    request_receiver: tokio_mpsc::Receiver<WireRequest>,
     event_sender: &SyncSender<PolicyEvent>,
-    shutdown_receiver: &Receiver<()>,
+    shutdown_receiver: oneshot::Receiver<()>,
+    status: &AtomicU8,
+) -> Result<(), WorkerFailure> {
+    let mut child = config
+        .command
+        .build()
+        .spawn()
+        .map_err(|error| WorkerFailure::Spawn(error.to_string()))?;
+    let Some(stdin) = child.stdin.take() else {
+        terminate_child(&mut child).await;
+        return Err(WorkerFailure::MissingPipe("stdin"));
+    };
+    let Some(stdout) = child.stdout.take() else {
+        terminate_child(&mut child).await;
+        return Err(WorkerFailure::MissingPipe("stdout"));
+    };
+
+    let (line_sender, line_receiver) = tokio_mpsc::channel(2);
+    let reader = tokio::spawn(read_lines(stdout, line_sender));
+    let result = serve_worker(
+        config,
+        request_receiver,
+        event_sender,
+        shutdown_receiver,
+        status,
+        &mut child,
+        stdin,
+        line_receiver,
+    )
+    .await;
+    terminate_child(&mut child).await;
+    reader.abort();
+    let _ = reader.await;
+    result
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the loop explicitly owns the child and each bounded channel"
+)]
+async fn serve_worker(
+    config: &WorkerConfig,
+    mut request_receiver: tokio_mpsc::Receiver<WireRequest>,
+    event_sender: &SyncSender<PolicyEvent>,
+    mut shutdown_receiver: oneshot::Receiver<()>,
     status: &AtomicU8,
     child: &mut Child,
-    line_receiver: &Receiver<ReaderEvent>,
-    write_sender: &SyncSender<Vec<u8>>,
-    write_error_receiver: &Receiver<String>,
+    mut stdin: tokio::process::ChildStdin,
+    mut line_receiver: tokio_mpsc::Receiver<ReaderEvent>,
 ) -> Result<(), WorkerFailure> {
     match wait_for_line(
-        line_receiver,
-        write_error_receiver,
-        shutdown_receiver,
+        &mut line_receiver,
+        &mut shutdown_receiver,
         child,
         config.startup_timeout,
-    ) {
+    )
+    .await
+    {
         WaitResult::Line(line) => decode_ready(&line).map_err(WorkerFailure::InvalidReady)?,
         WaitResult::Shutdown => return Ok(()),
         WaitResult::TimedOut => return Err(WorkerFailure::StartupTimeout),
@@ -551,213 +560,159 @@ fn run_ready_worker(
     publish(event_sender, PolicyEvent::Ready);
 
     loop {
-        if shutdown_requested(shutdown_receiver) {
-            return Ok(());
-        }
-        if let Some(failure) = idle_failure(line_receiver, write_error_receiver, child) {
-            return Err(failure);
-        }
-        match request_receiver.recv_timeout(SUPERVISOR_POLL_INTERVAL) {
-            Ok(request) => {
-                let mut bytes = request.line.into_bytes();
-                bytes.push(b'\n');
-                match write_sender.try_send(bytes) {
-                    Ok(()) => {}
-                    Err(TrySendError::Full(_)) => {
-                        return Err(WorkerFailure::Input(
-                            "policy writer queue is unexpectedly full".to_owned(),
-                        ));
-                    }
-                    Err(TrySendError::Disconnected(_)) => {
-                        return Err(WorkerFailure::Input(
-                            "policy writer thread ended".to_owned(),
-                        ));
-                    }
+        let request = tokio::select! {
+            biased;
+            _ = &mut shutdown_receiver => return Ok(()),
+            event = line_receiver.recv() => return Err(idle_failure(event)),
+            exit = child.wait() => return Err(process_failure(exit)),
+            request = request_receiver.recv() => match request {
+                Some(request) => request,
+                None => return Ok(()),
+            },
+        };
+        match exchange(
+            &mut stdin,
+            &mut line_receiver,
+            &mut shutdown_receiver,
+            child,
+            &request.line,
+            config.request_timeout,
+        )
+        .await
+        {
+            WaitResult::Line(line) => {
+                let response =
+                    PolicyResponse::decode(&line).map_err(WorkerFailure::InvalidResponse)?;
+                if response.id() != request.id {
+                    return Err(WorkerFailure::UnexpectedResponse {
+                        expected: request.id,
+                        received: response.id(),
+                    });
                 }
-                match wait_for_line(
-                    line_receiver,
-                    write_error_receiver,
-                    shutdown_receiver,
-                    child,
-                    config.request_timeout,
-                ) {
-                    WaitResult::Line(line) => {
-                        let response = PolicyResponse::decode(&line)
-                            .map_err(WorkerFailure::InvalidResponse)?;
-                        if response.id() != request.id {
-                            return Err(WorkerFailure::UnexpectedResponse {
-                                expected: request.id,
-                                received: response.id(),
-                            });
-                        }
-                        publish(event_sender, PolicyEvent::Response(response));
-                    }
-                    WaitResult::Shutdown => return Ok(()),
-                    WaitResult::TimedOut => {
-                        return Err(WorkerFailure::RequestTimeout(request.id));
-                    }
-                    WaitResult::Failed(failure) => return Err(failure),
-                }
+                publish(event_sender, PolicyEvent::Response(response));
             }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            WaitResult::Shutdown => return Ok(()),
+            WaitResult::TimedOut => return Err(WorkerFailure::RequestTimeout(request.id)),
+            WaitResult::Failed(failure) => return Err(failure),
         }
     }
 }
 
-fn wait_for_line(
-    line_receiver: &Receiver<ReaderEvent>,
-    write_error_receiver: &Receiver<String>,
-    shutdown_receiver: &Receiver<()>,
+async fn wait_for_line(
+    line_receiver: &mut tokio_mpsc::Receiver<ReaderEvent>,
+    shutdown_receiver: &mut oneshot::Receiver<()>,
     child: &mut Child,
     timeout: Duration,
 ) -> WaitResult {
-    let started = Instant::now();
-    loop {
-        if shutdown_requested(shutdown_receiver) {
-            return WaitResult::Shutdown;
-        }
-        if let Ok(error) = write_error_receiver.try_recv() {
-            return WaitResult::Failed(WorkerFailure::Input(error));
-        }
-        match child.try_wait() {
-            Ok(Some(exit)) => {
-                return WaitResult::Failed(WorkerFailure::ProcessExited(exit.code()));
-            }
-            Ok(None) => {}
-            Err(error) => return WaitResult::Failed(WorkerFailure::Process(error.to_string())),
-        }
-        let remaining = timeout.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            return WaitResult::TimedOut;
-        }
-        let interval = remaining.min(SUPERVISOR_POLL_INTERVAL);
-        match line_receiver.recv_timeout(interval) {
-            Ok(event) => return reader_wait_result(event),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {
-                return WaitResult::Failed(WorkerFailure::OutputEnded);
-            }
-        }
+    tokio::select! {
+        biased;
+        _ = shutdown_receiver => WaitResult::Shutdown,
+        event = line_receiver.recv() => reader_wait_result(event),
+        exit = child.wait() => WaitResult::Failed(process_failure(exit)),
+        () = time::sleep(timeout) => WaitResult::TimedOut,
     }
 }
 
-fn reader_wait_result(event: ReaderEvent) -> WaitResult {
-    match event {
-        ReaderEvent::Line(line) => WaitResult::Line(line),
-        ReaderEvent::Ended => WaitResult::Failed(WorkerFailure::OutputEnded),
-        ReaderEvent::Truncated => WaitResult::Failed(WorkerFailure::TruncatedOutput),
-        ReaderEvent::Oversized => WaitResult::Failed(WorkerFailure::OversizedOutput),
-        ReaderEvent::Failed(error) => WaitResult::Failed(WorkerFailure::Output(error)),
-    }
-}
-
-fn idle_failure(
-    line_receiver: &Receiver<ReaderEvent>,
-    write_error_receiver: &Receiver<String>,
+async fn exchange(
+    stdin: &mut tokio::process::ChildStdin,
+    line_receiver: &mut tokio_mpsc::Receiver<ReaderEvent>,
+    shutdown_receiver: &mut oneshot::Receiver<()>,
     child: &mut Child,
-) -> Option<WorkerFailure> {
-    if let Ok(error) = write_error_receiver.try_recv() {
-        return Some(WorkerFailure::Input(error));
-    }
-    match line_receiver.try_recv() {
-        Ok(ReaderEvent::Line(_)) => return Some(WorkerFailure::UnsolicitedOutput),
-        Ok(event) => {
-            if let WaitResult::Failed(failure) = reader_wait_result(event) {
-                return Some(failure);
-            }
+    line: &str,
+    timeout: Duration,
+) -> WaitResult {
+    let operation = async {
+        if let Err(error) = stdin.write_all(line.as_bytes()).await {
+            return WaitResult::Failed(WorkerFailure::Input(error.to_string()));
         }
-        Err(TryRecvError::Empty) => {}
-        Err(TryRecvError::Disconnected) => return Some(WorkerFailure::OutputEnded),
-    }
-    match child.try_wait() {
-        Ok(Some(exit)) => Some(WorkerFailure::ProcessExited(exit.code())),
-        Ok(None) => None,
-        Err(error) => Some(WorkerFailure::Process(error.to_string())),
+        if let Err(error) = stdin.write_all(b"\n").await {
+            return WaitResult::Failed(WorkerFailure::Input(error.to_string()));
+        }
+        if let Err(error) = stdin.flush().await {
+            return WaitResult::Failed(WorkerFailure::Input(error.to_string()));
+        }
+        reader_wait_result(line_receiver.recv().await)
+    };
+    tokio::select! {
+        biased;
+        _ = shutdown_receiver => WaitResult::Shutdown,
+        result = time::timeout(timeout, operation) => match result {
+            Ok(result) => result,
+            Err(_) => WaitResult::TimedOut,
+        },
+        exit = child.wait() => WaitResult::Failed(process_failure(exit)),
     }
 }
 
-fn spawn_reader(
-    stdout: ChildStdout,
-    sender: SyncSender<ReaderEvent>,
-) -> Result<JoinHandle<()>, String> {
-    thread::Builder::new()
-        .name("retro-deck-policy-out".to_owned())
-        .spawn(move || read_lines(stdout, &sender))
-        .map_err(|error| error.to_string())
+fn reader_wait_result(event: Option<ReaderEvent>) -> WaitResult {
+    match event {
+        Some(ReaderEvent::Line(line)) => WaitResult::Line(line),
+        Some(ReaderEvent::Ended) | None => WaitResult::Failed(WorkerFailure::OutputEnded),
+        Some(ReaderEvent::Truncated) => WaitResult::Failed(WorkerFailure::TruncatedOutput),
+        Some(ReaderEvent::Oversized) => WaitResult::Failed(WorkerFailure::OversizedOutput),
+        Some(ReaderEvent::Failed(error)) => WaitResult::Failed(WorkerFailure::Output(error)),
+    }
 }
 
-fn read_lines(stdout: ChildStdout, sender: &SyncSender<ReaderEvent>) {
+fn idle_failure(event: Option<ReaderEvent>) -> WorkerFailure {
+    match event {
+        Some(ReaderEvent::Line(_)) => WorkerFailure::UnsolicitedOutput,
+        Some(ReaderEvent::Ended) | None => WorkerFailure::OutputEnded,
+        Some(ReaderEvent::Truncated) => WorkerFailure::TruncatedOutput,
+        Some(ReaderEvent::Oversized) => WorkerFailure::OversizedOutput,
+        Some(ReaderEvent::Failed(error)) => WorkerFailure::Output(error),
+    }
+}
+
+fn process_failure(result: io::Result<std::process::ExitStatus>) -> WorkerFailure {
+    match result {
+        Ok(exit) => WorkerFailure::ProcessExited(exit.code()),
+        Err(error) => WorkerFailure::Process(error.to_string()),
+    }
+}
+
+async fn read_lines(stdout: ChildStdout, sender: tokio_mpsc::Sender<ReaderEvent>) {
     let mut reader = BufReader::new(stdout);
     loop {
-        let mut bytes = Vec::with_capacity(256);
-        loop {
-            let mut byte = [0_u8; 1];
-            match reader.read(&mut byte) {
-                Ok(0) => {
-                    let event = if bytes.is_empty() {
-                        ReaderEvent::Ended
-                    } else {
-                        ReaderEvent::Truncated
-                    };
-                    let _ = sender.try_send(event);
-                    return;
-                }
-                Ok(_) if byte[0] == b'\n' => {
-                    let event = match String::from_utf8(bytes) {
-                        Ok(line) => ReaderEvent::Line(line),
-                        Err(error) => ReaderEvent::Failed(error.to_string()),
-                    };
-                    if sender.try_send(event).is_err() {
-                        return;
-                    }
-                    break;
-                }
-                Ok(_) => {
-                    if bytes.len() >= DEFAULT_MAX_BYTES {
-                        let _ = sender.try_send(ReaderEvent::Oversized);
-                        return;
-                    }
-                    bytes.push(byte[0]);
-                }
-                Err(error) => {
-                    let _ = sender.try_send(ReaderEvent::Failed(error.to_string()));
-                    return;
-                }
-            }
-        }
-    }
-}
-
-fn spawn_writer(
-    stdin: ChildStdin,
-    receiver: Receiver<Vec<u8>>,
-    error_sender: SyncSender<String>,
-) -> Result<JoinHandle<()>, String> {
-    thread::Builder::new()
-        .name("retro-deck-policy-in".to_owned())
-        .spawn(move || write_lines(stdin, &receiver, &error_sender))
-        .map_err(|error| error.to_string())
-}
-
-fn write_lines(
-    mut stdin: ChildStdin,
-    receiver: &Receiver<Vec<u8>>,
-    error_sender: &SyncSender<String>,
-) {
-    while let Ok(line) = receiver.recv() {
-        if let Err(error) = stdin.write_all(&line).and_then(|()| stdin.flush()) {
-            let _ = error_sender.try_send(error.to_string());
+        let event = read_line(&mut reader).await;
+        let terminal = !matches!(event, ReaderEvent::Line(_));
+        if sender.send(event).await.is_err() || terminal {
             return;
         }
     }
 }
 
-fn shutdown_requested(receiver: &Receiver<()>) -> bool {
-    matches!(
-        receiver.try_recv(),
-        Ok(()) | Err(TryRecvError::Disconnected)
-    )
+async fn read_line(reader: &mut BufReader<ChildStdout>) -> ReaderEvent {
+    let mut bytes = Vec::with_capacity(256);
+    loop {
+        let available = match reader.fill_buf().await {
+            Ok(available) => available,
+            Err(error) => return ReaderEvent::Failed(error.to_string()),
+        };
+        if available.is_empty() {
+            return if bytes.is_empty() {
+                ReaderEvent::Ended
+            } else {
+                ReaderEvent::Truncated
+            };
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let amount = newline.unwrap_or(available.len());
+        if bytes.len().saturating_add(amount) > DEFAULT_MAX_BYTES {
+            return ReaderEvent::Oversized;
+        }
+        let Some(chunk) = available.get(..amount) else {
+            return ReaderEvent::Failed("policy reader produced invalid bounds".to_owned());
+        };
+        bytes.extend_from_slice(chunk);
+        reader.consume(amount.saturating_add(usize::from(newline.is_some())));
+        if newline.is_some() {
+            return match String::from_utf8(bytes) {
+                Ok(line) => ReaderEvent::Line(line),
+                Err(error) => ReaderEvent::Failed(error.to_string()),
+            };
+        }
+    }
 }
 
 fn publish(sender: &SyncSender<PolicyEvent>, event: PolicyEvent) {
@@ -769,14 +724,14 @@ fn fail(status: &AtomicU8, sender: &SyncSender<PolicyEvent>, failure: WorkerFail
     publish(sender, PolicyEvent::Unavailable(failure));
 }
 
-fn terminate_child(child: &mut Child) {
+async fn terminate_child(child: &mut Child) {
     match child.try_wait() {
         Ok(Some(_)) => {}
         Ok(None) | Err(_) => {
-            let _ = child.kill();
+            let _ = child.kill().await;
         }
     }
-    let _ = child.wait();
+    let _ = child.wait().await;
 }
 
 fn nonzero(value: usize) -> NonZeroUsize {

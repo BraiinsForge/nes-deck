@@ -5,6 +5,10 @@ runtime will load in a supervised child process. It is deliberately not a
 device runtime: display buffers, input descriptors, clocks, audio devices,
 processes, and filesystem authority stay in Rust.
 
+Rust supervises the Lisp child on one asynchronous worker thread. Product
+event loops only try bounded request and event queues; they never wait for
+Lisp startup, file loading, evaluation, or pipe I/O.
+
 The worker loads the tracked `retro-deck` ASDF system, installs its default
 hooks, and then loads root-owned local files from
 `RETRO_DECK_LISP_SITE_DIR` in lexical order. Production uses
