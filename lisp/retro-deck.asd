@@ -2,7 +2,6 @@
   :description "Trusted Common Lisp behavior layer for Retro Deck"
   :version "0.1.0"
   :license "GPL-3.0-only"
-  :depends-on (#:uiop)
   :serial t
   :components ((:file "package")
                (:module "policy"

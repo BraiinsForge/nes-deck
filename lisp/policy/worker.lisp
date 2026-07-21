@@ -17,19 +17,33 @@
     (and type (string-equal type "lisp"))))
 
 
+(defun policy--directory-pathname (directory)
+  "Return DIRECTORY as a pathname ending in a directory separator."
+  (let* ((path (pathname directory))
+         (name (namestring path)))
+    (pathname
+     (if (and (plusp (length name))
+              (char= (char name (1- (length name))) #\/))
+         name
+         (concatenate 'string name "/")))))
+
+
 (defun policy--site-files (directory)
   "Return lexically ordered Lisp files in existing DIRECTORY."
   (cond
     ((or (null directory)
          (and (stringp directory) (string= directory "")))
      nil)
-    ((not (uiop:directory-exists-p directory))
-     nil)
     (t
-     (sort (remove-if-not #'policy--lisp-source-path-p
-                          (uiop:directory-files directory))
-           #'string<
-           :key #'namestring))))
+     (let* ((base (policy--directory-pathname directory))
+            (wildcard (merge-pathnames (make-pathname :name :wild
+                                                      :type "lisp")
+                                       base))
+            (files (handler-case (directory wildcard)
+                     (file-error () nil))))
+       (sort (remove-if-not #'policy--lisp-source-path-p files)
+             #'string<
+             :key #'namestring)))))
 
 
 (defun policy--load-site-directory (directory)

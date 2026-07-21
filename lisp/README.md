@@ -12,13 +12,19 @@ worker across rounds and starts a replacement only after an actual failure.
 Product event loops only hand off a request and poll its outcome, so they never
 wait for Lisp startup, file loading, evaluation, or pipe I/O.
 
-The worker loads the tracked `retro-deck` ASDF system, installs its default
-hooks, and then loads root-owned local files from
+The appliance worker directly source-loads the eight tracked policy files in
+their declared order, installs its default hooks, and then loads root-owned
+local files from
 `RETRO_DECK_LISP_SITE_DIR` in lexical order. Production uses
 `/mnt/data/nes-deck/lisp/site.d`. The worker emits its `:ready` message only
 after every startup file loads successfully. The Rust host must terminate or
 replace a worker that fails startup, exceeds its deadline, crashes, or returns
 invalid data.
+
+The direct loader deliberately avoids initializing ASDF on the memory-limited
+Deck. `retro-deck.asd` remains the development and test system definition. The
+Rust supervisor gives source-loaded ECL a bounded 15-second startup window;
+policy requests retain their separate 250-millisecond deadline after readiness.
 
 Local files use the same package and replace behavior by registering a hook:
 

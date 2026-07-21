@@ -112,7 +112,10 @@ impl WorkerConfig {
     pub const fn new(command: WorkerCommand) -> Self {
         Self {
             command,
-            startup_timeout: Duration::from_secs(3),
+            // Source-loaded ECL takes about seven seconds on the ARMv7 Deck
+            // when the system is otherwise idle. Keep startup bounded while
+            // leaving enough headroom for boot-time contention and site files.
+            startup_timeout: Duration::from_secs(15),
             request_timeout: Duration::from_millis(250),
         }
     }
