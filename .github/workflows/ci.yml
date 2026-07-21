@@ -33,18 +33,30 @@ jobs:
       - name: Install host dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libpng-dev pkg-config
+          sudo apt-get install --no-install-recommends -y imagemagick sbcl
 
       - name: Check shell scripts
         run: |
           nix shell nixpkgs#shellcheck -c shellcheck \
+            -x \
+            ops/lib/deck-config.sh \
+            ops/check-deck.sh \
+            ops/configure-deck.sh \
             ops/deploy.sh \
-            deploy/menu/deck-menu-launcher \
+            ops/deploy/activate.sh \
+            ops/provision-deck.sh \
             deploy/menu/nes-deck-swap.init \
-            deploy/uploader/nes-deck-uploader.init \
+            tests/deploy_config_test.sh \
+            tests/deploy_activation_test.sh \
+            tests/check_deck_test.sh \
             tests/nes_deck_swap_test.sh \
             tests/run-host-tests.sh \
             tests/verify-arm-builds.sh
+
+      - name: Test Common Lisp policy
+        run: |
+          sbcl --script lisp/tests/run.lisp
+          nix shell nixpkgs#ecl -c ecl --norc --shell lisp/tests/run.lisp
 
       - name: Run host regression suite
         run: tests/run-host-tests.sh

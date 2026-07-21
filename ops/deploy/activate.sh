@@ -231,7 +231,7 @@ for directory in menu games terminal licenses; do
   rm -rf "$base/$directory.new"
   mkdir -p "$base/$directory.new"
   cp -Rp "$stage/nes-deck/$directory/." "$base/$directory.new/"
-  rm -rf "$base/$directory"
+  rm -rf "${base:?}/${directory:?}"
   mv "$base/$directory.new" "$base/$directory"
 done
 
