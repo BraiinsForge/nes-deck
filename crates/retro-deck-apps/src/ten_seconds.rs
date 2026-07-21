@@ -169,7 +169,7 @@ impl TimerDecision {
 pub enum TimerEffect {
     /// No external work is required.
     None,
-    /// Try to enqueue a small cue identifier for the audio worker.
+    /// Request a small cue for bounded submission to BMC audio.
     PlayCue(Cue),
     /// Try to submit these bounded arguments to `:ten-seconds/result`.
     SubmitPolicy(Value),

@@ -1,70 +1,51 @@
 # Retro Deck technical documentation
 
-## Current system
+## Selected architecture
 
-The current deployable system consists of static ARMv7 executables running on
-the Deck's OpenWrt userspace. Rust implements the CHIP-8 host, 10 Seconds game,
-chiptune player, authenticated ROM intake, the shared libretro host, Common
-Lisp policy boundary, and shared Wayland, input, timing, and lazy OSS audio
-layers. C++ remains in the dashboard and its Wayland presentation helper while
-those pieces are migrated. ECL provides the interactive Lisp program, runs the
-catalog compiler during activation, and loads bounded device-local behavior
-policy.
+Retro Deck's dashboard is a native ARMv7 process registered as a swipeable BMC
+scene. It consumes `bmc-widget` for surface lifecycle and touch,
+`bmc-render` for GPU-backed UI, BMC's focused gamepad and keyboard routing,
+and the BMC application service for declared child launches. System settings,
+reboot, Wi-Fi, and the physical audio device remain BMC responsibilities.
 
-The Rust audio foundation includes fixed-capacity PCM buffering, direct
-stereo-to-mono downmixing, callback-stable linear resampling, worker-side gain,
-and a lazy OSS stream worker. NES, GB/GBC, and ZX now use this worker through
-one Rust libretro host linked separately to each pinned upstream core. Audio
-callbacks only attempt a bounded queue operation; opening, priming, writing,
-and closing `/dev/dsp` stay on the worker thread.
+The main Rust workspace owns Retro Deck product behavior: typed catalogs and
+palette data, ROM validation and native saves, the CHIP-8 adapter, 10 Seconds,
+the chiptune player, the authenticated Axum ROM uploader, and one shared
+libretro host for the pinned NES, GB/GBC, and ZX cores. Games currently use a
+small gameplay-only layer-shell presentation adapter; it is not a second
+dashboard toolkit or compositor.
 
-The Rust chiptune player discovers a bounded symlink-free catalog, decodes Ogg
-Vorbis in pure Rust, owns Game Music Emu through a narrow audited C interface,
-and publishes exact 60 Hz RGB565 frames through the same Rust platform layer.
-Its input loop only changes state or submits bounded PCM; the audio worker
-releases the OSS device whenever playback is paused, muted, hidden, or closed.
+Common Lisp is a trusted, startup-loaded behavior layer. A supervised worker
+loads tracked policy and then a root-owned device-local override. Rust and Lisp
+exchange bounded, versioned S-expressions; invalid, late, or missing replies
+fall back to safe Rust behavior. The resident worker is reused across policy
+requests and replaced only after a real failure.
 
-The BMC installation presents the dashboard as a scene widget. Games use a
-black fullscreen layer surface and a centered gameplay layer surface. The
-native runtime can fall back to direct framebuffer output. Audio uses the ALSA
-OSS bridge at `/dev/dsp`; emulator timing is independent of the audio writer.
+## Audio and input contract
 
-Detailed current build, display, audio, and source contracts are documented in
-[`BUILD.md`](../BUILD.md). Third-party identity and license handling are
-documented in [`THIRD_PARTY.md`](../THIRD_PARTY.md).
+Dashboard navigation requests BMC-owned finite sounds through the widget
+action protocol. BMC-managed games and programs receive an inherited bounded
+PCM channel. Retro Deck performs nonblocking packet submission only: it never
+opens ALSA or `/dev/dsp`, creates a private playback thread, or waits for sound
+from an input or emulation callback. Transport pressure drops audio rather than
+delaying touch, a controller event, or a frame.
 
-## Target system
+BMC owns one central audio-device lease. Its application receiver opens ALSA
+after the first PCM packet, applies gain, drains after brief inactivity, and
+closes immediately on explicit release, disconnect, or application exit.
+Retro Deck sends that release when playback is muted, paused, hidden, stopped,
+or shut down. Emulator timing therefore remains independent of device I/O.
 
-Rust becomes the sole first-party native systems language. It owns resource
-lifetime, memory and buffer safety, device access, process supervision,
-network request boundaries, and foreign interfaces to pinned emulator and
-media libraries.
+BMC owns device discovery, hotplug, focus, and routing. Retro Deck receives
+semantic controller reports and keyboard events, then applies only its
+product-specific mappings. Common Lisp policy is supervised and deadline
+bound, never part of the input or audio execution path.
 
-Common Lisp becomes a trusted behavior runtime rather than a device driver.
-A supervised ECL worker loads tracked behavior and then root-owned local
-overrides. Rust and Lisp exchange bounded, versioned S-expressions. Rust
-uses the maintained `lexpr` parser and printer behind a stricter protocol
-preflight, validates all replies, and retains safe built-in behavior when Lisp
-is absent or fails.
+The checked-in C++ dashboard and legacy deployment route are rollback material
+until the controlled live-Deck gate selects the BMC packages. They are not the
+selected production architecture and carry no compatibility obligation after
+that gate.
 
-Audio follows explicit ownership states: closed, priming, active, draining,
-and idle. Short cues acquire the device only for their duration. Paused,
-muted, hidden, and idle applications release it. Continuous emulator playback
-retains it to avoid latency, clicks, and repeated OSS negotiation. Future BMC
-widget audio must share one lazy manager rather than opening one permanent
-stream per widget.
-
-Input and audio are independent execution paths. Touch and controller events
-update Rust state immediately and only try to enqueue a small cue identifier
-on a bounded channel. They never open `/dev/dsp`, write samples, wait for a
-sound child, or observe an audio cooldown. The audio worker may coalesce or
-drop stale cues when it falls behind. Continuous PCM producers follow the
-same contract: they only attempt a queue lock and bounded wakeup. Contention
-or overload discards old sound rather than delaying an emulator callback.
-Opening, ring priming, gain, resampling, writing, draining, resetting, and
-retry timing all remain on the dedicated audio thread. The same rule applies
-to Common Lisp: policy work is supervised and deadline-bound, never an
-input-loop dependency.
-
-The complete target layout, migration order, and proof gates are defined in
-[`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md).
+Detailed build and source contracts are in [`BUILD.md`](../BUILD.md), third
+party provenance is in [`THIRD_PARTY.md`](../THIRD_PARTY.md), and the remaining
+selection gates are in [`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md).

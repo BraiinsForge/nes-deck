@@ -78,9 +78,9 @@ pub enum PlayerEffect {
     PreviousTrack,
     /// Ask the decoder to select the next subsong.
     NextTrack,
-    /// Pause state changed; the audio worker must update its gate.
+    /// Pause state changed; the BMC audio client must update its gate.
     PauseChanged(bool),
-    /// User gain changed; the audio worker and persistent state must update.
+    /// User gain changed; BMC playback and persistent state must update.
     VolumeChanged(Volume),
     /// End-of-track behavior changed.
     PlaybackModeChanged(PlaybackMode),

@@ -29,7 +29,7 @@ ARMv7, BMC integration, and live Deck checks pass.
 | ROM validation, catalog meaning, cover selection and save paths | Retro Deck |
 | Game/app state, retro styling and controller mappings | Retro Deck |
 | Emulator ABI adaptation and pinned-core patches | Retro Deck |
-| Real-time emulator and chiptune PCM | BMC streaming-audio service; a migration-only adapter may bridge the gap |
+| Real-time emulator, chiptune, CHIP-8 and timer PCM | BMC application-audio service and its central ALSA lease |
 | Trusted local behavior patches | Supervised Common Lisp with a bounded Rust boundary |
 
 BMC sources are dependencies, not copied or vendored into this repository.
@@ -84,8 +84,9 @@ properties, not justification for recreating a mature library.
 - Replace dashboard raster primitives, layout, PNG scaling and duplicated
   interaction geometry with `bmc-render`. Retro pixel art remains an asset or
   a small renderer component, not a parallel UI toolkit.
-- Send finite dashboard cues through the widget action protocol. Do not keep a
-  dashboard OSS worker beside BMC sound ownership.
+- Send finite dashboard cues through the widget action protocol. Managed
+  applications submit bounded PCM through BMC's inherited audio channel. No
+  selected Retro Deck process opens an audio device.
 - Move brightness, reboot and Wi-Fi recovery behind BMC-owned controls. Retro
   Deck must not independently modify those resources.
 - Put ROM endpoints behind BMC authentication. The standalone migration server
@@ -111,16 +112,16 @@ sources. This is a review threshold, not an invitation to game the counter.
 ## Audio contract
 
 Frantisek Bohacek's guidance is the governing ownership rule: audio is open
-only while something needs to play. BMC owns finite widget sounds. Retro Deck
-requests a cue and never opens `/dev/dsp` for menu navigation.
+only while something needs to play. BMC owns both finite widget sounds and the
+single appliance audio-device lease. Retro Deck never opens ALSA or `/dev/dsp`.
 
-Real-time emulator and chiptune PCM is different from BMC's current file-based
-`madplay` service. Add a BMC streaming API with explicit acquisition and
-release semantics. While that API is being built, the existing Rust adapter is
-a rollback path only: one owner per active game or player opens lazily, writes
-off the input thread, and closes on mute, pause, dormancy, exit, idle, or first
-silence as appropriate. Input never waits for audio. Delete the adapter when
-the BMC service lands.
+Each BMC-managed foreground application receives a bounded inherited PCM
+channel. Its input, emulation, and decoder paths perform nonblocking sends;
+transport pressure drops sound instead of delaying interaction or a frame.
+BMC opens ALSA lazily after the first packet and releases it on an explicit
+release, application exit, disconnect, or 250 ms of inactivity. Mute, pause,
+hide, and shutdown send an explicit release. This is the production contract,
+not a migration adapter.
 
 ## Migration sequence
 

@@ -211,7 +211,8 @@ The patch selects nearest-neighbor filtering for both directions. The script
 is idempotent and refuses a source tree whose patch context does not match.
 When the game exits, both layer surfaces disappear and scene swiping resumes.
 
-`ops/deploy.sh` installs the widget under `/mnt/data/bmc-widgets/retro-deck`.
+The legacy `ops/deploy.sh` route installs its rollback widget under
+`/mnt/data/bmc-widgets/retro-deck`.
 If `bmc-compositor` is present, deployment stops it, adds one idempotent Retro
 Deck scene to `/etc/bmc_config.json`, disables the legacy fbdev menu service,
 enables a 64 MiB swapfile before BMC starts, and restarts the compositor. The
@@ -221,26 +222,20 @@ the first fullscreen SHM frame is faulted in. Existing swapfiles are left
 untouched if they cannot be enabled. The original configuration is retained
 once as `/etc/bmc_config.json.retro-deck.bak` before the first scene edit.
 
-Audio uses `/dev/dsp` through the Deck's ALSA OSS bridge. All streams use
-signed 16-bit little-endian samples. Emulator and chiptune streams are stereo;
-the menu and timer cues are mono. FCEUmm reports 48 kHz. The OSS device stays at its
-required nominal 48 kHz while the runtime resamples to the measured 47,328
-frames/s application clock. Fuse, CHIP-8, the timer, menu cues, and chiptunes
-use 44.1 kHz. Gambatte produces 32,768 Hz and is explicitly resampled to the
-Deck's verified 32 kHz OSS rate. Gain is applied in the native mixer because
-the kernel OSS path bypasses ALSA userspace soft volume.
+BMC owns ALSA and one central audio-device lease. Every managed foreground
+application receives an inherited bounded datagram channel for signed 16-bit
+PCM. Retro Deck's libretro, chiptune, CHIP-8, and timer paths perform only
+nonblocking submissions; stereo sources are downmixed before transport, and a
+full channel drops samples instead of delaying input or emulation.
 
-The Rust platform audio path keeps 16,384 recent mono source frames and moves
-at most 2,048 frames per worker operation. Emulator callbacks use a
-nonblocking queue attempt; lock contention drops that callback and queue
-overflow replaces the oldest sound. A streaming linear resampler keeps phase
-across callback boundaries and resets after a reported gap. The worker opens
-OSS only after PCM arrives, preserves the validated stream-ring priming
-sequence, drains and closes after 100 ms without source data, and resets
-immediately on mute, pause, hide, or shutdown. NES, GB/GBC, and ZX all use
-this Rust audio path through the shared libretro host. The chiptune runtime
-uses the same worker at 44.1 kHz and releases it immediately when playback is
-paused, muted, hidden, or stopped.
+BMC opens mono ALSA playback lazily on the first packet, enables ALSA rate
+conversion for the producer's declared rate, and applies the packet's volume.
+It drains and closes after 250 ms without samples, or discards immediately on
+an explicit release, disconnect, or application exit. Retro Deck explicitly
+releases on mute, pause, hide, stop, and shutdown. Dashboard navigation sounds
+use BMC widget actions; finite application cues are rendered once at startup
+and use the same bounded PCM channel. No selected Retro Deck Rust path opens
+`/dev/dsp` or owns a playback thread.
 
 The Rust libretro host keeps three persistent Wayland SHM frame slots and
 drops a new presentation when all slots remain compositor-owned. It never
@@ -252,10 +247,13 @@ waits for a buffer release in the input, emulation, or audio callback path.
 retrodeck/
 ├── crates/                      first-party Rust workspace
 │   ├── retro-deck-apps/         native app models, renderers, and runtimes
-│   ├── retro-deck-audio/        audio lifecycle, PCM queue, and resampler
-│   ├── retro-deck-emulator/     safe emulator hosts and c-octo boundary
-│   ├── retro-deck-platform/     Linux input, display, and lazy audio workers
+│   ├── retro-deck-audio/        validated PCM, volume, and tone types
+│   ├── retro-deck-config/       typed catalog, palette, and system contracts
+│   ├── retro-deck-dashboard/    isolated native BMC widget workspace
+│   ├── retro-deck-emulator/     libretro host and c-octo boundary
+│   ├── retro-deck-platform/     gameplay Wayland, input, and BMC PCM client
 │   ├── retro-deck-policy/       bounded Lisp protocol and supervisor
+│   ├── retro-deck-ui/           fixed retro raster primitives for applications
 │   └── retro-deck-uploader/     authenticated ROM and appearance service
 ├── chiptunes/                  CC0 seed tracks and provenance
 ├── deploy/
@@ -273,20 +271,10 @@ retrodeck/
 │   ├── check-deck.sh           read-only installed health report
 │   └── deploy.sh               local build, staging, and transfer
 ├── patches/                    pinned upstream fixes
-├── protocol/                   Deck widget and layer-shell client protocols
+├── protocol/                   gameplay layer-shell and rollback protocols
 ├── roms/                       private canonical ROM library and checksums
 ├── lisp/                       tracked Common Lisp policy runtime
-├── src/
-│   ├── deck_menu.cpp           dashboard, settings, and child supervision
-│   ├── menu_catalog.cpp        game model, manifest, and ROM validation
-│   ├── menu_credits.cpp        FOSS manifest and perspective crawl
-│   ├── menu_io.cpp             checked low-level menu I/O primitives
-│   ├── menu_network.cpp        sanitized Wi-Fi and interface status
-│   ├── menu_sound.cpp          dashboard cue synthesis and OSS playback
-│   ├── menu_state.cpp          atomic volume, brightness, and keymap state
-│   ├── menu_text.cpp           path and display-text validation
-│   ├── menu_ui.cpp             shared dashboard drawing primitives
-│   └── deck_wayland.cpp        legacy dashboard Wayland presentation path
+├── src/                        C++ dashboard rollback pending the live gate
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
 ├── vendor/emulators/           pinned emulator source and provenance
