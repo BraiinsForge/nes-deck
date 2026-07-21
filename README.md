@@ -1,11 +1,11 @@
 # Retro Deck
 
 Retro Deck turns a Braiins Forge Deck into a persistent touch-first game and
-program launcher. It runs as a fullscreen BMC scene when `bmc-compositor` is
-installed and retains a direct-framebuffer mode for Decks without BMC. The
-dashboard provides NES, Game Boy, Game Boy Color, ZX Spectrum, CHIP-8,
-utilities, language REPLs, and a chiptune player. Two Retro Games THEGamepad
-controllers work as stable Player 1 and Player 2 devices.
+program launcher. Its native Rust dashboard runs as a fullscreen swipeable
+scene in the BMC Wayland compositor. The dashboard provides NES, Game Boy,
+Game Boy Color, ZX Spectrum, CHIP-8, utilities, language REPLs, and a chiptune
+player. Two Retro Games THEGamepad controllers work as stable Player 1 and
+Player 2 devices.
 
 ## Deploy to a Deck
 
@@ -67,8 +67,8 @@ just this idempotent network preparation.
 The first build downloads the pinned ARM toolchain and can take several
 minutes. The script builds every static runtime, verifies the staged payload,
 uploads it below `/mnt/data`, briefly stops the dashboard, activates the new
-files, installs the configured uploader credential, and waits for `deck-menu`
-and the ROM uploader to be ready. If activation fails after a
+files, installs the configured uploader credential, and waits for the native
+dashboard and ROM uploader to be ready. If activation fails after a
 service is stopped, the script attempts to restart it before exiting.
 
 The deployment script does not edit, reload, or disconnect Wi-Fi. It merges
@@ -87,10 +87,10 @@ Verify the result:
 ./ops/check-deck.sh --config ~/.config/retro-deck/decks/my-deck.conf
 ```
 
-The health check is read-only. It understands both BMC compositor and direct
-framebuffer installations, reports processes and network identity, prints the
-last 20 dashboard log lines, and exits unsuccessfully when a required component
-is missing.
+The health check is read-only. It verifies the BMC compositor, native widget
+and application packages, dashboard and uploader processes, persistent data,
+and network identity. It prints the last 20 BMC log lines and exits
+unsuccessfully when a required component is missing.
 
 To update an already-provisioned Deck, pull the repository and run
 `./ops/deploy.sh --config PATH`. A positional `root@DECK-IP` temporarily
@@ -247,19 +247,13 @@ Check the service and its bounded persistent log:
 Restart the dashboard without rebooting the Deck:
 
 ```sh
-ssh root@DECK-IP '
-  if [ -x /etc/init.d/bmc-compositor ]; then
-    /etc/init.d/bmc-compositor restart
-  else
-    /etc/init.d/nes-deck restart
-  fi'
+ssh root@DECK-IP /etc/init.d/bmc-compositor restart
 ```
 
-If the display remains black, inspect the log before changing files or network
-configuration. BMC owns the dashboard process when its compositor is present;
-the `nes-deck` service owns the direct-framebuffer installation. Both require
-`/mnt/data` to be mounted. The direct-framebuffer path also validates display
-geometry, hides the console cursor, and unblanks the panel on every return.
+If the display remains black, inspect `/var/log/bmc/bmc.log` and
+`/var/log/bmc/widgets.log` before changing files or network configuration.
+BMC owns the dashboard lifecycle, rendering surface, input routing, and
+application launch contract. Retro Deck requires `/mnt/data` to be mounted.
 
 ## Development
 

@@ -1,3 +1,0 @@
-#!/bin/sh
-
-exec /mnt/data/nes-deck/menu/deck-menu-launcher
