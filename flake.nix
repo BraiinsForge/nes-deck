@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=d648e791e04a303a1236f78de6b79122f61fca93";
+    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=a4bd82e6de294dc673a3f55ec73afde35249352d";
     fceumm-src = {
       url = "github:libretro/libretro-fceumm/3a84a6fd0ba20dd4877c06b1d58741172148395f";
       flake = false;

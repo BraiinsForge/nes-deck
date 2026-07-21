@@ -32,29 +32,39 @@ Local files use the same package and replace behavior by registering a hook:
 The site directory is persistent local state. It is excluded from Git,
 preserved by deployment, and never exposed through the ROM uploader.
 
-The native dashboard requests `:dashboard/applications` once after the worker
+The native dashboard requests `:dashboard/startup` once after the worker
 becomes ready, then terminates the worker. The hook returns ordered
-`(kind title color)` rows. A local file can hide, reorder, retitle, or recolor
-the closed application set without gaining executable or path authority:
+`(kind title color)` rows and a bounded raw gamepad profile. A local file can
+patch product behavior without gaining executable, device, or path authority:
 
 ```lisp
 (in-package #:retro-deck)
 
 (register-policy-hook
- :dashboard/applications
+ :dashboard/startup
  (lambda (arguments)
    (unless (null arguments)
      (error "unexpected dashboard arguments"))
-   '((:lisp "LISP" "#AFD75F")
-     (:terminal "SHELL" "#5F87AF")
-     (:reboot "REBOOT" "#D75F5F"))))
+   '(:applications
+     ((:lisp "LISP" "#AFD75F")
+      (:terminal "SHELL" "#5F87AF")
+      (:reboot "REBOOT" "#D75F5F"))
+     :gamepad
+     ((:button 290 :confirm)
+      (:button 294 :back)
+      (:axis 0 :left :right)
+      (:axis 1 :up :down)))))
 ```
 
 Accepted kinds are `:lua`, `:lisp`, `:python`, `:scheme`, `:chiptunes`,
 `:terminal`, and `:reboot`, at most once each. Rust validates the title and
 xterm-256 color and supplies each stable identity itself. If the worker or a
 local override fails, the dashboard keeps its base ROM catalog instead of
-failing startup.
+failing startup. Gamepad rows are `(:button CODE :ACTION)` or
+`(:axis CODE :NEGATIVE-ACTION :POSITIVE-ACTION)`; accepted actions are
+`:up`, `:down`, `:left`, `:right`, `:confirm`, and `:back`. Rust validates the
+profile once, then handles report timing locally without calling Lisp from the
+input path.
 
 ## Wire protocol
 

@@ -21,8 +21,8 @@ use bmc_widget::surface::{
 use glow::HasContext as _;
 use retro_deck_dashboard::{
     ApplicationRequest, BMC_APPLICATION_ID, BmcNavigation, BmcScreen, BmcUiAction, DashboardModel,
-    Intent, Keymap, LaunchTarget, MenuCue, VolumeState, applications_from_policy,
-    bmc_action_for_navigation, bmc_action_for_touch, build_bmc_tree, load_native_catalog,
+    GamepadInput, Intent, Keymap, LaunchTarget, MenuCue, VolumeState, bmc_action_for_navigation,
+    bmc_action_for_touch, build_bmc_tree, dashboard_startup_from_policy, load_native_catalog,
 };
 use retro_deck_policy::{
     PolicyClient, PolicyEvent, PolicyEventPoll, PolicyResponse, PolicySubmit, RequestId, Value,
@@ -36,7 +36,7 @@ const ECL_DIRECTORY: &str = "/mnt/data/nes-deck/ecl/lib/ecl/";
 const LISP_DIRECTORY: &str = "/mnt/data/nes-deck/lisp";
 const LISP_WORKER: &str = "/mnt/data/nes-deck/lisp/run-worker.lisp";
 const LISP_SITE_DIRECTORY: &str = "/mnt/data/nes-deck/lisp/site.d";
-const APPLICATION_POLICY_HOOK: &str = "dashboard/applications";
+const DASHBOARD_POLICY_HOOK: &str = "dashboard/startup";
 const POLICY_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SETTINGS_COG_PATH: &str = "assets/gear-knekko-09.png";
 const KEY_ESCAPE: u32 = 1;
@@ -84,6 +84,7 @@ struct NativeRuntime {
     lifecycle: Option<LifecycleState>,
     pending_render: bool,
     active_touch: Option<i32>,
+    gamepad: GamepadInput,
     policy: Option<PolicyClient>,
     policy_request: Option<RequestId>,
     last_frame_at: Option<Instant>,
@@ -106,6 +107,7 @@ impl NativeRuntime {
             lifecycle: None,
             pending_render: true,
             active_touch: None,
+            gamepad: GamepadInput::default(),
             policy,
             policy_request: None,
             last_frame_at: None,
@@ -156,7 +158,7 @@ impl NativeRuntime {
                     return;
                 }
                 PolicyEventPoll::Event(PolicyEvent::Ready) => {
-                    let submission = policy.try_submit(APPLICATION_POLICY_HOOK, Value::Nil);
+                    let submission = policy.try_submit(DASHBOARD_POLICY_HOOK, Value::Nil);
                     match submission {
                         Ok(PolicySubmit::Queued(identifier)) => {
                             self.policy_request = Some(identifier);
@@ -196,10 +198,10 @@ impl NativeRuntime {
             tracing::warn!(?id, "ignored stale Common Lisp dashboard policy response");
             return;
         }
-        let applications = match applications_from_policy(&value) {
-            Ok(applications) => applications,
+        let (applications, gamepad) = match dashboard_startup_from_policy(&value) {
+            Ok(startup) => startup,
             Err(error) => {
-                tracing::warn!(?error, "invalid Common Lisp dashboard applications");
+                tracing::warn!(?error, "invalid Common Lisp dashboard startup policy");
                 return;
             }
         };
@@ -218,8 +220,9 @@ impl NativeRuntime {
             }
         };
         self.model = DashboardModel::new(catalog, self.model.volume(), self.model.keymap());
+        self.gamepad.set_profile(gamepad);
         self.pending_render = true;
-        tracing::info!("loaded dashboard applications from Common Lisp");
+        tracing::info!("loaded dashboard startup policy from Common Lisp");
     }
 
     fn drain_surface_events(&mut self) {
@@ -272,6 +275,11 @@ impl NativeRuntime {
                 }
                 | WidgetEvent::Setting(_)
                 | WidgetEvent::ParamUpdate(_) => {}
+                WidgetEvent::Gamepad(event) => {
+                    for navigation in self.gamepad.handle(&event) {
+                        self.apply_navigation(navigation);
+                    }
+                }
                 WidgetEvent::Shutdown => self.surface.request_shutdown(),
                 WidgetEvent::TransitionIncoming => {
                     if has_render_target(self.lifecycle) {
@@ -293,6 +301,7 @@ impl NativeRuntime {
         } else {
             self.pending_render = false;
             self.cancel_touch();
+            self.gamepad.reset();
         }
         tracing::info!(?previous, ?state, "Retro Deck lifecycle changed");
     }

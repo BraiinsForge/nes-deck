@@ -8,6 +8,9 @@ use retro_deck_config::{Catalog, CatalogEntry, CatalogSystem, MAXIMUM_GAMES, Sys
 #[cfg(feature = "bmc-native")]
 use retro_deck_policy::Value;
 
+#[cfg(feature = "bmc-native")]
+use crate::{GamepadProfile, GamepadProfileError};
+
 const SYSTEM_ORDER: [CatalogSystem; 6] = [
     CatalogSystem::Rom(System::Nes),
     CatalogSystem::Rom(System::GameBoy),
@@ -226,7 +229,7 @@ impl std::error::Error for DashboardCatalogError {}
 /// Returns [`DashboardApplicationPolicyError`] for malformed, excessive,
 /// duplicate, unknown, or schema-invalid rows.
 #[cfg(feature = "bmc-native")]
-pub fn applications_from_policy(
+fn applications_from_policy(
     value: &Value,
 ) -> Result<Vec<CatalogEntry>, DashboardApplicationPolicyError> {
     let Value::List(rows) = value else {
@@ -263,6 +266,41 @@ pub fn applications_from_policy(
         );
     }
     Ok(applications)
+}
+
+/// Decode the complete one-shot dashboard startup policy.
+///
+/// The exact property order is intentional: the trusted Lisp hook produces a
+/// tiny closed wire record rather than a general configuration language.
+///
+/// # Errors
+///
+/// Returns [`DashboardStartupPolicyError`] when either the record shape,
+/// application rows, or gamepad profile violates its closed schema.
+#[cfg(feature = "bmc-native")]
+pub fn dashboard_startup_from_policy(
+    value: &Value,
+) -> Result<(Vec<CatalogEntry>, GamepadProfile), DashboardStartupPolicyError> {
+    let Value::List(fields) = value else {
+        return Err(DashboardStartupPolicyError::InvalidShape);
+    };
+    let [
+        Value::Keyword(applications_key),
+        applications,
+        Value::Keyword(gamepad_key),
+        gamepad,
+    ] = fields.as_slice()
+    else {
+        return Err(DashboardStartupPolicyError::InvalidShape);
+    };
+    if applications_key != "applications" || gamepad_key != "gamepad" {
+        return Err(DashboardStartupPolicyError::InvalidShape);
+    }
+    Ok((
+        applications_from_policy(applications)
+            .map_err(DashboardStartupPolicyError::Applications)?,
+        GamepadProfile::from_policy(gamepad).map_err(DashboardStartupPolicyError::Gamepad)?,
+    ))
 }
 
 #[cfg(feature = "bmc-native")]
@@ -329,6 +367,40 @@ impl std::error::Error for DashboardApplicationPolicyError {
             | Self::DuplicateApplication
             | Self::UnknownApplication(_)
             | Self::Allocation => None,
+        }
+    }
+}
+
+/// Complete Common Lisp dashboard startup data violated its closed schema.
+#[cfg(feature = "bmc-native")]
+#[derive(Debug)]
+pub enum DashboardStartupPolicyError {
+    /// The response was not `(:applications ROWS :gamepad BINDINGS)`.
+    InvalidShape,
+    /// One or more application rows were invalid.
+    Applications(DashboardApplicationPolicyError),
+    /// One or more gamepad bindings were invalid.
+    Gamepad(GamepadProfileError),
+}
+
+#[cfg(feature = "bmc-native")]
+impl fmt::Display for DashboardStartupPolicyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidShape => formatter.write_str("invalid dashboard startup record"),
+            Self::Applications(source) => write!(formatter, "invalid applications: {source}"),
+            Self::Gamepad(source) => write!(formatter, "invalid gamepad profile: {source}"),
+        }
+    }
+}
+
+#[cfg(feature = "bmc-native")]
+impl std::error::Error for DashboardStartupPolicyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidShape => None,
+            Self::Applications(source) => Some(source),
+            Self::Gamepad(source) => Some(source),
         }
     }
 }
@@ -485,5 +557,37 @@ mod tests {
             ])),
             Err(DashboardApplicationPolicyError::DuplicateApplication)
         ));
+    }
+
+    #[cfg(feature = "bmc-native")]
+    #[test]
+    fn startup_policy_combines_applications_and_gamepad_profile() {
+        use super::dashboard_startup_from_policy;
+        use retro_deck_policy::Value;
+
+        let startup = Value::List(vec![
+            Value::Keyword("applications".to_owned()),
+            Value::List(vec![Value::List(vec![
+                Value::Keyword("terminal".to_owned()),
+                Value::String("SHELL".to_owned()),
+                Value::String("#5F87AF".to_owned()),
+            ])]),
+            Value::Keyword("gamepad".to_owned()),
+            Value::List(vec![Value::List(vec![
+                Value::Keyword("button".to_owned()),
+                Value::Integer(290),
+                Value::Keyword("confirm".to_owned()),
+            ])]),
+        ]);
+        let result = dashboard_startup_from_policy(&startup);
+        assert!(result.is_ok());
+        let Some((applications, _gamepad)) = result.ok() else {
+            return;
+        };
+        assert_eq!(applications.len(), 1);
+        assert_eq!(
+            applications.first().map(CatalogEntry::identifier),
+            Some("terminal")
+        );
     }
 }

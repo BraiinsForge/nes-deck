@@ -5,6 +5,8 @@ mod application;
 #[cfg(feature = "bmc-native")]
 mod bmc_ui;
 mod catalog;
+#[cfg(feature = "bmc-native")]
+mod gamepad;
 mod launch;
 mod launch_options;
 #[cfg(feature = "bmc-native")]
@@ -23,7 +25,11 @@ pub use bmc_ui::{
 };
 pub use catalog::{Category, DashboardCatalog, DashboardCatalogError, MAXIMUM_DASHBOARD_ENTRIES};
 #[cfg(feature = "bmc-native")]
-pub use catalog::{DashboardApplicationPolicyError, applications_from_policy};
+pub use catalog::{
+    DashboardApplicationPolicyError, DashboardStartupPolicyError, dashboard_startup_from_policy,
+};
+#[cfg(feature = "bmc-native")]
+pub use gamepad::{GamepadInput, GamepadProfile, GamepadProfileError};
 pub use launch::{
     ExitPolicy, LaunchPlan, LaunchPlanError, LaunchTarget, LaunchTargetError, TerminalMode,
 };

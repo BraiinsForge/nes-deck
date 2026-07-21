@@ -42,22 +42,32 @@
 (install-default-policy-hooks)
 
 (test-check-equal
- "default dashboard applications are ordered policy data"
- '((:lua "LUA REPL" "#5F87FF")
-   (:lisp "LISP REPL" "#AFD75F")
-   (:python "PYTHON REPL" "#FFD700")
-   (:scheme "SCHEME REPL" "#87D787")
-   (:chiptunes "CHIPTUNES" "#FF8700")
-   (:terminal "TERMINAL" "#5F87AF")
-   (:reboot "REBOOT" "#D75F5F"))
- (call-policy-hook :dashboard/applications nil))
+ "default dashboard startup is ordered policy data"
+ '(:applications
+   ((:lua "LUA REPL" "#5F87FF")
+    (:lisp "LISP REPL" "#AFD75F")
+    (:python "PYTHON REPL" "#FFD700")
+    (:scheme "SCHEME REPL" "#87D787")
+    (:chiptunes "CHIPTUNES" "#FF8700")
+    (:terminal "TERMINAL" "#5F87AF")
+    (:reboot "REBOOT" "#D75F5F"))
+   :gamepad
+   ((:button 288 :back)
+    (:button 289 :back)
+    (:button 290 :confirm)
+    (:button 291 :confirm)
+    (:button 294 :back)
+    (:button 295 :confirm)
+    (:axis 0 :left :right)
+    (:axis 1 :up :down)))
+ (call-policy-hook :dashboard/startup nil))
 
 (test-check
  "dashboard startup policy rejects arguments"
  (test-condition-p
   'policy-hook-error
   (lambda ()
-    (call-policy-hook :dashboard/applications '(:unexpected t)))))
+    (call-policy-hook :dashboard/startup '(:unexpected t)))))
 
 (test-check-equal
  "default timer policy preserves an exact result"
