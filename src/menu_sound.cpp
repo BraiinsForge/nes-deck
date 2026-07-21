@@ -127,7 +127,7 @@ bool menu_input_quarantined(int64_t quarantine_until, int64_t now) {
 }
 
 bool menu_sound_blocks_input(bool sound_active, MenuInputKind input_kind) {
-  return sound_active && input_kind != MenuInputKeyboard;
+  return sound_active && input_kind == MenuInputController;
 }
 
 bool play_chiptune_blocking(const std::vector<ChiptuneNote> &notes,

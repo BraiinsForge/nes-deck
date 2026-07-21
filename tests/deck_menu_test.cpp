@@ -262,11 +262,11 @@ int main() {
              !menu_input_quarantined(100, 100) &&
              menu_input_quarantined(101, 100),
          "dashboard renders bounded tones and exact input quarantine");
-  expect(menu_sound_blocks_input(true, MenuInputTouch) &&
+  expect(!menu_sound_blocks_input(true, MenuInputTouch) &&
              menu_sound_blocks_input(true, MenuInputController) &&
              !menu_sound_blocks_input(true, MenuInputKeyboard) &&
              !menu_sound_blocks_input(false, MenuInputController),
-         "menu sound quarantine keeps keyboard navigation responsive");
+         "menu sound quarantine keeps touch and keyboard responsive");
 
   MenuControllerInputGuard controller_guard;
   bool accepted_human_rate = true;
