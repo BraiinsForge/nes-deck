@@ -853,6 +853,24 @@ bool stage_canvas_for_scanout(const Canvas &canvas, size_t row_words,
   return true;
 }
 
+bool read_scanout_into_canvas(const uint16_t *frame, size_t row_words,
+                              Canvas *canvas) {
+  if (!frame || !canvas ||
+      row_words < static_cast<size_t>(kPhysicalWidth))
+    return false;
+  canvas->resize(static_cast<size_t>(kLogicalWidth * kLogicalHeight));
+  for (int logical_x = 0; logical_x < kLogicalWidth; ++logical_x) {
+    const uint16_t *source =
+        frame + static_cast<size_t>(kPhysicalHeight - 1 - logical_x) *
+                    row_words;
+    for (int logical_y = 0; logical_y < kLogicalHeight; ++logical_y) {
+      (*canvas)[static_cast<size_t>(logical_y) * kLogicalWidth + logical_x] =
+          source[logical_y];
+    }
+  }
+  return true;
+}
+
 
 void draw_pixel_panel(Canvas *canvas, const Rect &rect, uint16_t fill,
                       uint16_t border, int thickness = kPixelStroke) {
@@ -1779,6 +1797,70 @@ public:
     return true;
   }
 
+  bool present_console_scanout(std::string *error) {
+#ifdef RETRO_DECK_WAYLAND
+    if (!wayland_) {
+      if (error)
+        *error = "console mirroring requires Wayland presentation";
+      return false;
+    }
+    const int console_fd = open("/dev/fb0", O_RDONLY | O_CLOEXEC);
+    if (console_fd < 0) {
+      if (error)
+        *error = errno_message("cannot open console framebuffer");
+      return false;
+    }
+    struct fb_var_screeninfo variable;
+    struct fb_fix_screeninfo fixed;
+    std::memset(&variable, 0, sizeof(variable));
+    std::memset(&fixed, 0, sizeof(fixed));
+    if (ioctl(console_fd, FBIOGET_VSCREENINFO, &variable) != 0 ||
+        ioctl(console_fd, FBIOGET_FSCREENINFO, &fixed) != 0) {
+      if (error)
+        *error = errno_message("cannot query console framebuffer");
+      close(console_fd);
+      return false;
+    }
+    const unsigned int rows =
+        variable.yres_virtual ? variable.yres_virtual : variable.yres;
+    if (variable.xres != kPhysicalWidth ||
+        variable.yres != kPhysicalHeight || variable.bits_per_pixel != 16 ||
+        fixed.line_length < kPhysicalWidth * sizeof(uint16_t) ||
+        (fixed.line_length & 1) != 0 || rows < kPhysicalHeight ||
+        rows > SIZE_MAX / fixed.line_length ||
+        fixed.smem_len < static_cast<size_t>(fixed.line_length) * rows) {
+      if (error)
+        *error = "unsupported console framebuffer geometry";
+      close(console_fd);
+      return false;
+    }
+    void *mapped = mmap(NULL, fixed.smem_len, PROT_READ, MAP_SHARED,
+                        console_fd, 0);
+    if (mapped == MAP_FAILED) {
+      if (error)
+        *error = errno_message("cannot map console framebuffer");
+      close(console_fd);
+      return false;
+    }
+    const bool transformed = read_scanout_into_canvas(
+        static_cast<const uint16_t *>(mapped), fixed.line_length / 2,
+        &console_canvas_);
+    munmap(mapped, fixed.smem_len);
+    close(console_fd);
+    if (!transformed) {
+      if (error)
+        *error = "cannot rotate console framebuffer";
+      return false;
+    }
+    return wayland_->present_rgb565(
+        &console_canvas_[0], kLogicalWidth, kLogicalHeight,
+        static_cast<size_t>(kLogicalWidth) * sizeof(uint16_t), error);
+#else
+    (void)error;
+    return false;
+#endif
+  }
+
   void close_device() {
 #ifdef RETRO_DECK_WAYLAND
     delete wayland_;
@@ -1858,6 +1940,7 @@ private:
   std::vector<uint16_t> frame_;
 #ifdef RETRO_DECK_WAYLAND
   DeckWaylandPresentation *wayland_;
+  Canvas console_canvas_;
 #endif
 };
 
@@ -2820,7 +2903,8 @@ void signal_child_group(pid_t child, int signal_number) {
 ChildResult run_managed_child(
     const std::string &executable, const std::vector<std::string> &arguments,
     const std::vector<std::pair<std::string, std::string> > &environment,
-    const std::string &label, TouchDevice *touch, Framebuffer *framebuffer) {
+    const std::string &label, TouchDevice *touch, Framebuffer *framebuffer,
+    bool mirror_console = false) {
   ChildResult result;
   result.started = false;
   result.exited_for_touch = false;
@@ -2931,6 +3015,8 @@ ChildResult run_managed_child(
   bool corner_hold = false;
   int64_t corner_hold_started = 0;
   int64_t reconnect_attempt = 0;
+  int64_t last_console_frame = 0;
+  bool console_mirror = mirror_console && framebuffer->uses_wayland();
   std::string touch_error;
   const auto update_corner_hold = [&](bool down, int x, int y) {
     const bool inside = down && x >= 0 && x < kExitHoldWidth && y >= 0 &&
@@ -2978,6 +3064,15 @@ ChildResult run_managed_child(
     descriptor.revents = 0;
     const int poll_result = poll(descriptor.fd >= 0 ? &descriptor : NULL,
                                  descriptor.fd >= 0 ? 1 : 0, 40);
+    if (console_mirror && now - last_console_frame >= 100) {
+      std::string mirror_error;
+      if (!framebuffer->present_console_scanout(&mirror_error)) {
+        std::cerr << "deck-menu: terminal display unavailable: "
+                  << mirror_error << std::endl;
+        console_mirror = false;
+      }
+      last_console_frame = now;
+    }
     std::vector<TouchReport> reports;
     if (poll_result > 0 && (descriptor.revents & (POLLIN | POLLERR | POLLHUP))) {
       std::string error;
@@ -3032,6 +3127,13 @@ ChildResult run_managed_child(
   return result;
 }
 
+std::vector<std::string> launch_arguments_for_game(const GameEntry &game) {
+  std::vector<std::string> arguments;
+  if (game.system != "deck" || is_built_in_chiptune(game))
+    arguments.push_back(game.rom);
+  return arguments;
+}
+
 ChildResult run_game(const std::string &emulator, const GameEntry &game,
                      unsigned int volume, TouchDevice *touch,
                      Framebuffer *framebuffer,
@@ -3046,9 +3148,7 @@ ChildResult run_game(const std::string &emulator, const GameEntry &game,
     return result;
   }
   const std::string volume_text = std::to_string(volume);
-  std::vector<std::string> arguments;
-  if (game.system != "deck")
-    arguments.push_back(game.rom);
+  const std::vector<std::string> arguments = launch_arguments_for_game(game);
   std::vector<std::pair<std::string, std::string> > environment;
   environment.push_back(
       std::make_pair("RETRO_DECK_VOLUME_PERCENT", volume_text));
@@ -3080,7 +3180,8 @@ ChildResult run_terminal(const std::string &launcher,
   std::vector<std::string> arguments(1, mode);
   return run_managed_child(
       launcher, arguments, environment,
-      mode == "shell" ? "terminal" : mode + " REPL", touch, framebuffer);
+      mode == "shell" ? "terminal" : mode + " REPL", touch, framebuffer,
+      true);
 }
 
 ChildResult run_reboot(const std::string &executable, TouchDevice *touch,
@@ -3417,6 +3518,12 @@ int geometry_test() {
       frame[kLogicalHeight - 1] != 0xabcd ||
       frame[kLogicalHeight] != 0xdead) {
     std::cerr << "geometry-test: staged scanout transform failed\n";
+    return 1;
+  }
+  Canvas restored;
+  if (!read_scanout_into_canvas(&frame[0], kPhysicalWidth, &restored) ||
+      restored != canvas) {
+    std::cerr << "geometry-test: console scanout transform failed\n";
     return 1;
   }
   std::cout << "geometry-test: OK logical=1280x480 physical=600x1280 "

@@ -1204,9 +1204,16 @@ int main() {
     routed.system = "deck";
     expect(emulator_for_game(options, routed) == "/bin/cat",
            "Deck entry selects native Deck game");
+    expect(launch_arguments_for_game(routed).empty(),
+           "ordinary Deck entries do not pass catalog paths to the launcher");
     routed = built_in_chiptune_entry("/tmp/chiptunes");
     expect(emulator_for_game(options, routed) == "/bin/sleep",
            "chiptune entry selects the dedicated native player");
+    const std::vector<std::string> chiptune_arguments =
+        launch_arguments_for_game(routed);
+    expect(chiptune_arguments.size() == 1 &&
+               chiptune_arguments[0] == "/tmp/chiptunes",
+           "chiptune entry passes its music directory to the player");
   }
 
   expect(geometry_test() == 0, "framebuffer transform geometry");

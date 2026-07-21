@@ -41,6 +41,8 @@ details when they are needed for archaeology.
   0 through 1279 and Y 0 through 479. No touch rotation is needed.
 - Native content uses a 16-pixel safe inset for the rounded panel corners.
   fbterm uses a 1248 by 448 viewport for the same reason.
+- On BMC, the dashboard mirrors fbterm's rotated framebuffer into its existing
+  Wayland widget surface; fbterm keeps tty1 keyboard input and its fixed font.
 - With BMC installed, the dashboard is a full-screen swipeable widget. Games
   use a full-screen black layer-shell surface plus a centered game surface.
   Those temporary surfaces disappear when the game exits, restoring scene
