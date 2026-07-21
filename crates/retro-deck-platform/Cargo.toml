@@ -7,7 +7,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-deck-gamepad-v1 = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "89ca1aefe8c28a6c3f2002c7fe0990453a096a02" }
+deck-audio-v1 = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "2484d1fd84259a29e5aaf574034110dedb6ea4b7" }
+deck-gamepad-v1 = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "2484d1fd84259a29e5aaf574034110dedb6ea4b7" }
 libc = "0.2.186"
 memmap2 = "0.9.11"
 retro-deck-audio = { path = "../retro-deck-audio" }
