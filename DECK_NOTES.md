@@ -12,6 +12,7 @@ details when they are needed for archaeology.
 - `deploy/menu/README.md` defines dashboard behavior and the catalog contract.
 - `ops/deck-wifi/README.md` defines Wi-Fi recovery behavior.
 - `ops/deck-wireguard/README.md` defines the userspace WireGuard bundle.
+- `ops/bmc/README.md` defines the pinned Wayland canary and rollback workflow.
 - `docs/swipe-rendering-postmortem.org` explains the clock swipe incident.
 - `terminal/PROVENANCE.md` records the vendored fbterm sources and licenses.
 
@@ -45,11 +46,13 @@ details when they are needed for archaeology.
   use a full-screen black layer-shell surface plus a centered game surface.
   Those temporary surfaces disappear when the game exits, restoring scene
   swiping.
-- Only the active scene and a scene participating in a transition retain GPU
-  buffers. Idle neighboring scenes are `Dormant`. On generation 14, Retro Deck
-  starts directly in that state while the clock is active, does not initialize
-  EGL, and uses about 2.7 MiB RSS. This keeps the clock host alive on the
-  256 MiB unit instead of exhausting memory during boot.
+- The active scene is `Visible`; its immediate previous and next scenes are
+  `Prepared`, and more distant scenes are `Dormant`. Preparing the immediate
+  neighbors supplies a populated buffer before the first swipe and prevents a
+  black destination frame. The older generation 14 deployment kept Retro Deck
+  dormant while the clock was active and measured about 2.7 MiB RSS. That
+  historical measurement is not the standby-memory result for the current
+  prepared-neighbor candidate.
 - Emulators expand source pixels to the integer-scaled layer buffer before
   submitting it. `patches/bmc-nearest-neighbor-filter.patch` also selects
   nearest-neighbor minification and magnification in Smithay. Apply it with
@@ -180,8 +183,9 @@ details when they are needed for archaeology.
 The 2026-07-21 generation 14 deployment on `.15` passed host tests, ARM builds,
 BMC package activation, Common Lisp policy startup, service checks, and
 process-path checks. After 138 seconds at the clock, `bmc-openwrt`,
-`retro-deck`, and `bmc-wasm-host` remained alive with zero OOM kills. Four
-observations still require eyes and ears on the physical unit:
+`retro-deck`, and `bmc-wasm-host` remained alive with zero OOM kills. The
+prepared-neighbor candidate is built but has not yet had its one-Deck canary.
+Four observations still require eyes and ears on that physical unit:
 
 1. Swipe repeatedly between the clock and Retro Deck, confirm the current
    tabbed dashboard, and check for smearing, flashing, or a black return screen.
