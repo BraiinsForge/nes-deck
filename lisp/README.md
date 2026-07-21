@@ -5,12 +5,12 @@ runtime will load in a supervised child process. It is deliberately not a
 device runtime: display buffers, input descriptors, clocks, audio devices,
 processes, and filesystem authority stay in Rust.
 
-Rust supervises the Lisp child on one asynchronous worker thread. Each child
-is preloaded for one policy decision and then exits; the timer immediately
-preloads a replacement after each successful decision and retries on the next
-round after a failure. Product event loops only hand off one bounded request
-and poll one terminal outcome, so they never wait for Lisp startup, file
-loading, evaluation, or pipe I/O.
+Rust supervises one resident Lisp child on an asynchronous worker thread. Each
+application loads the tracked policy and local startup files once, then sends
+at most one bounded decision request at a time. The timer reuses that loaded
+worker across rounds and starts a replacement only after an actual failure.
+Product event loops only hand off a request and poll its outcome, so they never
+wait for Lisp startup, file loading, evaluation, or pipe I/O.
 
 The worker loads the tracked `retro-deck` ASDF system, installs its default
 hooks, and then loads root-owned local files from

@@ -195,18 +195,16 @@ impl TimerRuntime {
     }
 
     fn handle_policy_events(&mut self) {
-        let event = match &self.policy {
+        let event = match &mut self.policy {
             Some(policy) => policy.try_event(),
             None => return,
         };
         match event {
             PolicyEventPoll::Event(PolicyEvent::Response(response)) => {
-                self.policy.take();
                 let before = self.game.view();
                 let effect = self.game.apply_policy_response(&response);
                 self.dirty |= self.game.view() != before;
                 self.apply_effect(effect);
-                self.policy = start_policy();
             }
             PolicyEventPoll::Event(PolicyEvent::Unavailable(failure)) => {
                 self.policy.take();

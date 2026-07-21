@@ -144,27 +144,23 @@ impl NativeRuntime {
     }
 
     fn drain_policy_events(&mut self) {
-        loop {
-            let Some(policy) = self.policy.as_ref() else {
-                return;
-            };
-            match policy.try_event() {
-                PolicyEventPoll::Empty => return,
-                PolicyEventPoll::Disconnected => {
-                    tracing::warn!("Common Lisp dashboard policy disconnected");
-                    self.policy.take();
-                    return;
-                }
-                PolicyEventPoll::Event(PolicyEvent::Response(response)) => {
-                    self.apply_policy_response(response);
-                    self.policy.take();
-                    return;
-                }
-                PolicyEventPoll::Event(PolicyEvent::Unavailable(failure)) => {
-                    tracing::warn!(?failure, "Common Lisp dashboard policy unavailable");
-                    self.policy.take();
-                    return;
-                }
+        let event = match self.policy.as_mut() {
+            Some(policy) => policy.try_event(),
+            None => return,
+        };
+        match event {
+            PolicyEventPoll::Empty => {}
+            PolicyEventPoll::Disconnected => {
+                tracing::warn!("Common Lisp dashboard policy disconnected");
+                self.policy.take();
+            }
+            PolicyEventPoll::Event(PolicyEvent::Response(response)) => {
+                self.apply_policy_response(response);
+                self.policy.take();
+            }
+            PolicyEventPoll::Event(PolicyEvent::Unavailable(failure)) => {
+                tracing::warn!(?failure, "Common Lisp dashboard policy unavailable");
+                self.policy.take();
             }
         }
     }

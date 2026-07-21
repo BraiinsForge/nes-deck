@@ -1,11 +1,10 @@
-//! One-decision process boundary for the Common Lisp policy worker.
+//! Resident process boundary for the Common Lisp policy worker.
 
 use std::{
     ffi::OsString,
     fmt, io,
     path::PathBuf,
     process::Stdio,
-    sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -14,7 +13,7 @@ use tokio::{
     io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader},
     process::{Child, ChildStdout, Command},
     runtime::Builder,
-    sync::oneshot,
+    sync::{mpsc, oneshot},
     time,
 };
 
@@ -99,7 +98,7 @@ impl WorkerCommand {
     }
 }
 
-/// Deadlines for one worker process and its single decision.
+/// Deadlines for one worker process and each policy decision.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkerConfig {
     command: WorkerCommand,
@@ -136,13 +135,13 @@ impl WorkerConfig {
 /// Result of nonblocking policy submission from an application event path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PolicySubmit {
-    /// The only request was handed to the supervisor.
+    /// The request was handed to the supervisor.
     Queued(RequestId),
-    /// The request was already submitted or the worker has stopped.
+    /// Another request is in flight or the worker has stopped.
     Unavailable,
 }
 
-/// Terminal event emitted by a one-decision policy worker.
+/// Event emitted by a resident policy worker.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PolicyEvent {
     /// The worker returned one validated response.
@@ -244,28 +243,29 @@ impl fmt::Display for WorkerFailure {
 
 impl std::error::Error for WorkerFailure {}
 
-/// Preloaded policy process accepting one nonblocking decision request.
+/// Preloaded policy process accepting one nonblocking request at a time.
 #[derive(Debug)]
 pub struct PolicyClient {
-    request_sender: Option<oneshot::Sender<WireRequest>>,
-    event_receiver: Receiver<PolicyEvent>,
+    request_sender: mpsc::Sender<WireRequest>,
+    event_receiver: mpsc::Receiver<PolicyEvent>,
     shutdown_sender: Option<oneshot::Sender<()>>,
     supervisor: Option<JoinHandle<()>>,
+    request_in_flight: bool,
 }
 
 impl PolicyClient {
     /// Start loading policy in a child and return without waiting for Lisp.
     ///
-    /// The client accepts exactly one request. A caller that needs another
-    /// decision starts another worker while the next interaction is underway.
+    /// Trusted Lisp files load once during worker startup. The client accepts
+    /// another request after the preceding event has been polled.
     ///
     /// # Errors
     ///
     /// Returns an I/O error only if the Rust supervisor thread itself cannot
     /// be created. Child failures arrive as [`PolicyEvent::Unavailable`].
     pub fn spawn(config: WorkerConfig) -> io::Result<Self> {
-        let (request_sender, request_receiver) = oneshot::channel();
-        let (event_sender, event_receiver) = mpsc::sync_channel(1);
+        let (request_sender, request_receiver) = mpsc::channel(1);
+        let (event_sender, event_receiver) = mpsc::channel(1);
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let supervisor = thread::Builder::new()
             .name("retro-deck-policy".to_owned())
@@ -273,14 +273,15 @@ impl PolicyClient {
                 supervise(&config, request_receiver, &event_sender, shutdown_receiver);
             })?;
         Ok(Self {
-            request_sender: Some(request_sender),
+            request_sender,
             event_receiver,
             shutdown_sender: Some(shutdown_sender),
             supervisor: Some(supervisor),
+            request_in_flight: false,
         })
     }
 
-    /// Encode and hand off the worker's only policy call without waiting.
+    /// Encode and hand off one policy call without waiting.
     ///
     /// # Errors
     ///
@@ -293,26 +294,33 @@ impl PolicyClient {
         let request_id = policy_request_id();
         let request = PolicyRequest::new(request_id, hook, arguments)?;
         let line = request.encode()?;
-        let Some(sender) = self.request_sender.take() else {
+        if self.request_in_flight {
             return Ok(PolicySubmit::Unavailable);
-        };
-        sender
-            .send(WireRequest {
-                id: request_id,
-                line,
-            })
-            .map_or(Ok(PolicySubmit::Unavailable), |()| {
+        }
+        match self.request_sender.try_send(WireRequest {
+            id: request_id,
+            line,
+        }) {
+            Ok(()) => {
+                self.request_in_flight = true;
                 Ok(PolicySubmit::Queued(request_id))
-            })
+            }
+            Err(mpsc::error::TrySendError::Full(_) | mpsc::error::TrySendError::Closed(_)) => {
+                Ok(PolicySubmit::Unavailable)
+            }
+        }
     }
 
-    /// Poll the worker's terminal event without waiting.
+    /// Poll the worker's next event without waiting.
     #[must_use]
-    pub fn try_event(&self) -> PolicyEventPoll {
+    pub fn try_event(&mut self) -> PolicyEventPoll {
         match self.event_receiver.try_recv() {
-            Ok(event) => PolicyEventPoll::Event(event),
-            Err(TryRecvError::Empty) => PolicyEventPoll::Empty,
-            Err(TryRecvError::Disconnected) => PolicyEventPoll::Disconnected,
+            Ok(event) => {
+                self.request_in_flight = false;
+                PolicyEventPoll::Event(event)
+            }
+            Err(mpsc::error::TryRecvError::Empty) => PolicyEventPoll::Empty,
+            Err(mpsc::error::TryRecvError::Disconnected) => PolicyEventPoll::Disconnected,
         }
     }
 }
@@ -322,7 +330,6 @@ impl Drop for PolicyClient {
         if let Some(sender) = self.shutdown_sender.take() {
             let _ = sender.send(());
         }
-        self.request_sender.take();
         if let Some(supervisor) = self.supervisor.take() {
             let _ = supervisor.join();
         }
@@ -344,8 +351,8 @@ enum WaitResult {
 
 fn supervise(
     config: &WorkerConfig,
-    request_receiver: oneshot::Receiver<WireRequest>,
-    event_sender: &SyncSender<PolicyEvent>,
+    request_receiver: mpsc::Receiver<WireRequest>,
+    event_sender: &mpsc::Sender<PolicyEvent>,
     shutdown_receiver: oneshot::Receiver<()>,
 ) {
     let runtime = match Builder::new_current_thread().enable_all().build() {
@@ -358,18 +365,22 @@ fn supervise(
             return;
         }
     };
-    match runtime.block_on(run_worker(config, request_receiver, shutdown_receiver)) {
-        Ok(Some(response)) => publish(event_sender, PolicyEvent::Response(response)),
-        Ok(None) => {}
-        Err(failure) => publish(event_sender, PolicyEvent::Unavailable(failure)),
+    if let Err(failure) = runtime.block_on(run_worker(
+        config,
+        request_receiver,
+        event_sender,
+        shutdown_receiver,
+    )) {
+        publish(event_sender, PolicyEvent::Unavailable(failure));
     }
 }
 
 async fn run_worker(
     config: &WorkerConfig,
-    request_receiver: oneshot::Receiver<WireRequest>,
+    request_receiver: mpsc::Receiver<WireRequest>,
+    event_sender: &mpsc::Sender<PolicyEvent>,
     shutdown_receiver: oneshot::Receiver<()>,
-) -> Result<Option<PolicyResponse>, WorkerFailure> {
+) -> Result<(), WorkerFailure> {
     let mut child = config
         .command
         .build()
@@ -387,6 +398,7 @@ async fn run_worker(
     let result = serve_worker(
         config,
         request_receiver,
+        event_sender,
         shutdown_receiver,
         &mut child,
         stdin,
@@ -399,12 +411,13 @@ async fn run_worker(
 
 async fn serve_worker(
     config: &WorkerConfig,
-    mut request_receiver: oneshot::Receiver<WireRequest>,
+    mut request_receiver: mpsc::Receiver<WireRequest>,
+    event_sender: &mpsc::Sender<PolicyEvent>,
     mut shutdown_receiver: oneshot::Receiver<()>,
     child: &mut Child,
     mut stdin: tokio::process::ChildStdin,
     stdout: ChildStdout,
-) -> Result<Option<PolicyResponse>, WorkerFailure> {
+) -> Result<(), WorkerFailure> {
     let mut stdout = BufReader::new(stdout);
     match wait_for_line(
         &mut stdout,
@@ -415,48 +428,57 @@ async fn serve_worker(
     .await
     {
         WaitResult::Line(line) => decode_ready(&line).map_err(WorkerFailure::InvalidReady)?,
-        WaitResult::Shutdown => return Ok(None),
+        WaitResult::Shutdown => return Ok(()),
         WaitResult::TimedOut => return Err(WorkerFailure::StartupTimeout),
         WaitResult::Failed(failure) => return Err(failure),
     }
 
-    let request = tokio::select! {
-        biased;
-        _ = &mut shutdown_receiver => return Ok(None),
-        exit = child.wait() => return Err(process_failure(exit)),
-        output = read_line(&mut stdout) => {
-            output?;
-            return Err(WorkerFailure::UnsolicitedOutput);
-        }
-        request = &mut request_receiver => match request {
-            Ok(request) => request,
-            Err(_) => return Ok(None),
-        },
-    };
-
-    match exchange(
-        &mut stdin,
-        &mut stdout,
-        &mut shutdown_receiver,
-        child,
-        &request.line,
-        config.request_timeout,
-    )
-    .await
-    {
-        WaitResult::Line(line) => {
-            let response = PolicyResponse::decode(&line).map_err(WorkerFailure::InvalidResponse)?;
-            if response.id() != request.id {
-                return Err(WorkerFailure::UnexpectedResponse {
-                    expected: request.id,
-                    received: response.id(),
-                });
+    loop {
+        let request = tokio::select! {
+            biased;
+            _ = &mut shutdown_receiver => return Ok(()),
+            exit = child.wait() => return Err(process_failure(exit)),
+            output = read_line(&mut stdout) => {
+                output?;
+                return Err(WorkerFailure::UnsolicitedOutput);
             }
-            Ok(Some(response))
+            request = request_receiver.recv() => match request {
+                Some(request) => request,
+                None => return Ok(()),
+            },
+        };
+
+        let response = match exchange(
+            &mut stdin,
+            &mut stdout,
+            &mut shutdown_receiver,
+            child,
+            &request.line,
+            config.request_timeout,
+        )
+        .await
+        {
+            WaitResult::Line(line) => {
+                let response =
+                    PolicyResponse::decode(&line).map_err(WorkerFailure::InvalidResponse)?;
+                if response.id() != request.id {
+                    return Err(WorkerFailure::UnexpectedResponse {
+                        expected: request.id,
+                        received: response.id(),
+                    });
+                }
+                response
+            }
+            WaitResult::Shutdown => return Ok(()),
+            WaitResult::TimedOut => return Err(WorkerFailure::RequestTimeout(request.id)),
+            WaitResult::Failed(failure) => return Err(failure),
+        };
+        if event_sender
+            .try_send(PolicyEvent::Response(response))
+            .is_err()
+        {
+            return Ok(());
         }
-        WaitResult::Shutdown => Ok(None),
-        WaitResult::TimedOut => Err(WorkerFailure::RequestTimeout(request.id)),
-        WaitResult::Failed(failure) => Err(failure),
     }
 }
 
@@ -550,14 +572,13 @@ fn process_failure(result: io::Result<std::process::ExitStatus>) -> WorkerFailur
     }
 }
 
-fn publish(sender: &SyncSender<PolicyEvent>, event: PolicyEvent) {
+fn publish(sender: &mpsc::Sender<PolicyEvent>, event: PolicyEvent) {
     let _ = sender.try_send(event);
 }
 
 fn policy_request_id() -> RequestId {
     RequestId::new(1).unwrap_or(RequestId::ZERO)
 }
-
 async fn terminate_child(child: &mut Child) {
     match child.try_wait() {
         Ok(Some(_)) => {}
@@ -598,7 +619,7 @@ mod tests {
         result.ok()
     }
 
-    fn wait_event(client: &PolicyClient, timeout: Duration) -> Option<PolicyEvent> {
+    fn wait_event(client: &mut PolicyClient, timeout: Duration) -> Option<PolicyEvent> {
         let started = Instant::now();
         loop {
             match client.try_event() {
@@ -633,7 +654,7 @@ mod tests {
             Ok(PolicySubmit::Queued(_))
         ));
         assert!(matches!(
-            wait_event(&client, Duration::from_secs(6)),
+            wait_event(&mut client, Duration::from_secs(6)),
             Some(PolicyEvent::Response(PolicyResponse::Ok {
                 value: Value::List(values),
                 ..
@@ -661,7 +682,7 @@ mod tests {
             ))
         );
         assert!(matches!(
-            wait_event(&client, Duration::from_secs(1)),
+            wait_event(&mut client, Duration::from_secs(1)),
             Some(PolicyEvent::Response(PolicyResponse::Ok {
                 value: Value::List(values),
                 ..
@@ -677,7 +698,7 @@ mod tests {
             return;
         };
         assert!(matches!(
-            wait_event(&client, Duration::from_secs(1)),
+            wait_event(&mut client, Duration::from_secs(1)),
             Some(PolicyEvent::Unavailable(WorkerFailure::InvalidReady(_)))
         ));
         assert_eq!(
@@ -698,13 +719,13 @@ mod tests {
             Ok(PolicySubmit::Queued(_))
         ));
         assert!(matches!(
-            wait_event(&client, Duration::from_secs(1)),
+            wait_event(&mut client, Duration::from_secs(1)),
             Some(PolicyEvent::Unavailable(WorkerFailure::RequestTimeout(_)))
         ));
     }
 
     #[test]
-    fn one_worker_accepts_exactly_one_request() {
+    fn one_worker_accepts_only_one_request_at_a_time() {
         let Some(mut client) = spawn_test_client(shell_worker(
             "printf '(:ready :version 1)\\n'; IFS= read -r request; IFS= read -r rest",
         )) else {
@@ -718,6 +739,28 @@ mod tests {
             client.try_submit("two", Value::Nil),
             Ok(PolicySubmit::Unavailable)
         );
+    }
+
+    #[test]
+    fn one_loaded_worker_serves_sequential_requests() {
+        let script = "printf '(:ready :version 1)\\n'; \
+                      while IFS= read -r request; do \
+                        printf '(:response :version 1 :id 1 :status :ok :value (:answer 42))\\n'; \
+                      done";
+        let Some(mut client) = spawn_test_client(shell_worker(script)) else {
+            return;
+        };
+
+        for hook in ["one", "two"] {
+            assert!(matches!(
+                client.try_submit(hook, Value::Nil),
+                Ok(PolicySubmit::Queued(_))
+            ));
+            assert!(matches!(
+                wait_event(&mut client, Duration::from_secs(1)),
+                Some(PolicyEvent::Response(PolicyResponse::Ok { .. }))
+            ));
+        }
     }
 
     #[test]
