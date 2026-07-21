@@ -1,6 +1,6 @@
 # Freely licensed games on Retro Deck
 
-The boot menu retains two freely licensed CHIP-8 games. The other console
+The dashboard retains two freely licensed CHIP-8 games. The other console
 libraries contain only owner-supplied ROMs. The pinned fetch script downloads
 these CHIP-8 payloads and rejects any checksum mismatch. Generated files remain
 ignored by this repository and install under `/mnt/data/roms/chip8/`, with the
