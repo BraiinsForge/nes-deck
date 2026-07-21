@@ -69,6 +69,16 @@
           manifest = ./deploy/application/manifest.json;
         };
       };
+      dashboardManifest = builtins.fromJSON (
+        builtins.readFile ./deploy/widget/manifest.json
+      );
+      nativeDashboardPackage = {
+        pkg = nativeDashboardWidget;
+        inherit (dashboardManifest) version description;
+        category = "widget";
+        upgrade_strategy = null;
+        install_strategy = null;
+      };
 
       waylandNativeInputs = [ pkgs.wayland-scanner ];
       waylandStaticInputs = [ waylandStaticCross libffiStaticCross ];
@@ -856,5 +866,13 @@
           echo ""
         '';
       };
+
+      # Let BMC's stock `deck deploy` harness install this external package
+      # into the same generation-managed profile as its built-in widgets.
+      legacyPackages.${system}.deck-packages =
+        bmc-main.legacyPackages.${system}.deck-packages // {
+          retro-deck = nativeDashboardPackage;
+        };
+      apps.${system}.deck = bmc-main.apps.${system}.deck;
     };
 }
