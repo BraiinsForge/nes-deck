@@ -125,6 +125,9 @@ The suite runs the strict Rust formatter, lints, and tests for both the root
 runtime workspace and the isolated BMC-native dashboard workspace. Uploader
 coverage includes authentication, Axum request limits and multipart extraction,
 ROM validation, atomic storage, process control, and the Paper UI contract.
+It also audits every enabled dependency against RustSec. Narrow build-time and
+BMC-owned maintenance exceptions carry their reasons in each workspace's
+`deny.toml`.
 
 Run shell checks on deployment code with:
 

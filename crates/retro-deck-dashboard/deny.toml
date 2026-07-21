@@ -1,0 +1,8 @@
+[advisories]
+ignore = [
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser is an unmaintained BMC renderer dependency, not a vulnerability; replacement belongs in BMC" },
+  { id = "RUSTSEC-2026-0194", reason = "quick-xml is used only by the current wayland-scanner at build time on pinned local protocol XML" },
+  { id = "RUSTSEC-2026-0195", reason = "quick-xml is used only by the current wayland-scanner at build time on pinned local protocol XML" },
+  { id = "RUSTSEC-2026-0196", reason = "cgmath is an unmaintained Smithay dependency owned by BMC, not a vulnerability" },
+  { id = "RUSTSEC-2026-0206", reason = "rustybuzz is an unmaintained BMC renderer dependency, not a vulnerability; replacement belongs in BMC" },
+]

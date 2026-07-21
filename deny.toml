@@ -1,0 +1,5 @@
+[advisories]
+ignore = [
+  { id = "RUSTSEC-2026-0194", reason = "quick-xml is used only by the current wayland-scanner at build time on pinned local protocol XML" },
+  { id = "RUSTSEC-2026-0195", reason = "quick-xml is used only by the current wayland-scanner at build time on pinned local protocol XML" },
+]

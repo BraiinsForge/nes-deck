@@ -22,6 +22,13 @@ cargo clippy -p retro-deck-emulator --all-targets --all-features -- -D warnings
 cargo test --workspace
 
 dashboard_manifest=crates/retro-deck-dashboard/Cargo.toml
+nix shell nixpkgs#cargo-deny nixpkgs#cargo -c cargo-deny \
+  --all-features check advisories
+(
+  cd crates/retro-deck-dashboard
+  nix shell nixpkgs#cargo-deny nixpkgs#cargo -c cargo-deny \
+    --all-features check advisories
+)
 cargo fmt --manifest-path "$dashboard_manifest" --all --check
 cargo clippy --manifest-path "$dashboard_manifest" --workspace --all-targets \
   --no-default-features --features application-wire -- -D warnings
