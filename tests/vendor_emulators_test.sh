@@ -12,6 +12,11 @@ for emulator in "$vendor_root"/*/; do
     echo "Unsafe emulator vendor directory: $emulator" >&2
     exit 1
   }
+  unsafe_link=$(find "$emulator" -type l -print -quit)
+  [[ -z $unsafe_link ]] || {
+    echo "Symlink in emulator vendor directory: $unsafe_link" >&2
+    exit 1
+  }
   for required in provenance.md LICENSE.txt SHA256SUMS patches/series; do
     [[ -f $emulator/$required && ! -L $emulator/$required ]] || {
       echo "Missing emulator vendor record: $emulator/$required" >&2
@@ -31,6 +36,27 @@ for emulator in "$vendor_root"/*/; do
       exit 1
     }
   done <"$emulator/patches/series"
+
+  diff -u \
+    <(awk 'NF && $1 !~ /^#/ { print }' "$emulator/patches/series" | sort) \
+    <(find "$emulator/patches" -maxdepth 1 -type f -name '*.patch' \
+      -printf '%f\n' | sort) >&2 || {
+    echo "Patch series does not exactly cover $emulator/patches" >&2
+    exit 1
+  }
+
+  diff -u \
+    <({
+      printf '%s\n' LICENSE.txt
+      find "$emulator/patches" -maxdepth 1 -type f -name '*.patch' \
+        -printf 'patches/%f\n'
+      [[ ! -d $emulator/upstream ]] ||
+        (cd "$emulator" && find upstream -type f -printf '%p\n')
+    } | sort) \
+    <(cut -c67- "$emulator/SHA256SUMS" | sort) >&2 || {
+    echo "Checksum manifest does not exactly cover $emulator sources" >&2
+    exit 1
+  }
 done
 
 echo "vendor-emulators-test: OK"
