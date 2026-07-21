@@ -29,6 +29,19 @@
       pkgs = nixpkgs.legacyPackages.${system};
       pkgsCross = pkgs.pkgsCross.armv7l-hf-multiplatform;
       staticCross = pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsStatic;
+      libffiStaticCross = pkgsCross.libffi.overrideAttrs (_old: {
+        dontDisableStatic = true;
+        doCheck = false;
+      });
+      waylandStaticCross = (pkgsCross.wayland.override {
+        libffi = libffiStaticCross;
+      }).overrideAttrs (old: {
+        mesonFlags = (old.mesonFlags or [ ]) ++ [ "--default-library=static" ];
+      });
+      libpngStaticCross = pkgsCross.libpng.overrideAttrs (_old: {
+        dontDisableStatic = true;
+        doCheck = false;
+      });
       cargoLock = {
         lockFile = ./Cargo.lock;
         allowBuiltinFetchGit = true;
@@ -55,7 +68,7 @@
       };
 
       waylandNativeInputs = [ pkgs.wayland-scanner ];
-      waylandStaticInputs = [ staticCross.wayland staticCross.libffi ];
+      waylandStaticInputs = [ waylandStaticCross libffiStaticCross ];
       # Keep each local build input narrow. Referencing ./src as an include
       # directory would make every source edit invalidate every native runtime.
       sourceTree = files: pkgs.lib.fileset.toSource {
@@ -255,7 +268,7 @@
           coreArchive = "$core/fceumm_libretro.a";
           nativeLibraries = [ "-lstdc++" "-lz" ];
           extraNativeBuildInputs = [ pkgs.gnupatch ];
-          extraBuildInputs = [ staticCross.zlib ];
+          extraBuildInputs = [ pkgsCross.zlib.static ];
           installLicenses = ''
             install -m644 ${fceumm-src}/Copying \
               $out/share/licenses/nes-deck/FCEUmm-COPYING
@@ -274,8 +287,8 @@
           nativeBuildInputs = [ pkgs.nukeReferences ] ++ waylandNativeInputs;
           buildInputs = [
             pkgsCross.glibc.static
-            staticCross.libpng
-            staticCross.zlib
+            libpngStaticCross
+            pkgsCross.zlib.static
           ] ++ waylandStaticInputs;
           allowedReferences = [ ];
 
@@ -345,7 +358,7 @@
 
           env.RUSTFLAGS = "-C target-feature=+crt-static -C link-arg=-static";
           nativeBuildInputs = [ pkgs.cmake pkgs.nukeReferences ];
-          buildInputs = [ pkgsCross.glibc.static staticCross.zlib ];
+          buildInputs = [ pkgsCross.glibc.static pkgsCross.zlib.static ];
           allowedReferences = [ ];
 
           preBuild = ''
