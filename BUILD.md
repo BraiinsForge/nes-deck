@@ -162,20 +162,6 @@ The chiptune player can render its UI without opening the framebuffer:
   /mnt/data/chiptunes/crazy.ogg /tmp/chiptune-player.ppm
 ```
 
-## Render dashboard screenshots
-
-Copy the persistent cover cache from a Deck, then run the native renderer:
-
-```sh
-scp -r root@DECK-IP:/mnt/data/nes-deck/covers /tmp/deck-covers
-ops/deck-menu/render-screenshots.sh deploy/menu/games.tsv \
-  /tmp/deck-covers "$HOME/retro-deck-screens"
-```
-
-The output contains every game selection, settings variants, animated and
-reduced-motion FOSS credits, the Wi-Fi keyboard, reboot confirmation, timer,
-and a contact sheet.
-
 ## Platform details
 
 The Deck CPU is ARMv7 Cortex-A7 hard-float. Its panel is a portrait 600x1280

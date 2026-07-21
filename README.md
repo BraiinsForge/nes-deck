@@ -257,8 +257,8 @@ application launch contract. Retro Deck requires `/mnt/data` to be mounted.
 
 ## Development
 
-- [BUILD.md](BUILD.md) covers reproducible builds, tests, screenshots, and
-  platform details.
+- [BUILD.md](BUILD.md) covers reproducible builds, tests, and platform
+  details.
 - [docs/swipe-rendering-postmortem.org](docs/swipe-rendering-postmortem.org)
   explains the buffer-lifecycle and deployment failures behind the clock
   swipe rendering incident.
