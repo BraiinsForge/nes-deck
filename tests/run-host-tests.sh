@@ -31,9 +31,9 @@ nix shell nixpkgs#cargo-deny nixpkgs#cargo -c cargo-deny \
 )
 cargo fmt --manifest-path "$dashboard_manifest" --all --check
 cargo clippy --manifest-path "$dashboard_manifest" --workspace --all-targets \
-  --no-default-features --features application-wire -- -D warnings
+  --all-features -- -D warnings
 cargo test --manifest-path "$dashboard_manifest" --workspace --all-targets \
-  --no-default-features --features application-wire
+  --all-features
 
 tests/rom_library_test.sh
 tests/catalog_test.sh
