@@ -145,6 +145,44 @@
  (policy--utf-8-length
   (coerce (list #\a (code-char #x20ac) (code-char #x1f642)) 'string)))
 
+(test-check
+ "wire validation rejects C1 controls inside strings"
+ (test-condition-p
+  'policy-protocol-error
+  (lambda ()
+    (policy--validate-data (string (code-char #x85))))))
+
+(test-check
+ "wire validation accepts only canonical Rust keywords"
+ (and (policy--valid-keyword-p :ten-seconds/result)
+      (test-condition-p
+       'policy-protocol-error
+       (lambda ()
+         (policy--validate-data (intern "lower" '#:keyword))))
+      (test-condition-p
+       'policy-protocol-error
+       (lambda ()
+         (policy--validate-data (intern "BAD SPACE" '#:keyword))))))
+
+(labels ((nested-list (levels)
+           (if (zerop levels)
+               0
+               (list (nested-list (1- levels))))))
+  (test-check
+   "wire validation accepts the shared nesting limit"
+   (not (test-condition-p
+         'policy-protocol-error
+         (lambda ()
+           (policy--validate-data
+            (nested-list +policy-maximum-depth+))))))
+  (test-check
+   "wire validation rejects one list beyond the shared nesting limit"
+   (test-condition-p
+    'policy-protocol-error
+    (lambda ()
+      (policy--validate-data
+       (nested-list (1+ +policy-maximum-depth+)))))))
+
 
 ;;;; -- Worker framing --
 

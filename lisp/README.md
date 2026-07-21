@@ -80,9 +80,10 @@ input path.
 
 Standard input and output carry one bounded S-expression per UTF-8 line. The
 data vocabulary is limited to proper lists, signed 64-bit integers, strings
-without control characters, keywords, `t`, and `nil`. Reader evaluation,
-reader macros, arbitrary symbols, dotted lists, trailing forms, excessive
-depth, excessive values, and messages over 64 KiB are rejected.
+without control characters, canonical keywords, `t`, and `nil`. Keyword names
+use ASCII letters, digits, and `-/+*<>=!?_.`, matching the Rust codec. Reader
+evaluation, reader macros, arbitrary symbols, dotted lists, trailing forms,
+excessive depth, excessive values, and messages over 64 KiB are rejected.
 
 A request and successful response look like this:
 

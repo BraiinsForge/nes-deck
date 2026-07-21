@@ -45,7 +45,22 @@
   "Return true when CHARACTER cannot occur inside a wire string."
   (let ((code (char-code character)))
     (or (< code 32)
-        (= code 127))))
+        (<= 127 code 159))))
+
+
+(defun policy--keyword-character-p (character)
+  "Return true when CHARACTER belongs to the shared wire keyword alphabet."
+  (or (char<= #\A character #\Z)
+      (char<= #\0 character #\9)
+      (not (null (find character "-/+*<>=!?_." :test #'char=)))))
+
+
+(defun policy--valid-keyword-p (value)
+  "Return true when VALUE is a canonical keyword accepted by the Rust codec."
+  (and (keywordp value)
+       (let ((name (symbol-name value)))
+         (and (plusp (length name))
+              (every #'policy--keyword-character-p name)))))
 
 
 (defun policy--utf-8-character-length (character)
@@ -75,12 +90,13 @@
                (incf values-seen)
                (when (> values-seen +policy-maximum-values+)
                  (policy--protocol-error "message contains too many values"))
-               (when (> depth +policy-maximum-depth+)
-                 (policy--protocol-error "message is nested too deeply"))
                (cond
                  ((or (null current)
-                      (eq current t)
-                      (keywordp current))
+                      (eq current t))
+                  current)
+                 ((keywordp current)
+                  (unless (policy--valid-keyword-p current)
+                    (policy--protocol-error "keyword has an invalid name"))
                   current)
                  ((integerp current)
                   (unless (<= (- (expt 2 63)) current (1- (expt 2 63)))
@@ -93,6 +109,8 @@
                      "string contains a control character"))
                   current)
                  ((consp current)
+                  (when (>= depth +policy-maximum-depth+)
+                    (policy--protocol-error "message is nested too deeply"))
                   (let ((cursor current)
                         (seen   (make-hash-table :test #'eq)))
                     (loop
