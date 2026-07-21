@@ -5,38 +5,24 @@ use bmc_render::tree::{
     AutoFit, Color, DrawCommand, Fill, FontFamily, FontWeight, PathPaint, PropsData, TextAlign,
     TextStyle, TreeNode, VerticalAlign,
 };
-use retro_deck_config::{Palette, PaletteRole, Rgb};
+use retro_deck_config::{CatalogEntry, Palette, PaletteRole, Rgb};
 
-use crate::{Action, Category, DashboardModel};
+use crate::{Action, DashboardModel};
 
-const CATEGORY_PREVIOUS: &str = "category-previous";
-const CATEGORY_NEXT: &str = "category-next";
-const OPEN_CATEGORY: &str = "open-category";
+const CATEGORY_KEY_PREFIX: &str = "category:";
+const ENTRY_KEY_PREFIX: &str = "entry:";
 const ENTRY_PREVIOUS: &str = "entry-previous";
 const ENTRY_NEXT: &str = "entry-next";
-const OPEN_ENTRY: &str = "open-entry";
-const CLOSE_CAROUSEL: &str = "close-carousel";
 const OPEN_SYSTEM_SETTINGS: &str = "open-system-settings";
-
-/// Which of the two approved dashboard views is visible.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum BmcScreen {
-    /// Large centered console/category selector.
-    #[default]
-    Categories,
-    /// Selected game/application carousel.
-    Carousel,
-}
+const MAXIMUM_VISIBLE_CARDS: usize = 3;
 
 /// Product action derived from one BMC tree touch key.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BmcUiAction {
     /// Change the pure dashboard model.
     Model(Action),
-    /// Enter the selected category's carousel.
-    OpenCarousel,
-    /// Return to the category selector.
-    CloseCarousel,
+    /// Launch one catalog entry shown by the dashboard itself.
+    Launch(usize),
     /// Reveal the compositor-owned system settings tray.
     OpenSystemSettings,
 }
@@ -54,58 +40,72 @@ pub enum BmcNavigation {
 
 /// Translate a stable `bmc-render` hit-test key into product behavior.
 #[must_use]
-pub fn bmc_action_for_touch(screen: BmcScreen, key: &str) -> Option<BmcUiAction> {
-    match (screen, key) {
-        (BmcScreen::Categories, CATEGORY_PREVIOUS) => {
-            Some(BmcUiAction::Model(Action::CategoryPrevious))
-        }
-        (BmcScreen::Categories, CATEGORY_NEXT) => Some(BmcUiAction::Model(Action::CategoryNext)),
-        (BmcScreen::Categories, OPEN_CATEGORY) => Some(BmcUiAction::OpenCarousel),
-        (BmcScreen::Carousel, ENTRY_PREVIOUS) => Some(BmcUiAction::Model(Action::Previous)),
-        (BmcScreen::Carousel, ENTRY_NEXT) => Some(BmcUiAction::Model(Action::Next)),
-        (BmcScreen::Carousel, OPEN_ENTRY) => Some(BmcUiAction::Model(Action::Confirm)),
-        (BmcScreen::Carousel, CLOSE_CAROUSEL) => Some(BmcUiAction::CloseCarousel),
-        (BmcScreen::Carousel, OPEN_SYSTEM_SETTINGS) => Some(BmcUiAction::OpenSystemSettings),
-        _ => None,
+pub fn bmc_action_for_touch(key: &str) -> Option<BmcUiAction> {
+    match key {
+        ENTRY_PREVIOUS => Some(BmcUiAction::Model(Action::Previous)),
+        ENTRY_NEXT => Some(BmcUiAction::Model(Action::Next)),
+        OPEN_SYSTEM_SETTINGS => Some(BmcUiAction::OpenSystemSettings),
+        _ => indexed_key(key, CATEGORY_KEY_PREFIX)
+            .map(|index| BmcUiAction::Model(Action::CategorySelect(index)))
+            .or_else(|| indexed_key(key, ENTRY_KEY_PREFIX).map(BmcUiAction::Launch)),
     }
 }
 
 /// Translate one semantic navigation edge into product behavior.
 #[must_use]
-pub const fn bmc_action_for_navigation(
-    screen: BmcScreen,
-    navigation: BmcNavigation,
-) -> Option<BmcUiAction> {
-    match (screen, navigation) {
-        (BmcScreen::Categories, BmcNavigation::Up) => {
-            Some(BmcUiAction::Model(Action::CategoryPrevious))
-        }
-        (BmcScreen::Categories, BmcNavigation::Down) => {
-            Some(BmcUiAction::Model(Action::CategoryNext))
-        }
-        (BmcScreen::Categories, BmcNavigation::Confirm) => Some(BmcUiAction::OpenCarousel),
-        (BmcScreen::Carousel, BmcNavigation::Left) => Some(BmcUiAction::Model(Action::Previous)),
-        (BmcScreen::Carousel, BmcNavigation::Right) => Some(BmcUiAction::Model(Action::Next)),
-        (BmcScreen::Carousel, BmcNavigation::Confirm) => Some(BmcUiAction::Model(Action::Confirm)),
-        (BmcScreen::Carousel, BmcNavigation::Back) => Some(BmcUiAction::CloseCarousel),
-        _ => None,
+pub const fn bmc_action_for_navigation(navigation: BmcNavigation) -> Option<BmcUiAction> {
+    match navigation {
+        BmcNavigation::Up => Some(BmcUiAction::Model(Action::CategoryPrevious)),
+        BmcNavigation::Down => Some(BmcUiAction::Model(Action::CategoryNext)),
+        BmcNavigation::Left => Some(BmcUiAction::Model(Action::Previous)),
+        BmcNavigation::Right => Some(BmcUiAction::Model(Action::Next)),
+        BmcNavigation::Confirm => Some(BmcUiAction::Model(Action::Confirm)),
+        BmcNavigation::Back => None,
     }
 }
 
-/// Build the current Retro Deck screen with BMC-native layout and drawing.
+/// Catalog indices for the current three-card window.
 #[must_use]
+pub fn visible_catalog_indices(model: &DashboardModel) -> Vec<usize> {
+    let Some(category) = model.active_category() else {
+        return Vec::new();
+    };
+    let count = category.len();
+    let visible = count.min(MAXIMUM_VISIBLE_CARDS);
+    let selected = model.selected_position().min(count.saturating_sub(1));
+    let first = if count <= visible || selected == 0 {
+        0
+    } else if selected.saturating_add(1) >= count {
+        count - visible
+    } else {
+        selected - 1
+    };
+    category
+        .entry_indices()
+        .get(first..first + visible)
+        .map_or_else(Vec::new, <[usize]>::to_vec)
+}
+
+/// Build the current tabbed Retro Deck dashboard.
+#[must_use]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "the Deck surface dimensions are far below exact f32 integer limits"
+)]
 pub fn build_bmc_tree(
     model: &DashboardModel,
-    screen: BmcScreen,
     size: (u32, u32),
     palette: &Palette,
-    selected_cover: Option<BitmapId>,
+    covers: &[(usize, BitmapId)],
     settings_cog: Option<BitmapId>,
 ) -> TreeNode {
-    let children = match screen {
-        BmcScreen::Categories => category_nodes(model, size, palette),
-        BmcScreen::Carousel => carousel_nodes(model, size, palette, selected_cover, settings_cog),
-    };
+    let mut children = tab_nodes(model, size, palette);
+    children.extend(card_nodes(model, size, palette, covers));
+    children.push(position_indicator(model, size, palette));
+    children.push(settings_button(
+        settings_cog,
+        (size.0 as f32 - 68.0, size.1 as f32 - 68.0, 56.0, 56.0),
+    ));
     TreeNode::Column(
         PropsData {
             background: color(palette.color(PaletteRole::Background)),
@@ -117,182 +117,246 @@ pub fn build_bmc_tree(
 
 #[expect(
     clippy::cast_precision_loss,
-    reason = "surface dimensions are small integers represented by the renderer as f32"
+    reason = "surface dimensions and category counts are display-sized values"
 )]
-fn category_nodes(model: &DashboardModel, size: (u32, u32), palette: &Palette) -> Vec<TreeNode> {
-    let width = size.0 as f32;
-    let height = size.1 as f32;
-    let button_w = (width * 0.38).clamp(360.0, 520.0);
-    let button_h = (height * 0.38).clamp(150.0, 196.0);
-    let button_x = (width - button_w) / 2.0 - 36.0;
-    let button_y = (height - button_h) / 2.0;
-    let arrow_size = 72.0;
-    let arrow_x = button_x + button_w + 28.0;
-    let label = model
-        .active_category()
-        .map_or("---", |category| category.label());
-
-    vec![
-        text_button(
-            OPEN_CATEGORY,
-            (button_x, button_y, button_w, button_h),
-            label,
-            color(palette.color(PaletteRole::Accent)),
-            color(palette.color(PaletteRole::TextDark)),
-            42,
-        ),
-        arrow_button(
-            CATEGORY_PREVIOUS,
-            (arrow_x, button_y, arrow_size, arrow_size),
-            Arrow::Up,
-            palette,
-        ),
-        arrow_button(
-            CATEGORY_NEXT,
-            (
-                arrow_x,
-                button_y + button_h - arrow_size,
-                arrow_size,
-                arrow_size,
-            ),
-            Arrow::Down,
-            palette,
-        ),
-    ]
+fn tab_nodes(model: &DashboardModel, size: (u32, u32), palette: &Palette) -> Vec<TreeNode> {
+    let categories = model.catalog().categories();
+    if categories.is_empty() {
+        return Vec::new();
+    }
+    let gap = 8.0;
+    let left = 56.0;
+    let available = size.0 as f32 - 112.0;
+    let width =
+        (available - gap * categories.len().saturating_sub(1) as f32) / categories.len() as f32;
+    categories
+        .iter()
+        .enumerate()
+        .map(|(index, category)| {
+            panel_with_text(
+                &format!("{CATEGORY_KEY_PREFIX}{index}"),
+                (left + index as f32 * (width + gap), 76.0, width, 52.0),
+                category.label(),
+                if index == model.active_category_index() {
+                    PaletteRole::Active
+                } else {
+                    PaletteRole::Background
+                },
+                palette,
+                18,
+            )
+        })
+        .collect()
 }
 
 #[expect(
     clippy::cast_precision_loss,
-    reason = "surface dimensions are small integers represented by the renderer as f32"
+    reason = "surface dimensions and at most three card positions are display-sized values"
 )]
-fn carousel_nodes(
+fn card_nodes(
     model: &DashboardModel,
     size: (u32, u32),
     palette: &Palette,
-    selected_cover: Option<BitmapId>,
-    settings_cog: Option<BitmapId>,
+    covers: &[(usize, BitmapId)],
 ) -> Vec<TreeNode> {
-    let width = size.0 as f32;
-    let height = size.1 as f32;
-    let card_w = (width * 0.28).clamp(320.0, 380.0);
-    let card_h = (height * 0.73).clamp(320.0, 350.0);
-    let card_x = (width - card_w) / 2.0;
-    let card_y = 38.0;
-    let arrow_size = 80.0;
-    let (title, tile_color) = model
-        .selected_entry()
-        .map_or(("NO ENTRY", [48, 48, 48]), |(_, entry)| {
-            (entry.title(), entry.color().components())
-        });
-    let count = model.active_category().map_or(0, Category::len);
-
-    vec![
-        arrow_button(
-            CLOSE_CAROUSEL,
-            (24.0, 18.0, 56.0, 56.0),
-            Arrow::Close,
+    let visible = visible_catalog_indices(model);
+    let card_width = 216.0;
+    let card_height = 264.0;
+    let gap = 36.0;
+    let row_width =
+        visible.len() as f32 * card_width + visible.len().saturating_sub(1) as f32 * gap;
+    let mut nodes = Vec::with_capacity(visible.len().saturating_add(2));
+    let selected = model.selected_entry().map(|(index, _)| index);
+    for (position, catalog_index) in visible.into_iter().enumerate() {
+        let Some(entry) = model.catalog().entry(catalog_index) else {
+            continue;
+        };
+        let x = (size.0 as f32 - row_width) / 2.0 + position as f32 * (card_width + gap);
+        let cover = covers
+            .iter()
+            .find_map(|(index, bitmap)| (*index == catalog_index).then_some(*bitmap));
+        nodes.push(game_card(
+            catalog_index,
+            entry,
+            selected == Some(catalog_index),
+            cover,
+            (x, 154.0, card_width, card_height),
             palette,
-        ),
-        arrow_button(
+        ));
+    }
+    if model
+        .active_category()
+        .is_some_and(|category| category.len() > 1)
+    {
+        nodes.push(outline_arrow(
             ENTRY_PREVIOUS,
-            (
-                card_x - arrow_size - 44.0,
-                card_y + (card_h - arrow_size) / 2.0,
-                arrow_size,
-                arrow_size,
-            ),
+            (156.0, 232.0, 80.0, 100.0),
             Arrow::Left,
             palette,
-        ),
-        carousel_card(
-            OPEN_ENTRY,
-            (card_x, card_y, card_w, card_h),
-            title,
-            tile_color,
-            selected_cover,
-            palette,
-        ),
-        arrow_button(
+        ));
+        nodes.push(outline_arrow(
             ENTRY_NEXT,
-            (
-                card_x + card_w + 44.0,
-                card_y + (card_h - arrow_size) / 2.0,
-                arrow_size,
-                arrow_size,
-            ),
+            (size.0 as f32 - 236.0, 232.0, 80.0, 100.0),
             Arrow::Right,
             palette,
-        ),
-        position_indicator(
-            model.selected_position(),
-            count,
-            (width / 2.0, height - 42.0),
-            palette,
-        ),
-        settings_button(settings_cog, (width - 72.0, height - 64.0, 48.0, 48.0)),
-    ]
+        ));
+    }
+    nodes
 }
 
-fn carousel_card(
-    key: &str,
-    bounds: (f32, f32, f32, f32),
-    title: &str,
-    tile_color: [u8; 3],
+fn game_card(
+    catalog_index: usize,
+    entry: &CatalogEntry,
+    selected: bool,
     cover: Option<BitmapId>,
+    bounds: (f32, f32, f32, f32),
     palette: &Palette,
 ) -> TreeNode {
     let (x, y, width, height) = bounds;
-    let art_size = 248.0;
-    let art_x = (width - art_size) / 2.0;
-    let art_y = 12.0;
-    let title_y = art_y + art_size + 12.0;
-    let title_height = (height - title_y - 10.0).max(42.0);
-    let art = cover.map_or_else(
-        || DrawCommand::Rect {
-            x: art_x,
-            y: art_y,
-            w: art_size,
-            h: art_size,
-            fill: Fill::Solid(rgb_color(tile_color)),
-        },
-        |bitmap_id| DrawCommand::Bitmap {
-            x: art_x,
-            y: art_y,
+    let art_size = width - 16.0;
+    let mut draws = panel_draws(
+        width,
+        height,
+        color(palette.color(if selected {
+            PaletteRole::Active
+        } else {
+            PaletteRole::Background
+        })),
+        color(palette.color(PaletteRole::Accent)),
+    );
+    if let Some(bitmap_id) = cover {
+        draws.push(DrawCommand::Bitmap {
+            x: 8.0,
+            y: 8.0,
             w: art_size,
             h: art_size,
             bitmap_id: Some(bitmap_id),
+        });
+    } else {
+        draws.extend(fallback_art(entry, art_size, palette));
+    }
+    draws.push(DrawCommand::AutofitText {
+        x: 8.0,
+        y: width,
+        box_width: width - 16.0,
+        box_height: height - width - 8.0,
+        mode: AutoFit::Shrink,
+        min_size: 18,
+        max_size: 18,
+        text: card_title(entry.title()),
+        style: centered_text(18, color(palette.color(PaletteRole::Text))),
+    });
+    TreeNode::Canvas {
+        props: absolute_props(x, y, width, height),
+        touch_key: Some(format!("{ENTRY_KEY_PREFIX}{catalog_index}")),
+        draws,
+    }
+}
+
+fn fallback_art(entry: &CatalogEntry, size: f32, palette: &Palette) -> Vec<DrawCommand> {
+    let entry_color = rgb_color(entry.color().components());
+    vec![
+        DrawCommand::Rect {
+            x: 8.0,
+            y: 8.0,
+            w: size,
+            h: size,
+            fill: Fill::Solid(color(palette.color(PaletteRole::Background))),
         },
+        DrawCommand::Path {
+            points: rectangle_points(10.0, 10.0, size - 4.0, size - 4.0),
+            paint: PathPaint::Stroke {
+                color: entry_color,
+                width: 3.0,
+            },
+            closed: true,
+            smooth: false,
+        },
+        DrawCommand::AutofitText {
+            x: 22.0,
+            y: 22.0,
+            box_width: size - 28.0,
+            box_height: size - 28.0,
+            mode: AutoFit::Shrink,
+            min_size: 18,
+            max_size: 36,
+            text: fallback_mark(entry).to_owned(),
+            style: centered_text(30, entry_color),
+        },
+    ]
+}
+
+fn fallback_mark(entry: &CatalogEntry) -> &str {
+    match entry.identifier() {
+        "ten-seconds" => "10.00",
+        "lua-repl" => "LUA>",
+        "lisp-repl" => "(LISP)",
+        "python-repl" => ">>>",
+        "scheme-repl" => "<SCHEME>",
+        "chiptunes" => "||||||",
+        "terminal" => ">_",
+        "reboot" => "POWER",
+        _ => entry.title(),
+    }
+}
+
+fn panel_with_text(
+    key: &str,
+    bounds: (f32, f32, f32, f32),
+    label: &str,
+    fill_role: PaletteRole,
+    palette: &Palette,
+    font_size: u32,
+) -> TreeNode {
+    let (x, y, width, height) = bounds;
+    let mut draws = panel_draws(
+        width,
+        height,
+        color(palette.color(fill_role)),
+        color(palette.color(PaletteRole::Accent)),
     );
+    draws.push(DrawCommand::AutofitText {
+        x: 8.0,
+        y: 8.0,
+        box_width: width - 16.0,
+        box_height: height - 16.0,
+        mode: AutoFit::Shrink,
+        min_size: 14,
+        max_size: u16::try_from(font_size).unwrap_or(u16::MAX),
+        text: label.to_owned(),
+        style: centered_text(font_size, color(palette.color(PaletteRole::Text))),
+    });
     TreeNode::Canvas {
         props: absolute_props(x, y, width, height),
         touch_key: Some(key.to_owned()),
-        draws: vec![
-            DrawCommand::Rect {
-                x: 0.0,
-                y: 0.0,
-                w: width,
-                h: height,
-                fill: Fill::Solid(color(palette.color(PaletteRole::Selected))),
-            },
-            art,
-            DrawCommand::AutofitText {
-                x: 14.0,
-                y: title_y,
-                box_width: width - 28.0,
-                box_height: title_height,
-                mode: AutoFit::Shrink,
-                min_size: 16,
-                max_size: 25,
-                text: title.to_owned(),
-                style: centered_text(25, color(palette.color(PaletteRole::TextDark))),
-            },
-        ],
+        draws,
     }
+}
+
+fn panel_draws(width: f32, height: f32, fill: Color, border: Color) -> Vec<DrawCommand> {
+    vec![
+        DrawCommand::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: width,
+            h: height,
+            fill: Fill::Solid(fill),
+        },
+        DrawCommand::Path {
+            points: rectangle_points(1.5, 1.5, width - 3.0, height - 3.0),
+            paint: PathPaint::Stroke {
+                color: border,
+                width: 3.0,
+            },
+            closed: true,
+            smooth: false,
+        },
+    ]
 }
 
 fn settings_button(bitmap_id: Option<BitmapId>, bounds: (f32, f32, f32, f32)) -> TreeNode {
     let (x, y, width, height) = bounds;
-    let icon_size = 30.0;
+    let icon_size = 42.0;
     TreeNode::Canvas {
         props: absolute_props(x, y, width, height),
         touch_key: Some(OPEN_SYSTEM_SETTINGS.to_owned()),
@@ -306,155 +370,107 @@ fn settings_button(bitmap_id: Option<BitmapId>, bounds: (f32, f32, f32, f32)) ->
     }
 }
 
-fn text_button(
-    key: &str,
-    bounds: (f32, f32, f32, f32),
-    label: &str,
-    fill: Color,
-    text_color: Color,
-    font_size: u32,
-) -> TreeNode {
-    let (x, y, width, height) = bounds;
-    TreeNode::Canvas {
-        props: absolute_props(x, y, width, height),
-        touch_key: Some(key.to_owned()),
-        draws: vec![
-            DrawCommand::Rect {
-                x: 0.0,
-                y: 0.0,
-                w: width,
-                h: height,
-                fill: Fill::Solid(fill),
-            },
-            DrawCommand::AutofitText {
-                x: 24.0,
-                y: 18.0,
-                box_width: width - 48.0,
-                box_height: height - 36.0,
-                mode: AutoFit::Shrink,
-                min_size: 18,
-                max_size: u16::try_from(font_size).unwrap_or(u16::MAX),
-                text: label.to_owned(),
-                style: centered_text(font_size, text_color),
-            },
-        ],
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Arrow {
-    Up,
-    Down,
     Left,
     Right,
-    Close,
 }
 
-fn arrow_button(
+fn outline_arrow(
     key: &str,
     bounds: (f32, f32, f32, f32),
     arrow: Arrow,
     palette: &Palette,
 ) -> TreeNode {
     let (x, y, width, height) = bounds;
-    let inset = width.min(height) * 0.2;
-    let points = match arrow {
-        Arrow::Up => vec![
-            (width / 2.0, inset),
-            (width - inset, height - inset),
-            (inset, height - inset),
-        ],
-        Arrow::Down => vec![
-            (inset, inset),
-            (width - inset, inset),
-            (width / 2.0, height - inset),
-        ],
-        Arrow::Left => vec![
-            (inset, height / 2.0),
-            (width - inset, inset),
-            (width - inset, height - inset),
-        ],
-        Arrow::Right => vec![
-            (inset, inset),
-            (width - inset, height / 2.0),
-            (inset, height - inset),
-        ],
-        Arrow::Close => return close_button(key, bounds, palette),
-    };
+    let left = [
+        (56.0, 18.0),
+        (24.0, 50.0),
+        (56.0, 82.0),
+        (56.0, 66.0),
+        (72.0, 66.0),
+        (72.0, 34.0),
+        (56.0, 34.0),
+    ];
+    let points = left
+        .into_iter()
+        .map(|(px, py)| match arrow {
+            Arrow::Left => (px, py),
+            Arrow::Right => (width - px, py),
+        })
+        .collect();
     TreeNode::Canvas {
         props: absolute_props(x, y, width, height),
         touch_key: Some(key.to_owned()),
         draws: vec![DrawCommand::Path {
             points,
-            paint: PathPaint::Fill(Fill::Solid(color(palette.color(PaletteRole::Accent)))),
+            paint: PathPaint::Stroke {
+                color: color(palette.color(PaletteRole::Footer)),
+                width: 4.0,
+            },
             closed: true,
             smooth: false,
         }],
     }
 }
 
-fn close_button(key: &str, bounds: (f32, f32, f32, f32), palette: &Palette) -> TreeNode {
-    let (x, y, width, height) = bounds;
-    let inset = 16.0;
-    TreeNode::Canvas {
-        props: absolute_props(x, y, width, height),
-        touch_key: Some(key.to_owned()),
-        draws: vec![
-            DrawCommand::Path {
-                points: vec![(inset, inset), (width - inset, height - inset)],
-                paint: PathPaint::Stroke {
-                    color: color(palette.color(PaletteRole::White)),
-                    width: 4.0,
-                },
-                closed: false,
-                smooth: false,
-            },
-            DrawCommand::Path {
-                points: vec![(width - inset, inset), (inset, height - inset)],
-                paint: PathPaint::Stroke {
-                    color: color(palette.color(PaletteRole::White)),
-                    width: 4.0,
-                },
-                closed: false,
-                smooth: false,
-            },
-        ],
-    }
-}
-
 #[expect(
     clippy::cast_precision_loss,
-    reason = "the indicator caps indices and counts at 24"
+    reason = "the position indicator caps indices and counts at 24"
 )]
-fn position_indicator(
-    selected: usize,
-    count: usize,
-    center: (f32, f32),
-    palette: &Palette,
-) -> TreeNode {
+fn position_indicator(model: &DashboardModel, size: (u32, u32), palette: &Palette) -> TreeNode {
+    let count = model.active_category().map_or(0, crate::Category::len);
     let visible = count.min(24);
-    let cell_w = 12.0;
-    let gap = 5.0;
-    let total_w = visible as f32 * cell_w + visible.saturating_sub(1) as f32 * gap;
+    let cell_width = 16.0;
+    let gap = 8.0;
+    let total_width = visible as f32 * cell_width + visible.saturating_sub(1) as f32 * gap;
     let mut draws = Vec::with_capacity(visible);
     for index in 0..visible {
-        draws.push(DrawCommand::Rect {
-            x: index as f32 * (cell_w + gap),
-            y: 0.0,
-            w: cell_w,
-            h: 5.0,
-            fill: Fill::Solid(color(palette.color(if index == selected {
-                PaletteRole::Accent
-            } else {
-                PaletteRole::Footer
-            }))),
+        draws.push(DrawCommand::Path {
+            points: rectangle_points(index as f32 * (cell_width + gap), 0.0, cell_width, 8.0),
+            paint: PathPaint::Stroke {
+                color: color(palette.color(if index == model.selected_position() {
+                    PaletteRole::Footer
+                } else {
+                    PaletteRole::ControlBorder
+                })),
+                width: 2.0,
+            },
+            closed: true,
+            smooth: false,
         });
     }
     TreeNode::Canvas {
-        props: absolute_props(center.0 - total_w / 2.0, center.1, total_w, 5.0),
+        props: absolute_props(
+            (size.0 as f32 - total_width) / 2.0,
+            size.1 as f32 - 42.0,
+            total_width,
+            8.0,
+        ),
         touch_key: None,
         draws,
     }
+}
+
+fn card_title(title: &str) -> String {
+    const LIMIT: usize = 18;
+    if title.chars().count() <= LIMIT {
+        return title.to_owned();
+    }
+    title.chars().take(LIMIT - 3).chain("...".chars()).collect()
+}
+
+fn indexed_key(key: &str, prefix: &str) -> Option<usize> {
+    key.strip_prefix(prefix)?.parse().ok()
+}
+
+fn rectangle_points(x: f32, y: f32, width: f32, height: f32) -> Vec<(f32, f32)> {
+    vec![
+        (x, y),
+        (x + width, y),
+        (x + width, y + height),
+        (x, y + height),
+    ]
 }
 
 const fn color(rgb: Rgb) -> Color {
@@ -496,15 +512,26 @@ mod tests {
     use crate::{DashboardCatalog, Keymap, VolumeState};
 
     fn model() -> Option<DashboardModel> {
-        let entries = [
-            CatalogEntry::new(
-                "mario",
-                "MARIO BROS.",
-                CatalogSystem::Rom(System::Nes),
-                "/mnt/data/roms/nes/mario.nes",
-                "#ff5f00",
-            )
-            .ok()?,
+        let mut entries = Vec::new();
+        for (identifier, title) in [
+            ("one", "ONE"),
+            ("two", "TWO"),
+            ("three", "THREE"),
+            ("four", "FOUR"),
+        ] {
+            let rom = format!("/mnt/data/roms/nes/{identifier}.nes");
+            entries.push(
+                CatalogEntry::new(
+                    identifier,
+                    title,
+                    CatalogSystem::Rom(System::Nes),
+                    &rom,
+                    "#ff5f00",
+                )
+                .ok()?,
+            );
+        }
+        entries.push(
             CatalogEntry::new(
                 "tetris",
                 "TETRIS",
@@ -513,7 +540,7 @@ mod tests {
                 "#eeeeee",
             )
             .ok()?,
-        ];
+        );
         let catalog = DashboardCatalog::from_entries(entries).ok()?;
         Some(DashboardModel::new(
             catalog,
@@ -523,80 +550,60 @@ mod tests {
     }
 
     #[test]
-    fn category_touch_keys_map_only_on_category_screen() {
+    fn touch_keys_select_tabs_launch_cards_and_open_settings() {
         assert_eq!(
-            bmc_action_for_touch(BmcScreen::Categories, CATEGORY_NEXT),
-            Some(BmcUiAction::Model(Action::CategoryNext))
+            bmc_action_for_touch("category:1"),
+            Some(BmcUiAction::Model(Action::CategorySelect(1)))
         );
         assert_eq!(
-            bmc_action_for_touch(BmcScreen::Carousel, CATEGORY_NEXT),
-            None
-        );
-    }
-
-    #[test]
-    fn carousel_touch_keys_map_only_on_carousel_screen() {
-        assert_eq!(
-            bmc_action_for_touch(BmcScreen::Carousel, OPEN_ENTRY),
-            Some(BmcUiAction::Model(Action::Confirm))
+            bmc_action_for_touch("entry:7"),
+            Some(BmcUiAction::Launch(7))
         );
         assert_eq!(
-            bmc_action_for_touch(BmcScreen::Categories, OPEN_ENTRY),
-            None
-        );
-        assert_eq!(
-            bmc_action_for_touch(BmcScreen::Carousel, OPEN_SYSTEM_SETTINGS),
+            bmc_action_for_touch(OPEN_SYSTEM_SETTINGS),
             Some(BmcUiAction::OpenSystemSettings)
         );
+        assert_eq!(bmc_action_for_touch("category:nope"), None);
     }
 
     #[test]
-    fn semantic_navigation_is_screen_specific() {
+    fn navigation_stays_on_the_single_dashboard_screen() {
         assert_eq!(
-            bmc_action_for_navigation(BmcScreen::Categories, BmcNavigation::Down),
+            bmc_action_for_navigation(BmcNavigation::Down),
             Some(BmcUiAction::Model(Action::CategoryNext))
         );
         assert_eq!(
-            bmc_action_for_navigation(BmcScreen::Carousel, BmcNavigation::Right),
+            bmc_action_for_navigation(BmcNavigation::Right),
             Some(BmcUiAction::Model(Action::Next))
         );
-        assert_eq!(
-            bmc_action_for_navigation(BmcScreen::Carousel, BmcNavigation::Back),
-            Some(BmcUiAction::CloseCarousel)
-        );
-        assert_eq!(
-            bmc_action_for_navigation(BmcScreen::Categories, BmcNavigation::Left),
-            None
-        );
+        assert_eq!(bmc_action_for_navigation(BmcNavigation::Back), None);
     }
 
     #[test]
-    fn each_screen_builds_from_the_existing_product_model() {
+    fn three_card_window_follows_the_selected_entry() {
+        let Some(mut model) = model() else {
+            return;
+        };
+        assert_eq!(visible_catalog_indices(&model), vec![0, 1, 2]);
+        let _ = model.apply(Action::Next);
+        let _ = model.apply(Action::Next);
+        assert_eq!(visible_catalog_indices(&model), vec![1, 2, 3]);
+        let _ = model.apply(Action::Next);
+        assert_eq!(visible_catalog_indices(&model), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn dashboard_tree_contains_tabs_cards_and_no_category_selector() {
         let Some(model) = model() else {
             return;
         };
-        let palette = Palette::default();
-        assert!(matches!(
-            build_bmc_tree(
-                &model,
-                BmcScreen::Categories,
-                (1280, 480),
-                &palette,
-                None,
-                None,
-            ),
-            TreeNode::Column(_, children) if children.len() == 3
-        ));
-        assert!(matches!(
-            build_bmc_tree(
-                &model,
-                BmcScreen::Carousel,
-                (1280, 480),
-                &palette,
-                None,
-                None,
-            ),
-            TreeNode::Column(_, children) if children.len() == 6
-        ));
+        let tree = build_bmc_tree(&model, (1280, 480), &Palette::default(), &[], None);
+        assert!(matches!(tree, TreeNode::Column(_, children) if children.len() >= 8));
+    }
+
+    #[test]
+    fn long_titles_keep_one_fixed_display_size() {
+        assert_eq!(card_title("SHORT"), "SHORT");
+        assert_eq!(card_title("A VERY LONG GAME TITLE"), "A VERY LONG GAM...");
     }
 }

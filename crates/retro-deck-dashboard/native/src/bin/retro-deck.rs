@@ -20,10 +20,11 @@ use bmc_widget::surface::{
 };
 use glow::HasContext as _;
 use retro_deck_dashboard::{
-    ApplicationRequest, BMC_APPLICATION_ID, BmcNavigation, BmcScreen, BmcUiAction, DashboardModel,
+    ApplicationRequest, BMC_APPLICATION_ID, BmcNavigation, BmcUiAction, DashboardModel,
     GamepadInput, Intent, Keymap, LaunchTarget, MenuCue, NATIVE_COVER_SIZE, VolumeState,
     bmc_action_for_navigation, bmc_action_for_touch, build_bmc_tree, dashboard_startup_from_policy,
     load_native_catalog, load_native_catalog_with_uploads, load_native_cover, load_native_palette,
+    visible_catalog_indices,
 };
 use retro_deck_policy::{
     PolicyClient, PolicyEvent, PolicyEventPoll, PolicyResponse, PolicySubmit, Value, WorkerCommand,
@@ -101,7 +102,6 @@ struct NativeRuntime {
     tree_ui: TreeUi,
     model: DashboardModel,
     palette: retro_deck_config::Palette,
-    screen: BmcScreen,
     size: (u32, u32),
     lifecycle: Option<LifecycleState>,
     pending_render: bool,
@@ -125,7 +125,6 @@ impl NativeRuntime {
             tree_ui: TreeUi::new(),
             model,
             palette,
-            screen: BmcScreen::Categories,
             size,
             lifecycle: None,
             pending_render: true,
@@ -334,20 +333,21 @@ impl NativeRuntime {
         let delta_ms = self.last_frame_at.replace(now).map_or(0, |previous| {
             u32::try_from(now.duration_since(previous).as_millis()).unwrap_or(u32::MAX)
         });
-        let selected_identifier = (self.screen == BmcScreen::Carousel)
-            .then(|| self.model.selected_entry())
-            .flatten()
-            .map(|(_, entry)| entry.identifier().to_owned());
-        let selected_cover = match selected_identifier.as_deref() {
-            Some(identifier) => graphics.select_cover(identifier)?,
-            None => None,
-        };
+        let cover_requests = visible_catalog_indices(&self.model)
+            .into_iter()
+            .filter_map(|index| {
+                self.model
+                    .catalog()
+                    .entry(index)
+                    .map(|entry| (index, entry.identifier().to_owned()))
+            })
+            .collect::<Vec<_>>();
+        let covers = graphics.select_covers(&cover_requests)?;
         let tree = build_bmc_tree(
             &self.model,
-            self.screen,
             self.size,
             &self.palette,
-            selected_cover,
+            &covers,
             graphics.settings_cog,
         );
         let result = graphics.render(
@@ -364,7 +364,7 @@ impl NativeRuntime {
 
     fn apply_tree_result(&mut self, result: TreeResult) {
         for key in result.clicks.into_keys() {
-            let Some(action) = bmc_action_for_touch(self.screen, &key) else {
+            let Some(action) = bmc_action_for_touch(&key) else {
                 continue;
             };
             self.apply_ui_action(action);
@@ -372,26 +372,20 @@ impl NativeRuntime {
     }
 
     fn apply_navigation(&mut self, navigation: BmcNavigation) {
-        if let Some(action) = bmc_action_for_navigation(self.screen, navigation) {
+        if let Some(action) = bmc_action_for_navigation(navigation) {
             self.apply_ui_action(action);
         }
     }
 
     fn apply_ui_action(&mut self, action: BmcUiAction) {
         match action {
-            BmcUiAction::OpenCarousel => {
-                self.screen = BmcScreen::Carousel;
-                self.pending_render = true;
-                self.play_menu_cue(MenuCue::Confirm);
-            }
-            BmcUiAction::CloseCarousel => {
-                self.screen = BmcScreen::Categories;
-                self.pending_render = true;
-                self.play_menu_cue(MenuCue::Back);
-            }
             BmcUiAction::OpenSystemSettings => {
                 self.open_system_settings();
                 self.play_menu_cue(MenuCue::Confirm);
+            }
+            BmcUiAction::Launch(index) => {
+                self.play_menu_cue(MenuCue::Confirm);
+                self.request_intent(Intent::Launch(index));
             }
             BmcUiAction::Model(action) => {
                 let transition = self.model.apply(action);
@@ -527,8 +521,8 @@ struct Graphics {
     scratch: Option<SharedRenderScratch>,
     renderer: Option<FemtoVgRenderer>,
     settings_cog: Option<BitmapId>,
-    cover_identifier: Option<Box<str>>,
-    cover_bitmap: Option<BitmapId>,
+    cover_signature: Vec<(usize, Box<str>)>,
+    cover_bitmaps: Vec<(usize, BitmapId)>,
     buffers: DoubleBufferState,
     release: SlotReleaseState,
     gpu_lock: GpuRenderLock,
@@ -565,8 +559,8 @@ impl Graphics {
             scratch: Some(scratch),
             renderer: Some(renderer),
             settings_cog,
-            cover_identifier: None,
-            cover_bitmap: None,
+            cover_signature: Vec::new(),
+            cover_bitmaps: Vec::new(),
             buffers: DoubleBufferState::new(size.0, size.1, Depth::Disabled),
             release: SlotReleaseState::new(),
             gpu_lock,
@@ -577,33 +571,49 @@ impl Graphics {
         self.release.is_available(self.buffers.current_slot())
     }
 
-    fn select_cover(&mut self, identifier: &str) -> Result<Option<BitmapId>> {
-        if self.cover_identifier.as_deref() == Some(identifier) {
-            return Ok(self.cover_bitmap);
+    fn select_covers(&mut self, requests: &[(usize, String)]) -> Result<Vec<(usize, BitmapId)>> {
+        let unchanged = self.cover_signature.len() == requests.len()
+            && self.cover_signature.iter().zip(requests).all(
+                |((stored_index, stored_identifier), (index, identifier))| {
+                    stored_index == index && stored_identifier.as_ref() == identifier
+                },
+            );
+        if unchanged {
+            return Ok(self.cover_bitmaps.clone());
         }
-        let cover = match load_native_cover(Path::new(COVER_DIRECTORY), identifier) {
-            Ok(cover) => cover,
-            Err(error) => {
-                tracing::warn!(?error, identifier, "cannot load cached dashboard cover");
-                None
+        let mut decoded = Vec::with_capacity(requests.len());
+        for (index, identifier) in requests {
+            match load_native_cover(Path::new(COVER_DIRECTORY), identifier) {
+                Ok(Some(cover)) => decoded.push((*index, cover)),
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(?error, identifier, "cannot load cached dashboard cover");
+                }
             }
-        };
+        }
         let _lock = self.gpu_lock.lock("retro_deck_cover")?;
         let Some(renderer) = self.renderer.as_mut() else {
             anyhow::bail!("renderer was destroyed before cover selection");
         };
         renderer.evict_prefix(COVER_BITMAP_TAG);
-        let bitmap = cover.and_then(|cover| {
-            renderer.register_bitmap_rgba(
-                COVER_BITMAP_TAG,
+        let mut bitmaps = Vec::with_capacity(decoded.len());
+        for (index, cover) in decoded {
+            let tag = format!("{COVER_BITMAP_TAG}:{index}");
+            if let Some(bitmap) = renderer.register_bitmap_rgba(
+                &tag,
                 cover.rgba(),
                 NATIVE_COVER_SIZE,
                 NATIVE_COVER_SIZE,
-            )
-        });
-        self.cover_identifier = Some(identifier.into());
-        self.cover_bitmap = bitmap;
-        Ok(bitmap)
+            ) {
+                bitmaps.push((index, bitmap));
+            }
+        }
+        self.cover_signature = requests
+            .iter()
+            .map(|(index, identifier)| (*index, identifier.clone().into_boxed_str()))
+            .collect();
+        self.cover_bitmaps.clone_from(&bitmaps);
+        Ok(bitmaps)
     }
 
     fn render(

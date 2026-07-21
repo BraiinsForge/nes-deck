@@ -24,8 +24,8 @@ pub use application::{
 };
 #[cfg(feature = "bmc-native")]
 pub use bmc_ui::{
-    BmcNavigation, BmcScreen, BmcUiAction, bmc_action_for_navigation, bmc_action_for_touch,
-    build_bmc_tree,
+    BmcNavigation, BmcUiAction, bmc_action_for_navigation, bmc_action_for_touch, build_bmc_tree,
+    visible_catalog_indices,
 };
 pub use catalog::{Category, DashboardCatalog, DashboardCatalogError, MAXIMUM_DASHBOARD_ENTRIES};
 #[cfg(feature = "bmc-native")]
