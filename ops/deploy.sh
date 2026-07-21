@@ -167,7 +167,7 @@ cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/credits.tsv \
   deploy/menu/ASSETS.md \
   deploy/menu/compile-catalog.lisp deploy/menu/deck-menu-launcher \
   deploy/menu/fetch-covers "$payload/nes-deck/menu/"
-cp assets/settings-cog/gear-knekko-09.png \
+cp crates/retro-deck-dashboard/native/assets/gear-knekko-09.png \
   "$payload/nes-deck/menu/settings-icon.png"
 cp deploy/widget/manifest.json \
   "$payload/bmc-widgets/retro-deck/manifest.json"

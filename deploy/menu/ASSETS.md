@@ -5,8 +5,8 @@
 The dashboard uses `Medium/09.png` from
 [Cogwheels and Gears](https://opengameart.org/content/cogwheels-and-gears) by
 knekko (Christian Scholz). The original 23 by 23 RGBA PNG is retained as
-`assets/settings-cog/gear-knekko-09.png` and is released under CC0 1.0. Its
-SHA-256 is
+`crates/retro-deck-dashboard/native/assets/gear-knekko-09.png` and is released
+under CC0 1.0. Its SHA-256 is
 `92b44756d62e1afaa34c7b1d94cee6f014d5484f94377fe28f4d4392cb696aed`.
 
 The source archive SHA-256 is

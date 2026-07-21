@@ -725,7 +725,7 @@ int main() {
   }
 
   char settings_icon_path[PATH_MAX] = {};
-  expect(realpath("assets/settings-cog/gear-knekko-09.png",
+  expect(realpath("crates/retro-deck-dashboard/native/assets/gear-knekko-09.png",
                   settings_icon_path) != NULL,
          "resolve the approved settings icon");
   Canvas source_icon_canvas(

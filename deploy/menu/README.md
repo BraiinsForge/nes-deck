@@ -14,7 +14,7 @@ Copy these files to the Deck without changing their basenames:
 | `games.tsv` | `/mnt/data/nes-deck/menu/games.tsv` |
 | `credits.tsv` | `/mnt/data/nes-deck/menu/credits.tsv` |
 | `palette.tsv` | `/mnt/data/nes-deck/menu/palette.tsv` |
-| `assets/settings-cog/gear-knekko-09.png` | `/mnt/data/nes-deck/menu/settings-icon.png` |
+| `crates/retro-deck-dashboard/native/assets/gear-knekko-09.png` | `/mnt/data/nes-deck/menu/settings-icon.png` |
 | `compile-catalog.lisp` | `/mnt/data/nes-deck/menu/compile-catalog.lisp` |
 | `deck-menu-launcher` | `/mnt/data/nes-deck/menu/deck-menu-launcher` |
 | `deck-keyboard-quirks` | `/usr/sbin/deck-keyboard-quirks` |

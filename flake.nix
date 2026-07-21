@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=ec8b19dc1fd9e1ffa5d036c4107cfb778ea48779";
+    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=615dc57a249a6f23eba47a9ec9491d87284fffcb";
     fceumm-src = {
       url = "github:libretro/libretro-fceumm/3a84a6fd0ba20dd4877c06b1d58741172148395f";
       flake = false;
@@ -42,6 +42,7 @@
         features = [ "bmc-native" ];
         noDefaultFeatures = true;
         manifest = ./deploy/widget/manifest.json;
+        assets = ./crates/retro-deck-dashboard/native/assets;
         application = {
           name = "retro-deck";
           packageName = "retro-deck-dashboard";

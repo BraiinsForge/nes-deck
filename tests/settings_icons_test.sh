@@ -3,7 +3,7 @@
 set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-asset_directory=$repo_root/assets/settings-cog
+asset_directory=$repo_root/crates/retro-deck-dashboard/native/assets
 icon=$asset_directory/gear-knekko-09.png
 
 for command in find identify sha256sum; do
