@@ -323,9 +323,7 @@ mod tests {
             assert!(unsafe { environment.dispatch(command, ptr::null_mut()) });
         }
         // SAFETY: These unsupported commands do not dereference data.
-        assert!(!unsafe {
-            environment.dispatch(abi::ENVIRONMENT_GET_LOG_INTERFACE, ptr::null_mut())
-        });
+        assert!(!unsafe { environment.dispatch(27, ptr::null_mut()) });
         assert!(!unsafe { environment.dispatch(c_uint::MAX, ptr::null_mut()) });
     }
 

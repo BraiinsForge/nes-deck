@@ -1,8 +1,11 @@
 //! Single-session ownership for context-free libretro callbacks.
 
-#![allow(
-    dead_code,
-    reason = "callback ownership is consumed by the executable in the next host migration slice"
+#![cfg_attr(
+    not(feature = "libretro-linked"),
+    allow(
+        dead_code,
+        reason = "the default host build has no statically linked core; production builds enable libretro-linked"
+    )
 )]
 
 use std::cell::Cell;
@@ -27,8 +30,7 @@ use super::audio::{AudioBatchError, stereo_frames};
 use super::environment::{Environment, EnvironmentError};
 use super::video::{VideoCallbackError, VideoFrameLayout};
 use super::{
-    JoypadButton, JoypadState, LibretroCore, PixelFormat, abi, joypad_from_keyboard,
-    zx_keyboard_key_pressed,
+    JoypadButton, JoypadState, LibretroCore, abi, joypad_from_keyboard, zx_keyboard_key_pressed,
 };
 
 static SESSION_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -104,10 +106,6 @@ impl CallbackBinding {
             return Err(CallbackBindingError::AlreadyActive);
         }
         Ok(binding)
-    }
-
-    pub(super) const fn pixel_format(&self) -> PixelFormat {
-        self.state.environment.pixel_format()
     }
 
     #[allow(
@@ -511,7 +509,10 @@ mod tests {
                 ptr::from_mut(&mut format).cast(),
             )
         });
-        assert_eq!(binding.pixel_format(), PixelFormat::Rgb565);
+        assert_eq!(
+            binding.state.environment.pixel_format(),
+            super::super::PixelFormat::Rgb565
+        );
     }
 
     #[test]

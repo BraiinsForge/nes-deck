@@ -1,8 +1,11 @@
 //! Minimal raw declarations for libretro API version 1.
 
-#![allow(
-    dead_code,
-    reason = "ABI declarations are consumed incrementally by the private Rust host port"
+#![cfg_attr(
+    not(feature = "libretro-linked"),
+    allow(
+        dead_code,
+        reason = "the default host build has no statically linked core; production builds enable libretro-linked"
+    )
 )]
 
 use std::ffi::{c_char, c_uint, c_void};
@@ -31,8 +34,6 @@ pub(super) const ENVIRONMENT_SET_INPUT_DESCRIPTORS: c_uint = 11;
 pub(super) const ENVIRONMENT_GET_VARIABLE: c_uint = 15;
 pub(super) const ENVIRONMENT_SET_VARIABLES: c_uint = 16;
 pub(super) const ENVIRONMENT_GET_VARIABLE_UPDATE: c_uint = 17;
-pub(super) const ENVIRONMENT_GET_RUMBLE_INTERFACE: c_uint = 23;
-pub(super) const ENVIRONMENT_GET_LOG_INTERFACE: c_uint = 27;
 pub(super) const ENVIRONMENT_GET_CONTENT_DIRECTORY: c_uint = 30;
 pub(super) const ENVIRONMENT_GET_SAVE_DIRECTORY: c_uint = 31;
 pub(super) const ENVIRONMENT_SET_SYSTEM_AV_INFO: c_uint = 32;
@@ -62,7 +63,6 @@ pub(super) type AudioSampleCallback = unsafe extern "C" fn(i16, i16);
 pub(super) type AudioSampleBatchCallback = unsafe extern "C" fn(*const i16, usize) -> usize;
 pub(super) type InputPollCallback = unsafe extern "C" fn();
 pub(super) type InputStateCallback = unsafe extern "C" fn(c_uint, c_uint, c_uint, c_uint) -> i16;
-pub(super) type LogPrintf = unsafe extern "C" fn(c_uint, *const c_char, ...);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -146,12 +146,6 @@ impl Default for GameInfo {
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub(super) struct LogCallback {
-    pub(super) log: Option<LogPrintf>,
-}
-
 unsafe extern "C" {
     pub(super) fn retro_set_environment(callback: EnvironmentCallback);
     pub(super) fn retro_set_video_refresh(callback: VideoRefreshCallback);
@@ -215,7 +209,6 @@ mod tests {
         assert_eq!(offset_of!(GameInfo, size), pointer * 2);
         assert_eq!(offset_of!(GameInfo, metadata), pointer * 3);
         assert_eq!(size_of::<GameInfo>(), pointer * 4);
-        assert_eq!(size_of::<LogCallback>(), pointer);
     }
 
     #[test]
@@ -238,6 +231,5 @@ mod tests {
         assert_eq!(size_of::<AudioSampleBatchCallback>(), pointer);
         assert_eq!(size_of::<InputPollCallback>(), pointer);
         assert_eq!(size_of::<InputStateCallback>(), pointer);
-        assert_eq!(size_of::<LogPrintf>(), pointer);
     }
 }

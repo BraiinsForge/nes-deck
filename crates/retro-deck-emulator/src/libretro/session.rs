@@ -1,8 +1,11 @@
 //! Ordered ownership of one statically linked libretro core session.
 
-#![allow(
-    dead_code,
-    reason = "the tested session boundary is wired into the executable in the next host slice"
+#![cfg_attr(
+    not(feature = "libretro-linked"),
+    allow(
+        dead_code,
+        reason = "the default host build has no statically linked core; production builds enable libretro-linked"
+    )
 )]
 
 use std::error::Error;
@@ -162,7 +165,7 @@ pub struct CoreSession {
     lifecycle: CoreLifecycle,
     callbacks: CallbackBinding,
     content: Content,
-    content_path: CString,
+    _content_path: CString,
     metadata: CoreMetadata,
     av_info: CoreAvInfo,
     persistence: Persistence,
@@ -230,7 +233,7 @@ impl CoreSession {
             lifecycle,
             callbacks,
             content,
-            content_path,
+            _content_path: content_path,
             metadata,
             av_info,
             persistence,

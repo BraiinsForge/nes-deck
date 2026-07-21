@@ -18,6 +18,7 @@ for command in cargo nix; do
 done
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p retro-deck-emulator --all-targets --all-features -- -D warnings
 cargo test --workspace
 
 dashboard_manifest=crates/retro-deck-dashboard/Cargo.toml
