@@ -52,7 +52,6 @@ WIFI_HELPER=/usr/sbin/deck-wifi-profile-add
 WIFI_STATUS=/var/run/deck-wifi/status
 KEYBOARD_QUIRKS=/usr/sbin/deck-keyboard-quirks
 COMPILER=$MENU_DIR/compile-catalog.lisp
-SETTINGS_ICON_INDEX=$MENU_DIR/knekko-settings-icons.tsv
 ECL=$BASE/ecl/bin/ecl.bin
 ECLDIR=$BASE/ecl/lib/ecl/
 LOG_FILE=$LOG_DIR/deck-menu.log
@@ -248,7 +247,7 @@ if [ -r "$GENERATED_MANIFEST" ] && [ -s "$GENERATED_MANIFEST" ] &&
 	[ -r "$GENERATED_PALETTE" ] && [ -s "$GENERATED_PALETTE" ] &&
 	[ ! -L "$GENERATED_PALETTE" ]; then
 	catalog_cache_current=true
-	for input in "$CATALOG" "$COMPILER" "$SETTINGS_ICON_INDEX"; do
+	for input in "$CATALOG" "$COMPILER"; do
 		if [ -e "$input" ] &&
 			{ [ "$input" -nt "$GENERATED_MANIFEST" ] ||
 			  [ "$input" -nt "$GENERATED_PALETTE" ]; }; then
