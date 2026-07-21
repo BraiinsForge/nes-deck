@@ -149,8 +149,8 @@ the BMC service lands.
 ### 3. Use BMC system and web services
 
 - Remove direct dashboard brightness, reboot and Wi-Fi mutation.
-- Agree on a widget-safe system-control surface with BMC instead of binding the
-  settings-overlay-only protocol opportunistically.
+- Reveal BMC's compositor-owned settings tray through the widget action
+  protocol. Retro Deck receives no direct settings or device authority.
 - Add ROM intake to BMC's authenticated Axum service, keeping only Retro Deck's
   ROM/catalog/storage domain code.
 - Keep network deployment unchanged until a separately reviewed BMC-backed

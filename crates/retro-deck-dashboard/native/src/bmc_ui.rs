@@ -1,5 +1,6 @@
 //! Retro Deck product UI expressed as a native `bmc-render` tree.
 
+use bmc_render::BitmapId;
 use bmc_render::tree::{
     AutoFit, Color, DrawCommand, Fill, FontFamily, FontWeight, PathPaint, PropsData, TextAlign,
     TextStyle, TreeNode, VerticalAlign,
@@ -20,6 +21,7 @@ const ENTRY_PREVIOUS: &str = "entry-previous";
 const ENTRY_NEXT: &str = "entry-next";
 const OPEN_ENTRY: &str = "open-entry";
 const CLOSE_CAROUSEL: &str = "close-carousel";
+const OPEN_SYSTEM_SETTINGS: &str = "open-system-settings";
 
 /// Which of the two approved dashboard views is visible.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -40,6 +42,8 @@ pub enum BmcUiAction {
     OpenCarousel,
     /// Return to the category selector.
     CloseCarousel,
+    /// Reveal the compositor-owned system settings tray.
+    OpenSystemSettings,
 }
 
 /// Translate a stable `bmc-render` hit-test key into product behavior.
@@ -55,16 +59,22 @@ pub fn bmc_action_for_touch(screen: BmcScreen, key: &str) -> Option<BmcUiAction>
         (BmcScreen::Carousel, ENTRY_NEXT) => Some(BmcUiAction::Model(Action::Next)),
         (BmcScreen::Carousel, OPEN_ENTRY) => Some(BmcUiAction::Model(Action::Confirm)),
         (BmcScreen::Carousel, CLOSE_CAROUSEL) => Some(BmcUiAction::CloseCarousel),
+        (BmcScreen::Carousel, OPEN_SYSTEM_SETTINGS) => Some(BmcUiAction::OpenSystemSettings),
         _ => None,
     }
 }
 
 /// Build the current Retro Deck screen with BMC-native layout and drawing.
 #[must_use]
-pub fn build_bmc_tree(model: &DashboardModel, screen: BmcScreen, size: (u32, u32)) -> TreeNode {
+pub fn build_bmc_tree(
+    model: &DashboardModel,
+    screen: BmcScreen,
+    size: (u32, u32),
+    settings_cog: Option<BitmapId>,
+) -> TreeNode {
     let children = match screen {
         BmcScreen::Categories => category_nodes(model, size),
-        BmcScreen::Carousel => carousel_nodes(model, size),
+        BmcScreen::Carousel => carousel_nodes(model, size, settings_cog),
     };
     TreeNode::Column(
         PropsData {
@@ -123,7 +133,11 @@ fn category_nodes(model: &DashboardModel, size: (u32, u32)) -> Vec<TreeNode> {
     clippy::cast_precision_loss,
     reason = "surface dimensions are small integers represented by the renderer as f32"
 )]
-fn carousel_nodes(model: &DashboardModel, size: (u32, u32)) -> Vec<TreeNode> {
+fn carousel_nodes(
+    model: &DashboardModel,
+    size: (u32, u32),
+    settings_cog: Option<BitmapId>,
+) -> Vec<TreeNode> {
     let width = size.0 as f32;
     let height = size.1 as f32;
     let card_w = (width * 0.36).clamp(380.0, 500.0);
@@ -171,7 +185,24 @@ fn carousel_nodes(model: &DashboardModel, size: (u32, u32)) -> Vec<TreeNode> {
             count,
             (width / 2.0, height - 42.0),
         ),
+        settings_button(settings_cog, (width - 72.0, height - 64.0, 48.0, 48.0)),
     ]
+}
+
+fn settings_button(bitmap_id: Option<BitmapId>, bounds: (f32, f32, f32, f32)) -> TreeNode {
+    let (x, y, width, height) = bounds;
+    let icon_size = 30.0;
+    TreeNode::Canvas {
+        props: absolute_props(x, y, width, height),
+        touch_key: Some(OPEN_SYSTEM_SETTINGS.to_owned()),
+        draws: vec![DrawCommand::Bitmap {
+            x: (width - icon_size) / 2.0,
+            y: (height - icon_size) / 2.0,
+            w: icon_size,
+            h: icon_size,
+            bitmap_id,
+        }],
+    }
 }
 
 fn text_button(
@@ -390,6 +421,10 @@ mod tests {
             bmc_action_for_touch(BmcScreen::Categories, OPEN_ENTRY),
             None
         );
+        assert_eq!(
+            bmc_action_for_touch(BmcScreen::Carousel, OPEN_SYSTEM_SETTINGS),
+            Some(BmcUiAction::OpenSystemSettings)
+        );
     }
 
     #[test]
@@ -398,12 +433,12 @@ mod tests {
             return;
         };
         assert!(matches!(
-            build_bmc_tree(&model, BmcScreen::Categories, (1280, 480)),
+            build_bmc_tree(&model, BmcScreen::Categories, (1280, 480), None),
             TreeNode::Column(_, children) if children.len() == 3
         ));
         assert!(matches!(
-            build_bmc_tree(&model, BmcScreen::Carousel, (1280, 480)),
-            TreeNode::Column(_, children) if children.len() == 5
+            build_bmc_tree(&model, BmcScreen::Carousel, (1280, 480), None),
+            TreeNode::Column(_, children) if children.len() == 6
         ));
     }
 }

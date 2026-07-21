@@ -10,7 +10,7 @@ use bmc_gpu_render_lock::GpuRenderLock;
 use bmc_render::gpu::FemtoVgRenderer;
 use bmc_render::interaction::TouchEvent;
 use bmc_render::renderer::{FrameClear, Renderer as _};
-use bmc_render::{TreeUi, tree::TreeResult};
+use bmc_render::{BitmapId, TreeUi, tree::TreeResult};
 use bmc_widget::ActionPayload;
 use bmc_widget::egl::{
     Depth, DoubleBufferState, EglContext, SharedRenderScratch, SlotReleaseState,
@@ -38,6 +38,8 @@ const LISP_WORKER: &str = "/mnt/data/nes-deck/lisp/run-worker.lisp";
 const LISP_SITE_DIRECTORY: &str = "/mnt/data/nes-deck/lisp/site.d";
 const APPLICATION_POLICY_HOOK: &str = "dashboard/applications";
 const POLICY_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const SETTINGS_COG_PNG: &[u8] =
+    include_bytes!("../../../../../assets/settings-cog/gear-knekko-09.png");
 
 fn main() -> ExitCode {
     bmc_log::init_console();
@@ -319,7 +321,7 @@ impl NativeRuntime {
         let delta_ms = self.last_frame_at.replace(now).map_or(0, |previous| {
             u32::try_from(now.duration_since(previous).as_millis()).unwrap_or(u32::MAX)
         });
-        let tree = build_bmc_tree(&self.model, self.screen, self.size);
+        let tree = build_bmc_tree(&self.model, self.screen, self.size, graphics.settings_cog);
         let result = graphics.render(
             &mut self.surface,
             &mut self.tree_ui,
@@ -347,6 +349,10 @@ impl NativeRuntime {
                     self.screen = BmcScreen::Categories;
                     self.pending_render = true;
                     self.play_menu_cue(MenuCue::Back);
+                }
+                BmcUiAction::OpenSystemSettings => {
+                    self.open_system_settings();
+                    self.play_menu_cue(MenuCue::Confirm);
                 }
                 BmcUiAction::Model(action) => {
                     let elapsed_ms =
@@ -381,10 +387,14 @@ impl NativeRuntime {
             }
             Intent::OpenTerminal => LaunchTarget::Terminal(TerminalMode::Shell),
             Intent::OpenWifi => {
-                tracing::warn!("native Wi-Fi settings require a BMC-owned settings action");
+                self.open_system_settings();
                 return;
             }
         };
+        if target == LaunchTarget::Reboot {
+            self.open_system_settings();
+            return;
+        }
         let request =
             match ApplicationRequest::from_target(target, self.model.volume(), self.model.keymap())
             {
@@ -419,6 +429,15 @@ impl NativeRuntime {
         };
         if let Err(error) = self.surface.request_action(&action) {
             tracing::warn!(?error, ?cue, "BMC menu sound request failed");
+        }
+    }
+
+    fn open_system_settings(&self) {
+        if let Err(error) = self
+            .surface
+            .request_action(&ActionPayload::OpenSystemSettings {})
+        {
+            tracing::warn!(?error, "BMC system settings request failed");
         }
     }
 
@@ -457,6 +476,7 @@ struct Graphics {
     egl: EglContext,
     scratch: Option<SharedRenderScratch>,
     renderer: Option<FemtoVgRenderer>,
+    settings_cog: Option<BitmapId>,
     buffers: DoubleBufferState,
     release: SlotReleaseState,
     gpu_lock: GpuRenderLock,
@@ -479,17 +499,20 @@ impl Graphics {
                 0,
             )
         };
-        let renderer = match renderer {
+        let mut renderer = match renderer {
             Ok(renderer) => renderer,
             Err(error) => {
                 scratch.destroy(&egl);
                 return Err(error).context("create BMC renderer");
             }
         };
+        let settings_cog =
+            renderer.register_bitmap_nearest("retro-deck:settings-cog", SETTINGS_COG_PNG);
         Ok(Self {
             egl,
             scratch: Some(scratch),
             renderer: Some(renderer),
+            settings_cog,
             buffers: DoubleBufferState::new(size.0, size.1, Depth::Disabled),
             release: SlotReleaseState::new(),
             gpu_lock,
