@@ -53,8 +53,17 @@ grep -Fq -- '-o BatchMode=yes -o ConnectTimeout=7 -o LogLevel=ERROR root@192.0.2
   "$arguments" || fail 'health check did not use bounded batch SSH'
 grep -Fq '20 ssh -o BatchMode=yes' "$timeout_arguments" ||
   fail 'health check did not enforce its overall SSH timeout'
-grep -Fq "pidof \"\$process\"" "$remote_script" ||
-  fail 'remote health check does not inspect required processes'
+grep -Fq 'require_process UPLOADER rom-uploader' "$remote_script" ||
+  fail 'remote health check does not inspect the uploader process'
+if grep -Fq 'require_process DASHBOARD deck-menu' "$remote_script"; then
+  fail 'remote health check still requires the retired C++ dashboard'
+fi
+grep -Fq 'native_widget=/run/current-profile/lib/bmc-widgets/retro-deck' \
+  "$remote_script" ||
+  fail 'remote health check does not inspect the native widget package'
+grep -Fq 'native_application=/run/current-profile/lib/bmc-applications/retro-deck' \
+  "$remote_script" ||
+  fail 'remote health check does not inspect the native application package'
 grep -Fq "grep -q ' /mnt/data ' /proc/mounts" "$remote_script" ||
   fail 'remote health check does not verify persistent storage'
 grep -Fq 'interface_address wlan0' "$remote_script" ||
@@ -63,8 +72,10 @@ grep -Fq '/usr/sbin/iw dev wlan0 link' "$remote_script" ||
   fail 'remote health check does not report the associated SSID'
 grep -Fq "tr -cd ' -~'" "$remote_script" ||
   fail 'remote health check does not use BusyBox-compatible SSID sanitizing'
+grep -Fq 'log=/var/log/bmc/bmc.log' "$remote_script" ||
+  fail 'remote health check does not select the live BMC log'
 grep -Fq "tail -n 20 \"\$log\"" "$remote_script" ||
-  fail 'remote health check does not include the bounded dashboard log'
+  fail 'remote health check does not include a bounded BMC log'
 
 PATH="$fixture/bin:$PATH" "$repo_root/ops/check-deck.sh" \
   --config "$config" root@192.0.2.7 >/dev/null

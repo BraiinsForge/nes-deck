@@ -409,9 +409,13 @@ ssh -o BatchMode=yes "$target" "
   set -eu
   /etc/init.d/deck-wifi status >/dev/null
   /etc/init.d/deck-wireguard status >/dev/null
-  /etc/init.d/nes-deck status >/dev/null
+  /etc/init.d/bmc-compositor status >/dev/null
   /etc/init.d/nes-deck-uploader status >/dev/null
-  pidof deck-menu >/dev/null
+  test -s /run/current-profile/lib/bmc-widgets/retro-deck/manifest.json
+  test -x /run/current-profile/lib/bmc-widgets/retro-deck/bin/retro-deck
+  test -s /run/current-profile/lib/bmc-applications/retro-deck/manifest.json
+  test -x /run/current-profile/lib/bmc-applications/retro-deck/bin/retro-deck-launcher
+  grep -q '73219c9d-f1ef-41dc-960c-d0711e42a6ac' /etc/bmc_config.json
   pidof rom-uploader >/dev/null
   ip route get '$wireguard_health_address' |
     grep -q 'dev wg0.*src $wireguard_address'

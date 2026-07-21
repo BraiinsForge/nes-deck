@@ -80,25 +80,38 @@ else
   failures=$((failures + 1))
 fi
 
-if [ -x /etc/init.d/bmc-compositor ]; then
-  presentation='BMC compositor'
-  if /etc/init.d/bmc-compositor status >/dev/null 2>&1; then
-    report PRESENTATION "$presentation running"
-  else
-    report PRESENTATION "$presentation NOT RUNNING"
-    failures=$((failures + 1))
-  fi
+if [ -x /etc/init.d/bmc-compositor ] &&
+   /etc/init.d/bmc-compositor status >/dev/null 2>&1; then
+  report PRESENTATION 'BMC compositor running'
 else
-  presentation='direct framebuffer'
-  if /etc/init.d/nes-deck status >/dev/null 2>&1; then
-    report PRESENTATION "$presentation service running"
-  else
-    report PRESENTATION "$presentation service NOT RUNNING"
-    failures=$((failures + 1))
-  fi
+  report PRESENTATION 'BMC compositor NOT RUNNING'
+  failures=$((failures + 1))
 fi
 
-require_process DASHBOARD deck-menu
+native_widget=/run/current-profile/lib/bmc-widgets/retro-deck
+native_application=/run/current-profile/lib/bmc-applications/retro-deck
+if [ -s "$native_widget/manifest.json" ] &&
+   [ -x "$native_widget/bin/retro-deck" ] &&
+   [ -s "$native_widget/assets/gear-knekko-09.png" ]; then
+  report DASHBOARD 'native package installed'
+else
+  report DASHBOARD 'native package INCOMPLETE'
+  failures=$((failures + 1))
+fi
+if [ -s "$native_application/manifest.json" ] &&
+   [ -x "$native_application/bin/retro-deck-launcher" ]; then
+  report APPLICATION 'native launcher installed'
+else
+  report APPLICATION 'native launcher INCOMPLETE'
+  failures=$((failures + 1))
+fi
+if [ -r /etc/bmc_config.json ] &&
+   grep -q '73219c9d-f1ef-41dc-960c-d0711e42a6ac' /etc/bmc_config.json; then
+  report BMC-SCENE 'Retro Deck configured'
+else
+  report BMC-SCENE 'Retro Deck scene MISSING'
+  failures=$((failures + 1))
+fi
 require_process UPLOADER rom-uploader
 
 if [ -x /etc/init.d/deck-wifi ] &&
@@ -148,13 +161,18 @@ if [ -d /mnt/data ]; then
   report STORAGE "${disk:-usage unavailable}"
 fi
 
-log=/mnt/data/nes-deck/log/deck-menu.log
+log=/var/log/bmc/bmc.log
 if [ -r "$log" ]; then
-  printf '\nRecent dashboard log:\n'
+  printf '\nRecent BMC log:\n'
   tail -n 20 "$log"
 else
-  report LOG 'dashboard log is missing'
+  report LOG 'BMC log is missing'
   failures=$((failures + 1))
+fi
+refresh_log=/mnt/data/nes-deck/log/cover-refresh.log
+if [ -r "$refresh_log" ]; then
+  printf '\nRecent cover refresh log:\n'
+  tail -n 10 "$refresh_log"
 fi
 
 printf '\n'

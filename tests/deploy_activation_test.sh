@@ -40,9 +40,30 @@ grep -Fq "[[ -f \$activate_script && ! -L \$activate_script ]]" "$deployer" ||
   fail 'deployer does not validate the activation script'
 grep -Fq 'cp lisp/package.lisp lisp/retro-deck.asd lisp/run-worker.lisp' \
   "$deployer" || fail 'deployer does not stage managed Lisp sources'
-grep -Fq 'exec /mnt/data/nes-deck/menu/deck-menu-launcher' \
-  "$repo_root/deploy/widget/retro-deck" ||
-  fail 'the installed widget no longer defaults to the proven launcher'
+grep -Fq 'nix run .#deck -- deploy --device "$deck_device"' "$deployer" ||
+  fail 'deployer does not use the BMC package harness'
+grep -Fq -- '--packages retro-deck' "$deployer" ||
+  fail 'deployer does not select the native Retro Deck package'
+grep -Fq 'deploy/menu/retro-deck-refresh' "$deployer" ||
+  fail 'deployer does not stage the native refresh helper'
+if grep -Fq 'build_flake .#deck-menu' "$deployer"; then
+  fail 'deployer still builds the retired C++ dashboard'
+fi
+grep -Fq 'native_widget=$profile/lib/bmc-widgets/retro-deck' "$activation" ||
+  fail 'activation does not require the BMC-native widget package'
+grep -Fq 'native_application=$profile/lib/bmc-applications/retro-deck' \
+  "$activation" ||
+  fail 'activation does not require the BMC-native application package'
+native_check_line=$(grep -n 'require_executable "$native_widget/bin/retro-deck"' \
+  "$activation" | head -n 1 | cut -d: -f1)
+service_stop_line=$(grep -n '^  /etc/init.d/bmc-compositor stop' "$activation" |
+  tail -n 1 | cut -d: -f1)
+[[ -n $native_check_line && -n $service_stop_line &&
+   $native_check_line -lt $service_stop_line ]] ||
+  fail 'activation can stop BMC before native package preflight'
+if grep -Fq 'pidof deck-menu' "$activation"; then
+  fail 'activation still waits for the retired C++ dashboard'
+fi
 grep -Fq "\"\$stage/deploy/install-lisp-tree\" --check \"\$stage/nes-deck/lisp\"" \
   "$activation" || fail 'activation does not preflight managed Lisp sources'
 grep -Fq "\"\$stage/deploy/install-lisp-tree\" \"\$stage/nes-deck/lisp\" \"\$base/lisp\"" \

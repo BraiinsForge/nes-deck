@@ -50,6 +50,13 @@ deck_config_load "$config" "$target_override"
 target=$DECK_SSH_TARGET
 wireguard_address=$DECK_WIREGUARD_ADDRESS
 uploader_password=$ROM_UPLOADER_PASSWORD
+case $target in
+  root@*) deck_device=${target#root@} ;;
+  *)
+    echo "BMC deployment requires a root@HOST SSH target: $target" >&2
+    exit 1
+    ;;
+esac
 
 if [[ $check_config -eq 1 ]]; then
   echo "Deck configuration is valid for $target at $wireguard_address"
@@ -65,7 +72,7 @@ fi
   exit 1
 }
 
-for command in nix ssh tar gzip sha256sum; do
+for command in nix ssh tar gzip; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -90,7 +97,6 @@ gb=$(build_flake .#gb-deck)
 zx=$(build_flake .#zx-deck)
 chip8=$(build_flake .#chip8-deck)
 timer=$(build_flake .#ten-seconds-deck)
-menu=$(build_flake .#deck-menu)
 fbterm=$(build_flake .#fbterm-deck)
 rlwrap=$(build_flake .#rlwrap-deck)
 lua=$(build_flake .#lua-deck)
@@ -114,7 +120,6 @@ mkdir -p \
   "$payload/nes-deck/terminal/fonts" \
   "$payload/nes-deck/terminal/keymaps" \
   "$payload/nes-deck/uploader" \
-  "$payload/bmc-widgets/retro-deck/bin" \
   "$payload/nes-deck/ecl" \
   "$payload/chiptunes" \
   "$payload/roms" \
@@ -128,7 +133,6 @@ cp "$gb/bin/gb-deck" "$payload/nes-deck/gb-deck"
 cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
 cp "$chip8/bin/chip8-deck" "$payload/nes-deck/chip8-deck"
 cp "$timer/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
-cp "$menu/bin/deck-menu" "$payload/nes-deck/menu/deck-menu"
 cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
 cp "$uploader/bin/rom-uploader" \
   "$payload/nes-deck/uploader/rom-uploader"
@@ -165,22 +169,15 @@ cp deploy/terminal/fonts.conf deploy/terminal/retro-terminal \
 cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/credits.tsv \
   deploy/menu/palette.tsv \
   deploy/menu/ASSETS.md \
-  deploy/menu/compile-catalog.lisp deploy/menu/deck-menu-launcher \
-  deploy/menu/fetch-covers "$payload/nes-deck/menu/"
-cp crates/retro-deck-dashboard/native/assets/gear-knekko-09.png \
-  "$payload/nes-deck/menu/settings-icon.png"
-cp deploy/widget/manifest.json \
-  "$payload/bmc-widgets/retro-deck/manifest.json"
-cp deploy/widget/retro-deck \
-  "$payload/bmc-widgets/retro-deck/bin/retro-deck"
-chmod 0755 "$payload/bmc-widgets/retro-deck/bin/retro-deck"
+  deploy/menu/compile-catalog.lisp deploy/menu/fetch-covers \
+  "$payload/nes-deck/menu/"
 cp deploy/ecl "$payload/usr/bin/ecl"
+cp deploy/menu/retro-deck-refresh "$payload/usr/sbin/retro-deck-refresh"
 cp ops/deck-wifi/deck-wifi-profile-add \
   "$payload/usr/sbin/deck-wifi-profile-add"
 cp ops/deck-wifi/deck-wifi-select ops/deck-wifi/deck-wifi-watch \
   "$payload/usr/sbin/"
 cp ops/deck-wifi/deck-wifi.init "$payload/etc/init.d/deck-wifi"
-cp deploy/menu/nes-deck.init "$payload/etc/init.d/nes-deck"
 cp deploy/menu/nes-deck-swap.init "$payload/etc/init.d/nes-deck-swap"
 mkdir -p "$payload/etc/hotplug.d/usb"
 cp deploy/menu/nes-deck-keyboard.hotplug \
@@ -218,8 +215,7 @@ done
 find "$payload/nes-deck" -type f \( \
   -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o \
   -name 'chip8-deck' -o -name 'ten-seconds-deck' -o \
-  -name 'chiptune-deck' -o -name 'deck-menu' -o \
-  -name 'deck-menu-launcher' -o -name 'fetch-covers' -o \
+  -name 'chiptune-deck' -o -name 'fetch-covers' -o \
   -name 'retro-terminal' -o -name 'fbterm' -o -name 'loadkeys' -o \
   -name 'rlwrap' -o \
   -name 'lua' -o -name 'python' -o -name 'chibi-scheme' -o \
@@ -232,12 +228,12 @@ find "$payload/nes-deck/lisp" -type f -exec chmod 0600 {} +
 chmod 0700 "$payload/usr/bin/ecl" \
   "$payload/deploy/install-lisp-tree" \
   "$payload/usr/sbin/deck-keyboard-quirks" \
+  "$payload/usr/sbin/retro-deck-refresh" \
   "$payload/usr/sbin/deck-wifi-profile-add" \
   "$payload/usr/sbin/deck-wifi-select" \
   "$payload/usr/sbin/deck-wifi-watch" \
   "$payload/etc/hotplug.d/usb/90-nes-deck-keyboard" \
   "$payload/etc/init.d/deck-wifi" \
-  "$payload/etc/init.d/nes-deck" \
   "$payload/etc/init.d/nes-deck-swap" \
   "$payload/etc/init.d/nes-deck-uploader"
 
@@ -253,6 +249,15 @@ if ! tar -C "$payload" -czf - . | ssh "$target" \
   # shellcheck disable=SC2029
   ssh "$target" "rm -rf '$remote_stage'" >/dev/null 2>&1 || :
   echo "Payload transfer failed; removed the remote staging directory" >&2
+  exit 1
+fi
+
+echo "Installing the native widget and application with BMC package tooling..."
+if ! printf 'n\n' | nix run .#deck -- deploy --device "$deck_device" \
+  --packages retro-deck; then
+  # shellcheck disable=SC2029
+  ssh "$target" "rm -rf '$remote_stage'" >/dev/null 2>&1 || :
+  echo "BMC package deployment failed; removed the staged static payload" >&2
   exit 1
 fi
 

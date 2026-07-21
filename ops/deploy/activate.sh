@@ -12,6 +12,10 @@ fi
 
 stage=$1
 base=/mnt/data/nes-deck
+profile=/run/current-profile
+native_widget=$profile/lib/bmc-widgets/retro-deck
+native_application=$profile/lib/bmc-applications/retro-deck
+
 case "$stage" in
   /mnt/data/.nes-deck-deploy-*) ;;
   *)
@@ -28,91 +32,122 @@ grep -q ' /mnt/data ' /proc/mounts || {
   exit 1
 }
 
-service_needs_restart=0
-uploader_needs_restart=0
-bmc_mode=0
-compositor_needs_restart=0
-if [ -x /etc/init.d/bmc-compositor ]; then
-  bmc_mode=1
-fi
-restore_service_after_failure() {
+compositor_was_running=0
+legacy_was_running=0
+uploader_was_running=0
+activation_complete=0
+
+restore_after_failure() {
   result=$?
   trap - EXIT
-  if [ "$result" -ne 0 ] && [ "$service_needs_restart" -eq 1 ]; then
-    echo "Activation failed; restarting Retro Deck" >&2
-    /etc/init.d/nes-deck start >/dev/null 2>&1 || :
-  fi
-  if [ "$result" -ne 0 ] && \
-     [ "$compositor_needs_restart" -eq 1 ]; then
-    echo "Activation failed; restarting BMC compositor" >&2
-    /etc/init.d/bmc-compositor restart >/dev/null 2>&1 || :
-  fi
-  if [ "$result" -ne 0 ] && [ "$uploader_needs_restart" -eq 1 ] && \
-     [ -x /etc/init.d/nes-deck-uploader ]; then
-    echo "Activation failed; restarting ROM uploader" >&2
-    /etc/init.d/nes-deck-uploader start >/dev/null 2>&1 || :
+  if [ "$result" -ne 0 ] && [ "$activation_complete" -eq 0 ]; then
+    echo "Activation failed; restoring the previous presentation owner" >&2
+    if [ "$compositor_was_running" -eq 1 ]; then
+      /etc/init.d/bmc-compositor restart >/dev/null 2>&1 || :
+    else
+      /etc/init.d/bmc-compositor stop >/dev/null 2>&1 || :
+      if [ "$legacy_was_running" -eq 1 ] && [ -x /etc/init.d/nes-deck ]; then
+        /etc/init.d/nes-deck start >/dev/null 2>&1 || :
+      fi
+    fi
+    if [ "$uploader_was_running" -eq 1 ] && \
+       [ -x /etc/init.d/nes-deck-uploader ]; then
+      /etc/init.d/nes-deck-uploader start >/dev/null 2>&1 || :
+    fi
   fi
   rm -rf "$stage" 2>/dev/null || :
   exit "$result"
 }
-trap restore_service_after_failure EXIT
+trap restore_after_failure EXIT
 
-# Validate the complete payload before stopping a running service.
-for executable in \
-  nes-deck gb-deck zx-deck chip8-deck ten-seconds-deck chiptune-deck; do
-  [ -x "$stage/nes-deck/$executable" ] || {
-    echo "Staged executable is missing: $executable" >&2
+require_executable() {
+  path=$1
+  label=$2
+  [ -x "$path" ] || {
+    echo "$label is missing: $path" >&2
     exit 1
   }
+}
+
+install_file() {
+  source=$1
+  destination=$2
+  mode=$3
+  temporary=$destination.retro-deck-new.$$
+  rm -f "$temporary"
+  cp -p "$source" "$temporary"
+  chmod "$mode" "$temporary"
+  mv -f "$temporary" "$destination"
+}
+
+# The package generation must be complete before any running service stops.
+require_executable /etc/init.d/bmc-compositor \
+  "BMC compositor service"
+[ -s "$native_widget/manifest.json" ] || {
+  echo "Native Retro Deck widget manifest is not installed" >&2
+  exit 1
+}
+require_executable "$native_widget/bin/retro-deck" \
+  "Native Retro Deck widget"
+[ -s "$native_widget/assets/gear-knekko-09.png" ] || {
+  echo "Native Retro Deck settings asset is not installed" >&2
+  exit 1
+}
+[ -s "$native_application/manifest.json" ] || {
+  echo "Native Retro Deck application manifest is not installed" >&2
+  exit 1
+}
+require_executable "$native_application/bin/retro-deck-launcher" \
+  "Native Retro Deck application launcher"
+[ -f /etc/bmc_config.json ] && [ ! -L /etc/bmc_config.json ] || {
+  echo "BMC configuration is missing or unsafe: /etc/bmc_config.json" >&2
+  exit 1
+}
+
+# Validate the complete static payload before interrupting any service.
+for executable in \
+  nes-deck gb-deck zx-deck chip8-deck ten-seconds-deck chiptune-deck; do
+  require_executable "$stage/nes-deck/$executable" \
+    "Staged executable $executable"
 done
 for executable in \
-  menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
+  menu/fetch-covers \
   terminal/fbterm terminal/loadkeys terminal/retro-terminal terminal/rlwrap \
   langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin \
   uploader/rom-uploader; do
-  [ -x "$stage/nes-deck/$executable" ] || {
-    echo "Staged runtime is missing: $executable" >&2
-    exit 1
-  }
+  require_executable "$stage/nes-deck/$executable" \
+    "Staged runtime $executable"
 done
-[ -x "$stage/usr/sbin/deck-keyboard-quirks" ] || {
-  echo "Staged keyboard quirk helper is missing" >&2
-  exit 1
-}
-[ -x "$stage/deploy/install-lisp-tree" ] || {
-  echo "Staged managed Lisp installer is missing" >&2
-  exit 1
-}
+require_executable "$stage/usr/sbin/retro-deck-refresh" \
+  "Staged native dashboard refresh helper"
+require_executable "$stage/usr/sbin/deck-keyboard-quirks" \
+  "Staged keyboard quirk helper"
+require_executable "$stage/deploy/install-lisp-tree" \
+  "Staged managed Lisp installer"
 "$stage/deploy/install-lisp-tree" --check "$stage/nes-deck/lisp"
-[ -s "$stage/bmc-widgets/retro-deck/manifest.json" ] && \
-  [ -x "$stage/bmc-widgets/retro-deck/bin/retro-deck" ] || {
-  echo "Staged Retro Deck widget is incomplete" >&2
-  exit 1
-}
+
 for wifi_executable in deck-wifi-profile-add deck-wifi-select deck-wifi-watch; do
-  [ -x "$stage/usr/sbin/$wifi_executable" ] || {
-    echo "Staged Wi-Fi helper is missing: $wifi_executable" >&2
-    exit 1
-  }
+  require_executable "$stage/usr/sbin/$wifi_executable" \
+    "Staged Wi-Fi helper $wifi_executable"
 done
-[ -x "$stage/etc/init.d/deck-wifi" ] || {
-  echo "Staged Wi-Fi service is missing" >&2
-  exit 1
-}
-[ -x "$stage/etc/init.d/nes-deck-swap" ] || {
-  echo "Staged swap service is missing" >&2
-  exit 1
-}
-[ -x "$stage/etc/hotplug.d/usb/90-nes-deck-keyboard" ] || {
-  echo "Staged keyboard hotplug hook is missing" >&2
-  exit 1
-}
+require_executable "$stage/etc/init.d/deck-wifi" \
+  "Staged Wi-Fi service"
+require_executable "$stage/etc/init.d/nes-deck-swap" \
+  "Staged swap service"
+require_executable "$stage/etc/init.d/nes-deck-uploader" \
+  "Staged uploader service"
+require_executable "$stage/etc/hotplug.d/usb/90-nes-deck-keyboard" \
+  "Staged keyboard hotplug hook"
 [ -r "$stage/nes-deck/langs/chibi/lib/init-7.scm" ] || {
   echo "Staged Chibi module library is incomplete" >&2
   exit 1
 }
 [ -s "$stage/nes-deck/menu/games.tsv" ] || {
   echo "Staged menu catalog is empty" >&2
+  exit 1
+}
+[ -s "$stage/nes-deck/menu/games.sexp" ] || {
+  echo "Staged Lisp menu catalog is empty" >&2
   exit 1
 }
 [ -s "$stage/nes-deck/menu/palette.tsv" ] || {
@@ -124,18 +159,9 @@ done
   echo "Staged third-party license archive is incomplete" >&2
   exit 1
 }
-settings_icon=$stage/nes-deck/menu/settings-icon.png
-[ -f "$settings_icon" ] && [ ! -L "$settings_icon" ] &&
-  [ "$(sha256sum "$settings_icon" | cut -d ' ' -f 1)" = \
-    92b44756d62e1afaa34c7b1d94cee6f014d5484f94377fe28f4d4392cb696aed ] || {
-  echo "Staged settings icon is missing or corrupt" >&2
-  exit 1
-}
 
-# Exercise staged interpreters and configuration parsers on the target CPU.
-python_result=$(
-  "$stage/nes-deck/langs/python" -c 'print(6 * 7)'
-)
+# Exercise staged interpreters and uploader configuration on the target CPU.
+python_result=$("$stage/nes-deck/langs/python" -c 'print(6 * 7)')
 [ "$python_result" = 42 ] || {
   echo "Staged Python runtime failed its smoke test" >&2
   exit 1
@@ -148,9 +174,6 @@ scheme_result=$(
   echo "Staged Scheme runtime failed its smoke test" >&2
   exit 1
 }
-"$stage/nes-deck/menu/deck-menu" --help >/dev/null
-"$stage/nes-deck/menu/deck-menu" --validate-palette \
-  "$stage/nes-deck/menu/palette.tsv"
 uploader_deploy_config=$stage/nes-deck/uploader/password.conf
 uploader_address_config=$stage/nes-deck/uploader/address.conf
 [ -f "$uploader_deploy_config" ] && [ ! -L "$uploader_deploy_config" ] || {
@@ -166,65 +189,51 @@ uploader_address_config=$stage/nes-deck/uploader/address.conf
 "$stage/nes-deck/uploader/rom-uploader" --check-address \
   "$uploader_address_config"
 
-# All preflight checks passed. Service interruption begins here.
-mkdir -p "$base" /mnt/data/roms /mnt/data/langs \
-  /mnt/data/chiptunes "$base/langs" "$base/licenses" \
-  "$base/uploader" "$base/uploads" /mnt/data/bmc-widgets
+# Install the scene while the current presentation remains available. This
+# command is idempotent and preserves every unrelated BMC setting.
+"$stage/nes-deck/uploader/rom-uploader" \
+  --install-bmc-scene /etc/bmc_config.json
 
-if [ -x /etc/init.d/nes-deck-uploader ]; then
+mkdir -p "$base" /mnt/data/roms /mnt/data/langs \
+  /mnt/data/chiptunes "$base/langs" "$base/licenses" "$base/log" \
+  "$base/state" "$base/uploader" "$base/uploads"
+
+if [ -x /etc/init.d/nes-deck-uploader ] && \
+   /etc/init.d/nes-deck-uploader status >/dev/null 2>&1; then
+  uploader_was_running=1
   /etc/init.d/nes-deck-uploader stop 2>/dev/null || :
 fi
-uploader_needs_restart=1
-
-/etc/init.d/nes-deck stop 2>/dev/null || :
-if [ "$bmc_mode" -eq 1 ]; then
+if /etc/init.d/bmc-compositor status >/dev/null 2>&1; then
+  compositor_was_running=1
   /etc/init.d/bmc-compositor stop 2>/dev/null || :
-  compositor_needs_restart=1
-else
-  service_needs_restart=1
+fi
+if [ -x /etc/init.d/nes-deck ] && \
+   /etc/init.d/nes-deck status >/dev/null 2>&1; then
+  legacy_was_running=1
+  /etc/init.d/nes-deck stop 2>/dev/null || :
 fi
 
 # Install application runtimes and repository-managed assets.
-cp -p "$stage/nes-deck/nes-deck" "$base/nes-deck"
-cp -p "$stage/nes-deck/gb-deck" "$base/gb-deck"
-cp -p "$stage/nes-deck/zx-deck" "$base/zx-deck"
-cp -p "$stage/nes-deck/chip8-deck" "$base/chip8-deck"
-cp -p "$stage/nes-deck/ten-seconds-deck" "$base/ten-seconds-deck"
-cp -p "$stage/nes-deck/chiptune-deck" "$base/chiptune-deck"
-cp -p "$stage/nes-deck/uploader/rom-uploader" \
-  "$base/uploader/rom-uploader"
-chmod 0700 "$base/uploader" "$base/uploads" \
-  "$base/uploader/rom-uploader"
-cp -p "$uploader_deploy_config" "$base/uploader/password.conf"
-cp -p "$uploader_address_config" "$base/uploader/address.conf"
-chmod 0600 "$base/uploader/password.conf" "$base/uploader/address.conf"
+install_file "$stage/nes-deck/nes-deck" "$base/nes-deck" 0700
+install_file "$stage/nes-deck/gb-deck" "$base/gb-deck" 0700
+install_file "$stage/nes-deck/zx-deck" "$base/zx-deck" 0700
+install_file "$stage/nes-deck/chip8-deck" "$base/chip8-deck" 0700
+install_file "$stage/nes-deck/ten-seconds-deck" \
+  "$base/ten-seconds-deck" 0700
+install_file "$stage/nes-deck/chiptune-deck" "$base/chiptune-deck" 0700
+install_file "$stage/nes-deck/uploader/rom-uploader" \
+  "$base/uploader/rom-uploader" 0700
+chmod 0700 "$base/uploader" "$base/uploads"
+install_file "$uploader_deploy_config" "$base/uploader/password.conf" 0600
+install_file "$uploader_address_config" "$base/uploader/address.conf" 0600
 
-mkdir -p "$base/menu" "$base/terminal" "$base/licenses"
-cp -Rp "$stage/nes-deck/menu/." "$base/menu/"
-rm -rf "$base/menu/settings-icons"
-rm -f "$base/menu/knekko-settings-icons.tsv"
-rm -rf "$base/games.new"
-mkdir -p "$base/games.new"
-cp -Rp "$stage/nes-deck/games/." "$base/games.new/"
-rm -rf "$base/games"
-mv "$base/games.new" "$base/games"
-cp -Rp "$stage/nes-deck/terminal/." "$base/terminal/"
-cp -Rp "$stage/nes-deck/licenses/." "$base/licenses/"
-
-rm -rf /mnt/data/bmc-widgets/retro-deck.new
-cp -Rp "$stage/bmc-widgets/retro-deck" \
-  /mnt/data/bmc-widgets/retro-deck.new
-rm -rf /mnt/data/bmc-widgets/retro-deck
-mv /mnt/data/bmc-widgets/retro-deck.new \
-  /mnt/data/bmc-widgets/retro-deck
-if [ "$bmc_mode" -eq 1 ]; then
-  [ -f /etc/bmc_config.json ] || {
-    echo "BMC configuration is missing: /etc/bmc_config.json" >&2
-    exit 1
-  }
-  "$stage/nes-deck/uploader/rom-uploader" \
-    --install-bmc-scene /etc/bmc_config.json
-fi
+for directory in menu games terminal licenses; do
+  rm -rf "$base/$directory.new"
+  mkdir -p "$base/$directory.new"
+  cp -Rp "$stage/nes-deck/$directory/." "$base/$directory.new/"
+  rm -rf "$base/$directory"
+  mv "$base/$directory.new" "$base/$directory"
+done
 
 rm -rf "$base/ecl.new" "$base/langs/chibi.new"
 mv "$stage/nes-deck/ecl" "$base/ecl.new"
@@ -233,8 +242,8 @@ rm -rf "$base/ecl" "$base/langs/chibi"
 mv "$base/ecl.new" "$base/ecl"
 mv "$base/langs/chibi.new" "$base/langs/chibi"
 "$stage/deploy/install-lisp-tree" "$stage/nes-deck/lisp" "$base/lisp"
-cp -p "$stage/nes-deck/langs/lua" "$base/langs/lua"
-cp -p "$stage/nes-deck/langs/python" "$base/langs/python"
+install_file "$stage/nes-deck/langs/lua" "$base/langs/lua" 0700
+install_file "$stage/nes-deck/langs/python" "$base/langs/python" 0700
 
 for system in nes gb gbc zx chip8; do
   mkdir -p "/mnt/data/roms/$system"
@@ -246,64 +255,61 @@ mkdir -p /mnt/data/langs/lua /mnt/data/langs/lisp \
 chmod 0700 /mnt/data/langs/lua /mnt/data/langs/lisp \
   /mnt/data/langs/python /mnt/data/langs/scheme /mnt/data/chiptunes
 
-# Install system entry points and service definitions.
-cp -p "$stage/usr/bin/ecl" /usr/bin/ecl
-cp -p "$stage/usr/sbin/deck-wifi-profile-add" \
-  /usr/sbin/deck-wifi-profile-add
-cp -p "$stage/usr/sbin/deck-wifi-select" /usr/sbin/deck-wifi-select
-cp -p "$stage/usr/sbin/deck-wifi-watch" /usr/sbin/deck-wifi-watch
-cp -p "$stage/etc/init.d/deck-wifi" /etc/init.d/deck-wifi
-cp -p "$stage/etc/init.d/nes-deck" /etc/init.d/nes-deck
-cp -p "$stage/etc/init.d/nes-deck-swap" /etc/init.d/nes-deck-swap
-cp -p "$stage/etc/init.d/nes-deck-uploader" \
-  /etc/init.d/nes-deck-uploader
-chmod 0700 /usr/bin/ecl /usr/sbin/deck-wifi-profile-add \
-  /usr/sbin/deck-wifi-select /usr/sbin/deck-wifi-watch \
-  /etc/init.d/deck-wifi \
-  /etc/init.d/nes-deck /etc/init.d/nes-deck-swap \
-  /etc/init.d/nes-deck-uploader
+# Install system entry points atomically, including the Wi-Fi watcher files.
+# No Wi-Fi profile or wireless configuration is changed here.
+install_file "$stage/usr/bin/ecl" /usr/bin/ecl 0700
+install_file "$stage/usr/sbin/retro-deck-refresh" \
+  /usr/sbin/retro-deck-refresh 0700
+install_file "$stage/usr/sbin/deck-keyboard-quirks" \
+  /usr/sbin/deck-keyboard-quirks 0700
+install_file "$stage/usr/sbin/deck-wifi-profile-add" \
+  /usr/sbin/deck-wifi-profile-add 0700
+install_file "$stage/usr/sbin/deck-wifi-select" \
+  /usr/sbin/deck-wifi-select 0700
+install_file "$stage/usr/sbin/deck-wifi-watch" \
+  /usr/sbin/deck-wifi-watch 0700
+install_file "$stage/etc/init.d/deck-wifi" /etc/init.d/deck-wifi 0700
+install_file "$stage/etc/init.d/nes-deck-swap" \
+  /etc/init.d/nes-deck-swap 0700
+install_file "$stage/etc/init.d/nes-deck-uploader" \
+  /etc/init.d/nes-deck-uploader 0700
+mkdir -p /etc/hotplug.d/usb
+install_file "$stage/etc/hotplug.d/usb/90-nes-deck-keyboard" \
+  /etc/hotplug.d/usb/90-nes-deck-keyboard 0700
 
-# Select the compositor or direct-framebuffer service owner and restart it.
+# Remove the former shell wrapper so BMC has exactly one native package for
+# the Retro Deck widget and application identifiers.
+rm -rf /mnt/data/bmc-widgets/retro-deck \
+  /mnt/data/bmc-applications/retro-deck
+
 if [ -x /etc/init.d/bmc ]; then
   /etc/init.d/bmc stop 2>/dev/null || :
   /etc/init.d/bmc disable 2>/dev/null || :
 fi
+if [ -x /etc/init.d/nes-deck ]; then
+  /etc/init.d/nes-deck stop 2>/dev/null || :
+  /etc/init.d/nes-deck disable 2>/dev/null || :
+fi
+rm -f /etc/rc.d/S??nes-deck /etc/rc.d/K??nes-deck
+
+# Restart only the watcher process. Its profiles and live wireless state are
+# preserved, as are the current WLAN address and default route.
 /etc/init.d/deck-wifi enable
 /etc/init.d/deck-wifi restart
-# Remove links created with an older START or STOP value before re-enabling.
 rm -f /etc/rc.d/S??nes-deck-swap /etc/rc.d/K??nes-deck-swap
-if [ "$bmc_mode" -eq 1 ]; then
-  /etc/init.d/nes-deck disable
-  /etc/init.d/nes-deck-swap enable
-  /etc/init.d/nes-deck-swap start
-  service_needs_restart=0
-  /etc/init.d/bmc-compositor enable
-  /etc/init.d/bmc-compositor start
-else
-  /etc/init.d/nes-deck-swap stop 2>/dev/null || :
-  /etc/init.d/nes-deck-swap disable
-  /etc/init.d/nes-deck enable
-  /etc/init.d/nes-deck start
-fi
+/etc/init.d/nes-deck-swap enable
+/etc/init.d/nes-deck-swap start
+/etc/init.d/bmc-compositor enable
+/etc/init.d/bmc-compositor restart
 /etc/init.d/nes-deck-uploader enable
-/etc/init.d/nes-deck-uploader start
+/etc/init.d/nes-deck-uploader restart
 
-# Confirm readiness before discarding the staging tree.
-# A fresh Deck may need to download and decode the persistent Libretro indexes
-# before deck-menu starts. Keep this bounded, but allow the first fill to
-# finish on the target CPU instead of rolling back a healthy installation.
+# The widget is lifecycle-managed and need not have a process while its scene
+# is inactive. Readiness therefore checks BMC, its installed package, and the
+# always-on uploader rather than requiring a retro-deck PID.
 attempt=0
-while [ "$attempt" -lt 120 ]; do
-  dashboard_ready=0
-  if [ "$bmc_mode" -eq 1 ] && \
-     /etc/init.d/bmc-compositor status >/dev/null 2>&1; then
-    dashboard_ready=1
-  elif [ "$bmc_mode" -eq 0 ] && \
-       /etc/init.d/nes-deck status >/dev/null 2>&1 && \
-       pidof deck-menu >/dev/null 2>&1; then
-    dashboard_ready=1
-  fi
-  if [ "$dashboard_ready" -eq 1 ] && \
+while [ "$attempt" -lt 45 ]; do
+  if /etc/init.d/bmc-compositor status >/dev/null 2>&1 && \
      /etc/init.d/nes-deck-uploader status >/dev/null 2>&1 && \
      pidof rom-uploader >/dev/null 2>&1; then
     break
@@ -312,26 +318,14 @@ while [ "$attempt" -lt 120 ]; do
   sleep 1
 done
 
-if [ "$bmc_mode" -eq 1 ]; then
-  /etc/init.d/bmc-compositor status >/dev/null 2>&1 || {
-    echo "BMC compositor did not restart" >&2
-    exit 1
-  }
-else
-  /etc/init.d/nes-deck status >/dev/null 2>&1 || {
-    echo "Retro Deck service did not start" >&2
-    exit 1
-  }
-fi
+/etc/init.d/bmc-compositor status >/dev/null 2>&1 || {
+  echo "BMC compositor did not restart" >&2
+  exit 1
+}
 /etc/init.d/deck-wifi status >/dev/null 2>&1 || {
   echo "Deck Wi-Fi watcher did not start" >&2
   exit 1
 }
-if [ "$bmc_mode" -eq 0 ] && ! pidof deck-menu >/dev/null 2>&1; then
-  echo "Retro Deck menu did not reach its ready state" >&2
-  tail -n 80 "$base/log/deck-menu.log" >&2 || :
-  exit 1
-fi
 /etc/init.d/nes-deck-uploader status >/dev/null 2>&1 || {
   echo "ROM uploader service did not start" >&2
   exit 1
@@ -340,14 +334,19 @@ pidof rom-uploader >/dev/null 2>&1 || {
   echo "ROM uploader did not reach its ready state" >&2
   exit 1
 }
+require_executable "$native_widget/bin/retro-deck" \
+  "Installed native Retro Deck widget"
+require_executable "$native_application/bin/retro-deck-launcher" \
+  "Installed native Retro Deck application launcher"
 
-service_needs_restart=0
-uploader_needs_restart=0
-compositor_needs_restart=0
+activation_complete=1
+compositor_was_running=0
+legacy_was_running=0
+uploader_was_running=0
 rm -rf "$stage"
-if [ "$bmc_mode" -eq 1 ]; then
-  echo "Retro Deck widget is installed and the BMC compositor is running."
-else
-  echo "Retro Deck and its ROM uploader are running."
-fi
-tail -n 12 "$base/log/deck-menu.log" || :
+trap - EXIT
+
+# Cover downloads and the resulting compositor restart happen outside both
+# HTTP requests and the activation critical path.
+/usr/sbin/retro-deck-refresh refresh
+echo "Retro Deck native widget, application, and ROM uploader are running."
