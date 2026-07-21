@@ -41,11 +41,6 @@ semantic controller reports and keyboard events, then applies only its
 product-specific mappings. Common Lisp policy is supervised and deadline
 bound, never part of the input or audio execution path.
 
-The checked-in C++ dashboard and legacy deployment route are rollback material
-until the controlled live-Deck gate selects the BMC packages. They are not the
-selected production architecture and carry no compatibility obligation after
-that gate.
-
 Detailed build and source contracts are in [`BUILD.md`](../BUILD.md), third
-party provenance is in [`THIRD_PARTY.md`](../THIRD_PARTY.md), and the remaining
-selection gates are in [`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md).
+party provenance is in [`THIRD_PARTY.md`](../THIRD_PARTY.md), and ownership and
+dependency rules are in [`ARCHITECTURE.md`](../ARCHITECTURE.md).

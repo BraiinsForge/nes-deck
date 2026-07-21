@@ -248,6 +248,8 @@ application launch contract. Retro Deck requires `/mnt/data` to be mounted.
 
 ## Development
 
+- [ARCHITECTURE.md](ARCHITECTURE.md) defines BMC ownership, dependency, audio,
+  Lisp, emulator, and network boundaries.
 - [BUILD.md](BUILD.md) covers reproducible builds, tests, and platform
   details.
 - [docs/swipe-rendering-postmortem.org](docs/swipe-rendering-postmortem.org)
