@@ -369,7 +369,7 @@ mod tests {
     use retro_deck_config::{CatalogEntry, CatalogSystem, System};
 
     use super::*;
-    use crate::{Brightness, DashboardCatalog, Keymap, VolumeState};
+    use crate::{DashboardCatalog, Keymap, VolumeState};
 
     fn model() -> Option<DashboardModel> {
         let entries = [
@@ -394,7 +394,6 @@ mod tests {
         Some(DashboardModel::new(
             catalog,
             VolumeState::DEFAULT,
-            Brightness::DEFAULT,
             Keymap::Us,
         ))
     }

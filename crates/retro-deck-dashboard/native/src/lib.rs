@@ -6,6 +6,7 @@ mod application;
 mod bmc_ui;
 mod catalog;
 mod launch;
+mod launch_options;
 #[cfg(feature = "bmc-native")]
 mod native_catalog;
 mod state;
@@ -23,10 +24,7 @@ pub use catalog::{DashboardApplicationPolicyError, applications_from_policy};
 pub use launch::{
     ExitPolicy, LaunchPlan, LaunchPlanError, LaunchTarget, LaunchTargetError, TerminalMode,
 };
+pub use launch_options::{DEFAULT_VOLUME_PERCENT, Keymap, VolumeError, VolumeState};
 #[cfg(feature = "bmc-native")]
 pub use native_catalog::{NativeCatalogError, load_native_catalog};
-pub use state::{
-    Action, Brightness, BrightnessError, DEFAULT_BRIGHTNESS_PERCENT, DEFAULT_VOLUME_PERCENT,
-    DashboardModel, Intent, Keymap, MenuCue, Screen, SettingChange, SettingsTarget, Status,
-    Transition, VolumeError, VolumeState,
-};
+pub use state::{Action, DashboardModel, Intent, MenuCue, Transition};

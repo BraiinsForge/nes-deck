@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use retro_deck_config::System;
 
-use crate::{DEFAULT_VOLUME_PERCENT, Keymap, LaunchPlan, LaunchTarget, TerminalMode, VolumeState};
+use crate::{Keymap, LaunchPlan, LaunchTarget, TerminalMode, VolumeState};
 
 /// Logical BMC application registered by the native Retro Deck package.
 pub const BMC_APPLICATION_ID: &str = "retro-deck";
@@ -126,13 +126,8 @@ impl ApplicationRequest {
                 (LaunchTarget::Chiptunes, *volume_percent, Keymap::Us)
             }
         };
-        let last_audible = if volume_percent == 0 {
-            DEFAULT_VOLUME_PERCENT
-        } else {
-            volume_percent
-        };
-        let volume = VolumeState::new(volume_percent, last_audible)
-            .map_err(|_| ApplicationRequestError::InvalidVolume)?;
+        let volume =
+            VolumeState::new(volume_percent).map_err(|_| ApplicationRequestError::InvalidVolume)?;
         LaunchPlan::from_target(target, volume, keymap)
             .map_err(|_| ApplicationRequestError::SystemActionRequired)
     }
@@ -211,7 +206,7 @@ mod tests {
         };
         let request = ApplicationRequest::from_target(
             target,
-            VolumeState::new(55, 55).unwrap_or(VolumeState::DEFAULT),
+            VolumeState::new(55).unwrap_or(VolumeState::DEFAULT),
             Keymap::Czech,
         );
         let Some(request) = request.ok() else {

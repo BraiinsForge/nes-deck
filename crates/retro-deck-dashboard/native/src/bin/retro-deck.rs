@@ -20,9 +20,9 @@ use bmc_widget::surface::{
 };
 use glow::HasContext as _;
 use retro_deck_dashboard::{
-    ApplicationRequest, BMC_APPLICATION_ID, BmcScreen, BmcUiAction, Brightness, DashboardModel,
-    Intent, Keymap, LaunchTarget, MenuCue, TerminalMode, VolumeState, applications_from_policy,
-    bmc_action_for_touch, build_bmc_tree, load_native_catalog,
+    ApplicationRequest, BMC_APPLICATION_ID, BmcScreen, BmcUiAction, DashboardModel, Intent, Keymap,
+    LaunchTarget, MenuCue, VolumeState, applications_from_policy, bmc_action_for_touch,
+    build_bmc_tree, load_native_catalog,
 };
 use retro_deck_policy::{
     PolicyClient, PolicyEvent, PolicyEventPoll, PolicyResponse, PolicySubmit, RequestId, Value,
@@ -55,12 +55,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let catalog = load_native_catalog(configured_path(MANIFEST_ENV, DEFAULT_MANIFEST_PATH))
         .context("load Retro Deck catalog")?;
-    let model = DashboardModel::new(
-        catalog,
-        VolumeState::DEFAULT,
-        Brightness::DEFAULT,
-        Keymap::default(),
-    );
+    let model = DashboardModel::new(catalog, VolumeState::DEFAULT, Keymap::default());
     let (surface, initial) =
         DeckWidgetSurfaceClient::connect().context("connect Retro Deck scene")?;
     let policy = spawn_dashboard_policy();
@@ -84,7 +79,6 @@ struct NativeRuntime {
     active_touch: Option<i32>,
     policy: Option<PolicyClient>,
     policy_request: Option<RequestId>,
-    started_at: Instant,
     last_frame_at: Option<Instant>,
 }
 
@@ -107,7 +101,6 @@ impl NativeRuntime {
             active_touch: None,
             policy,
             policy_request: None,
-            started_at: Instant::now(),
             last_frame_at: None,
         }
     }
@@ -217,12 +210,7 @@ impl NativeRuntime {
                 return;
             }
         };
-        self.model = DashboardModel::new(
-            catalog,
-            self.model.volume(),
-            self.model.brightness(),
-            self.model.keymap(),
-        );
+        self.model = DashboardModel::new(catalog, self.model.volume(), self.model.keymap());
         self.pending_render = true;
         tracing::info!("loaded dashboard applications from Common Lisp");
     }
@@ -355,9 +343,7 @@ impl NativeRuntime {
                     self.play_menu_cue(MenuCue::Confirm);
                 }
                 BmcUiAction::Model(action) => {
-                    let elapsed_ms =
-                        u64::try_from(self.started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    let transition = self.model.apply_at(action, elapsed_ms);
+                    let transition = self.model.apply(action);
                     self.pending_render |= transition.redraw;
                     if let Some(cue) = transition.cue {
                         self.play_menu_cue(cue);
@@ -371,23 +357,15 @@ impl NativeRuntime {
     }
 
     fn request_intent(&self, intent: Intent) {
-        let target = match intent {
-            Intent::Launch(index) => {
-                let Some(entry) = self.model.catalog().entry(index) else {
-                    tracing::warn!(index, "rejected missing native catalog launch");
-                    return;
-                };
-                match LaunchTarget::from_entry(entry) {
-                    Ok(target) => target,
-                    Err(error) => {
-                        tracing::warn!(index, ?error, "rejected unknown native catalog launch");
-                        return;
-                    }
-                }
-            }
-            Intent::OpenTerminal => LaunchTarget::Terminal(TerminalMode::Shell),
-            Intent::OpenWifi => {
-                self.open_system_settings();
+        let Intent::Launch(index) = intent;
+        let Some(entry) = self.model.catalog().entry(index) else {
+            tracing::warn!(index, "rejected missing native catalog launch");
+            return;
+        };
+        let target = match LaunchTarget::from_entry(entry) {
+            Ok(target) => target,
+            Err(error) => {
+                tracing::warn!(index, ?error, "rejected unknown native catalog launch");
                 return;
             }
         };
@@ -601,7 +579,7 @@ const fn menu_cue_sound(cue: MenuCue) -> &'static str {
     match cue {
         MenuCue::Previous | MenuCue::Back => "PriceDown",
         MenuCue::Next => "PriceUp",
-        MenuCue::Confirm | MenuCue::Volume => "Confirmation",
+        MenuCue::Confirm => "Confirmation",
     }
 }
 
@@ -661,6 +639,5 @@ mod tests {
         assert_eq!(menu_cue_sound(MenuCue::Next), "PriceUp");
         assert_eq!(menu_cue_sound(MenuCue::Confirm), "Confirmation");
         assert_eq!(menu_cue_sound(MenuCue::Back), "PriceDown");
-        assert_eq!(menu_cue_sound(MenuCue::Volume), "Confirmation");
     }
 }

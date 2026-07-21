@@ -17,7 +17,6 @@ const CHIPTUNE_PROGRAM: &str = "/mnt/data/nes-deck/chiptune-deck";
 const CHIPTUNE_DIRECTORY: &str = "/mnt/data/chiptunes";
 const TERMINAL_PROGRAM: &str = "/mnt/data/nes-deck/terminal/retro-terminal";
 const VOLUME_STATE: &str = "/mnt/data/nes-deck/state/menu-volume.state";
-const REBOOT_PROGRAM: &str = "/sbin/reboot";
 
 /// Terminal or REPL mode accepted by the managed terminal launcher.
 #[cfg_attr(
@@ -122,8 +121,6 @@ pub enum ExitPolicy {
     SupervisorTouchHold,
     /// The native child owns touch and exposes its own exit control.
     ChildOwnsTouch,
-    /// No interactive exit path applies, as for an explicitly confirmed reboot.
-    None,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -158,12 +155,12 @@ pub struct LaunchPlan<'entry> {
 }
 
 impl<'entry> LaunchPlan<'entry> {
-    /// Build a managed-child plan for a non-reboot target.
+    /// Build a managed-child plan for an application target.
     ///
     /// # Errors
     ///
-    /// Returns [`LaunchPlanError::RebootConfirmationRequired`] rather than
-    /// turning an unconfirmed catalog activation into a reboot command.
+    /// Returns [`LaunchPlanError::SystemActionRequired`] for targets owned by
+    /// BMC rather than constructing a privileged command.
     pub fn from_target(
         target: LaunchTarget<'entry>,
         volume: VolumeState,
@@ -215,21 +212,7 @@ impl<'entry> LaunchPlan<'entry> {
                 shares_volume_state: true,
                 exit_policy: ExitPolicy::ChildOwnsTouch,
             }),
-            LaunchTarget::Reboot => Err(LaunchPlanError::RebootConfirmationRequired),
-        }
-    }
-
-    /// Build the reboot command only after the caller has confirmed it.
-    #[must_use]
-    pub const fn confirmed_reboot() -> Self {
-        Self {
-            program: REBOOT_PROGRAM,
-            argument: None,
-            volume_percent: None,
-            keymap: None,
-            exit_hint: false,
-            shares_volume_state: false,
-            exit_policy: ExitPolicy::None,
+            LaunchTarget::Reboot => Err(LaunchPlanError::SystemActionRequired),
         }
     }
 
@@ -279,15 +262,15 @@ impl<'entry> LaunchPlan<'entry> {
 /// A launch target cannot yet be turned into an executable plan.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LaunchPlanError {
-    /// Reboot needs a second activation within the confirmation window.
-    RebootConfirmationRequired,
+    /// The target belongs to a BMC-owned system surface rather than a child process.
+    SystemActionRequired,
 }
 
 impl fmt::Display for LaunchPlanError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::RebootConfirmationRequired => {
-                formatter.write_str("reboot requires explicit confirmation")
+            Self::SystemActionRequired => {
+                formatter.write_str("target requires a BMC system action")
             }
         }
     }
@@ -352,7 +335,7 @@ mod tests {
 
     #[test]
     fn console_plans_keep_executables_out_of_catalog_data() {
-        let Some(volume) = VolumeState::new(55, 55).ok() else {
+        let Some(volume) = VolumeState::new(55).ok() else {
             return;
         };
         for (system, program, content) in [
@@ -401,7 +384,7 @@ mod tests {
 
     #[test]
     fn native_application_plans_have_narrow_distinct_effects() {
-        let Some(volume) = VolumeState::new(42, 42).ok() else {
+        let Some(volume) = VolumeState::new(42).ok() else {
             return;
         };
         let Some(timer) =
@@ -455,16 +438,10 @@ mod tests {
     }
 
     #[test]
-    fn reboot_plan_cannot_follow_one_catalog_activation() {
+    fn reboot_never_becomes_a_process_plan() {
         assert_eq!(
             LaunchPlan::from_target(LaunchTarget::Reboot, VolumeState::DEFAULT, Keymap::Us),
-            Err(LaunchPlanError::RebootConfirmationRequired)
+            Err(LaunchPlanError::SystemActionRequired)
         );
-        let reboot = LaunchPlan::confirmed_reboot();
-        assert_eq!(reboot.program(), Path::new("/sbin/reboot"));
-        assert_eq!(reboot.argument(), None);
-        assert_eq!(reboot.volume_percent(), None);
-        assert_eq!(reboot.keymap(), None);
-        assert_eq!(reboot.exit_policy(), ExitPolicy::None);
     }
 }
