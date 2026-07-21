@@ -45,6 +45,11 @@ details when they are needed for archaeology.
   use a full-screen black layer-shell surface plus a centered game surface.
   Those temporary surfaces disappear when the game exits, restoring scene
   swiping.
+- Only the active scene and a scene participating in a transition retain GPU
+  buffers. Idle neighboring scenes are `Dormant`. On generation 14, Retro Deck
+  starts directly in that state while the clock is active, does not initialize
+  EGL, and uses about 2.7 MiB RSS. This keeps the clock host alive on the
+  256 MiB unit instead of exhausting memory during boot.
 - Emulators expand source pixels to the integer-scaled layer buffer before
   submitting it. `patches/bmc-nearest-neighbor-filter.patch` also selects
   nearest-neighbor minification and magnification in Smithay. Apply it with
@@ -66,8 +71,8 @@ details when they are needed for archaeology.
 - The dashboard palette uses full RGB semantic roles. A malformed persistent
   override cannot prevent startup; the launcher falls back through the last
   valid generated palette, the checked-in palette, and built-in defaults.
-- Settings icons include twelve native pixel cogs and 36 CC0 Knekko cogs.
-  The selected icon is stored in the same appearance override as the colors.
+- The dashboard ships only the approved CC0 `gear-knekko-09` settings cog and
+  its matching built-in fallback. There is no cog picker.
 - The bottom-left `(c)` control opens an animated FOSS credits crawl from
   `deploy/menu/credits.tsv`. Its fixed-size source text is projected onto one
   continuously receding plane instead of changing between discrete font
@@ -113,6 +118,11 @@ details when they are needed for archaeology.
   audio failure as non-fatal so video and input remain usable.
 - Menu volume is stored from 0 through 100 in five-point steps and is passed to
   every child. Muting remembers the last audible level.
+- BMC owns the ALSA playback lease for native applications. It opens the device
+  after the first PCM packet and releases it on an explicit release,
+  disconnect, or 250 ms of inactivity. On generation 14, the idle compositor,
+  dormant Retro Deck widget, and clock host each hold no `/dev/snd` or
+  `/dev/dsp` descriptor.
 - FCEUmm reports 48 kHz. The OSS device remains configured at its required
   nominal 48 kHz while the runtime resamples to the measured 47,328-frame
   application clock to avoid slowing emulation.
@@ -173,14 +183,18 @@ details when they are needed for archaeology.
 
 ## Current physical acceptance items
 
-The 2026-07-18 `.15` deployment passed host tests, ARM builds, staged
-validation, ECL catalog generation, service checks, and process-path checks.
-Three observations still require eyes and ears on the physical unit:
+The 2026-07-21 generation 14 deployment on `.15` passed host tests, ARM builds,
+BMC package activation, Common Lisp policy startup, service checks, and
+process-path checks. After 138 seconds at the clock, `bmc-openwrt`,
+`retro-deck`, and `bmc-wasm-host` remained alive with zero OOM kills. Four
+observations still require eyes and ears on the physical unit:
 
-1. Compare NES pixel edges after the nearest-neighbor compositor patch.
-2. Listen to Kirby and Micro Mages long enough to assess the reported NES audio
+1. Swipe repeatedly between the clock and Retro Deck, confirm the current
+   tabbed dashboard, and check for smearing, flashing, or a black return screen.
+2. Compare NES pixel edges after the nearest-neighbor compositor patch.
+3. Listen to Kirby and Micro Mages long enough to assess the reported NES audio
    distortion rather than only their title screens.
-3. Start a ZX title with the rebuilt valid-memfd frontend and confirm its first
+4. Start a ZX title with the rebuilt valid-memfd frontend and confirm its first
    playable frame.
 
 These are explicit acceptance checks, not claims that unobserved behavior has
@@ -192,8 +206,10 @@ already been verified.
 # BMC and Retro Deck processes
 /etc/init.d/bmc-compositor status
 pidof bmc-openwrt
-pidof deck-menu
-tail -n 100 /mnt/data/nes-deck/log/deck-menu.log
+pidof retro-deck
+pidof bmc-wasm-host
+tail -n 100 /var/log/bmc/bmc.log
+tail -n 100 /var/log/bmc/widgets.log
 
 # Generated catalog and credits
 cmp /mnt/data/nes-deck/menu/games.tsv \
