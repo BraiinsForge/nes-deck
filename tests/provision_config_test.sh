@@ -98,6 +98,10 @@ grep -Fq 'Live Wi-Fi changed during BMC store initialization' \
   echo "provisioner does not guard live Wi-Fi across BMC initialization" >&2
   exit 1
 }
+grep -Fq 'pidof retro-deck >/dev/null' "$root/ops/provision-deck.sh" || {
+  echo "provisioner does not verify the native dashboard process" >&2
+  exit 1
+}
 
 ln -s home.psk "$profiles/unsafe.psk"
 if "$root/ops/provision-deck.sh" --config "$config" \

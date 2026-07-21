@@ -55,6 +55,8 @@ grep -Fq '20 ssh -o BatchMode=yes' "$timeout_arguments" ||
   fail 'health check did not enforce its overall SSH timeout'
 grep -Fq 'require_process UPLOADER rom-uploader' "$remote_script" ||
   fail 'remote health check does not inspect the uploader process'
+grep -Fq 'require_process WIDGET retro-deck' "$remote_script" ||
+  fail 'remote health check does not inspect the native widget process'
 if grep -Fq 'require_process DASHBOARD deck-menu' "$remote_script"; then
   fail 'remote health check still requires the retired C++ dashboard'
 fi

@@ -98,6 +98,7 @@ else
   report DASHBOARD 'native package INCOMPLETE'
   failures=$((failures + 1))
 fi
+require_process WIDGET retro-deck
 if [ -s "$native_application/manifest.json" ] &&
    [ -x "$native_application/bin/retro-deck-launcher" ]; then
   report APPLICATION 'native launcher installed'

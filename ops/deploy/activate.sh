@@ -306,13 +306,13 @@ rm -f /etc/rc.d/S??nes-deck-swap /etc/rc.d/K??nes-deck-swap
 /etc/init.d/nes-deck-uploader enable
 /etc/init.d/nes-deck-uploader restart
 
-# The widget is lifecycle-managed and need not have a process while its scene
-# is inactive. Readiness therefore checks BMC, its installed package, and the
-# always-on uploader rather than requiring a retro-deck PID.
+# BMC spawns each enabled scene at startup and keeps inactive native widgets in
+# the prepared lifecycle state. A missing process therefore means startup failed.
 attempt=0
 while [ "$attempt" -lt 45 ]; do
   if /etc/init.d/bmc-compositor status >/dev/null 2>&1 && \
      /etc/init.d/nes-deck-uploader status >/dev/null 2>&1 && \
+     pidof retro-deck >/dev/null 2>&1 && \
      pidof rom-uploader >/dev/null 2>&1; then
     break
   fi
@@ -334,6 +334,10 @@ done
 }
 pidof rom-uploader >/dev/null 2>&1 || {
   echo "ROM uploader did not reach its ready state" >&2
+  exit 1
+}
+pidof retro-deck >/dev/null 2>&1 || {
+  echo "Retro Deck native widget did not reach its prepared state" >&2
   exit 1
 }
 require_executable "$native_widget/bin/retro-deck" \

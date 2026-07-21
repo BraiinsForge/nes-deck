@@ -64,6 +64,8 @@ service_stop_line=$(grep -n '^  /etc/init.d/bmc-compositor stop' "$activation" |
 if grep -Fq 'pidof deck-menu' "$activation"; then
   fail 'activation still waits for the retired C++ dashboard'
 fi
+grep -Fq 'pidof retro-deck' "$activation" ||
+  fail 'activation does not wait for the native dashboard process'
 grep -Fq "\"\$stage/deploy/install-lisp-tree\" --check \"\$stage/nes-deck/lisp\"" \
   "$activation" || fail 'activation does not preflight managed Lisp sources'
 grep -Fq "\"\$stage/deploy/install-lisp-tree\" \"\$stage/nes-deck/lisp\" \"\$base/lisp\"" \
