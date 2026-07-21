@@ -43,7 +43,7 @@ const LISP_WORKER: &str = "/mnt/data/nes-deck/lisp/run-worker.lisp";
 const LISP_SITE_DIRECTORY: &str = "/mnt/data/nes-deck/lisp/site.d";
 const DASHBOARD_POLICY_HOOK: &str = "dashboard/startup";
 const POLICY_POLL_INTERVAL: Duration = Duration::from_millis(25);
-const SETTINGS_COG_PATH: &str = "assets/gear-knekko-09.png";
+const SETTINGS_COG_PNG: &[u8] = include_bytes!("../../assets/gear-knekko-09.png");
 const COVER_BITMAP_TAG: &str = "retro-deck-cover";
 const KEY_ESCAPE: u32 = 1;
 const KEY_ENTER: u32 = 28;
@@ -558,13 +558,8 @@ impl Graphics {
                 return Err(error).context("create BMC renderer");
             }
         };
-        let settings_cog = match std::fs::read(SETTINGS_COG_PATH) {
-            Ok(png) => renderer.register_bitmap_nearest("retro-deck:settings-cog", &png),
-            Err(error) => {
-                tracing::warn!(?error, path = SETTINGS_COG_PATH, "cannot load settings cog");
-                None
-            }
-        };
+        let settings_cog =
+            renderer.register_bitmap_nearest("retro-deck:settings-cog", SETTINGS_COG_PNG);
         Ok(Self {
             egl,
             scratch: Some(scratch),
