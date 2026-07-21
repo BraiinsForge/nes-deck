@@ -368,8 +368,7 @@
             gme_source=$TMPDIR/game-music-emu
             gme_build=$TMPDIR/game-music-emu-build
             mkdir -p "$gme_source" "$gme_build"
-            tar --extract --file=${pkgs.game-music-emu.src} \
-              --directory="$gme_source" --strip-components=1
+            cp -R ${pkgs.game-music-emu.src}/. "$gme_source/"
             chmod -R u+w "$gme_source"
             cmake -S "$gme_source" -B "$gme_build" \
               -DCMAKE_BUILD_TYPE=Release \
@@ -389,10 +388,8 @@
 
           postInstall = ''
             mkdir -p $out/bin $out/share/licenses/chiptune-deck
-            tar --extract --file=${pkgs.game-music-emu.src} \
-              --to-stdout \
-              game-music-emu-${pkgs.game-music-emu.version}/license.txt \
-              > $out/share/licenses/chiptune-deck/license.txt
+            install -m644 ${pkgs.game-music-emu.src}/license.txt \
+              $out/share/licenses/chiptune-deck/license.txt
           '';
 
           postFixup = ''
