@@ -35,8 +35,8 @@ details when they are needed for archaeology.
 - The panel framebuffer is 600 by 1280 RGB565 with a reported 1280-byte pitch.
   Each physical row therefore includes 80 padding bytes. Code must use the
   reported stride, not `xres * bytes-per-pixel`.
-- The panel is portrait hardware used as a 1280 by 480 logical landscape
-  display. The fbdev fallback rotates pixels in software.
+- The panel is portrait hardware exposed by BMC as a 1280 by 480 logical
+  landscape surface. Retro Deck has no separate fbdev presentation path.
 - The touchscreen already reports logical landscape coordinates from X
   0 through 1279 and Y 0 through 479. No touch rotation is needed.
 - Native content uses a 16-pixel safe inset for the rounded panel corners.
@@ -162,9 +162,9 @@ details when they are needed for archaeology.
 
 ## Services and deployment
 
-- In BMC mode, `/etc/init.d/bmc-compositor` owns the display and spawns the
-  Retro Deck widget. The legacy fbdev `nes-deck` service remains disabled.
-- Without BMC, `/etc/init.d/nes-deck` supervises the fbdev launcher directly.
+- `/etc/init.d/bmc-compositor` owns the display and spawns the Retro Deck
+  widget. Deployment disables a leftover fbdev `nes-deck` service when one is
+  present; BMC is the only supported presentation path.
 - `/etc/init.d/nes-deck-uploader`, `/etc/init.d/deck-wifi`, and
   `/etc/init.d/deck-wireguard` are independent services.
 - `ops/deploy.sh` builds a complete static ARM payload and uploads it to a
