@@ -18,8 +18,7 @@ details for development.
 ## Prerequisites
 
 Install Nix with flakes enabled. Host tests also require Rust 1.94 or newer
-with Cargo, rustfmt, and Clippy; a C++ compiler; `pkg-config`; libpng; and
-ImageMagick.
+with Cargo, rustfmt, and Clippy, a C compiler, and ImageMagick.
 
 All first-party Rust uses the same 1.94 language level as BMC. The flake follows
 BMC's nixpkgs input, so native widget and ARM runtime builds use the same Rust
@@ -28,8 +27,7 @@ package set instead of maintaining a second compiler boundary.
 On Debian or Ubuntu:
 
 ```sh
-sudo apt-get install \
-  build-essential imagemagick libpng-dev pkg-config
+sudo apt-get install build-essential imagemagick
 ```
 
 Then clone the private repository:
@@ -42,10 +40,9 @@ cd retrodeck
 The first Nix build downloads the pinned cross toolchain and may take several
 minutes. Later builds reuse the Nix store.
 
-Each native runtime receives an explicit local source set. Editing the menu,
-for example, invalidates `deck-menu` without rebuilding unrelated emulators.
-Keep new source and header files in the corresponding source set near the top
-of `flake.nix`; do not add the complete `src/` directory as a build input.
+Each native runtime receives an explicit local source set. Keep new files in
+the narrow Rust, Lisp, asset, or vendored-emulator source set that consumes
+them instead of invalidating every ARM package.
 
 ## Build packages individually
 
@@ -57,7 +54,7 @@ nix build --no-link --print-out-paths .#gb-deck
 nix build --no-link --print-out-paths .#zx-deck
 nix build --no-link --print-out-paths .#chip8-deck
 nix build --no-link --print-out-paths .#ten-seconds-deck
-nix build --no-link --print-out-paths .#deck-menu
+nix build --no-link --print-out-paths .#retro-deck-widget
 nix build --no-link --print-out-paths .#fbterm-deck
 nix build --no-link --print-out-paths .#rlwrap-deck
 nix build --no-link --print-out-paths .#lua-deck
@@ -77,7 +74,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `zx-deck` | `bin/zx-deck` |
 | `chip8-deck` | `bin/chip8-deck` |
 | `ten-seconds-deck` | `bin/ten-seconds-deck` |
-| `deck-menu` | `bin/deck-menu` |
+| `retro-deck-widget` | BMC native widget and application package |
 | `fbterm-deck` | `bin/{fbterm,loadkeys}` plus font and keymaps |
 | `rlwrap-deck` | `bin/rlwrap` |
 | `lua-deck` | `bin/lua` |
@@ -197,16 +194,15 @@ The patch selects nearest-neighbor filtering for both directions. The script
 is idempotent and refuses a source tree whose patch context does not match.
 When the game exits, both layer surfaces disappear and scene swiping resumes.
 
-The legacy `ops/deploy.sh` route installs its rollback widget under
-`/mnt/data/bmc-widgets/retro-deck`.
-If `bmc-compositor` is present, deployment stops it, adds one idempotent Retro
-Deck scene to `/etc/bmc_config.json`, disables the legacy fbdev menu service,
-enables a 64 MiB swapfile before BMC starts, and restarts the compositor. The
-swap is needed because 128 MiB of the Deck's 256 MiB RAM is reserved for CMA;
-without it, a stock BMC widget plus Retro Deck can trigger global OOM while
-the first fullscreen SHM frame is faulted in. Existing swapfiles are left
-untouched if they cannot be enabled. The original configuration is retained
-once as `/etc/bmc_config.json.retro-deck.bak` before the first scene edit.
+`ops/deploy.sh` installs the dashboard through BMC's generation-managed native
+widget and application package format. It preflights that package and the
+complete static payload before stopping the compositor, adds one idempotent
+Retro Deck scene to `/etc/bmc_config.json`, disables the former fbdev service,
+enables a 64 MiB swapfile, and restarts the compositor. The swap is needed
+because 128 MiB of the Deck's 256 MiB RAM is reserved for CMA. Existing
+swapfiles are left untouched if they cannot be enabled. The original BMC
+configuration is retained once as `/etc/bmc_config.json.retro-deck.bak` before
+the first scene edit.
 
 BMC owns ALSA and one central audio-device lease. Every managed foreground
 application receives an inherited bounded datagram channel for signed 16-bit
@@ -243,10 +239,11 @@ retrodeck/
 │   └── retro-deck-uploader/     authenticated ROM and appearance service
 ├── chiptunes/                  CC0 seed tracks and provenance
 ├── deploy/
-│   ├── menu/                   catalog, launcher, and procd service
+│   ├── application/            native BMC application manifest
+│   ├── menu/                   catalog, palette, covers, and system hooks
 │   ├── terminal/               fbterm wrapper, fontconfig, and keymaps
 │   ├── uploader/               uploader service and credential plumbing
-│   └── widget/                 BMC manifest, launcher, and scene installer
+│   └── widget/                 native BMC widget manifest
 ├── nix/                        ECL and runtime-specific Nix expressions
 ├── ops/
 │   ├── bmc/                    external BMC patch application
@@ -257,10 +254,9 @@ retrodeck/
 │   ├── check-deck.sh           read-only installed health report
 │   └── deploy.sh               local build, staging, and transfer
 ├── patches/                    pinned upstream fixes
-├── protocol/                   gameplay layer-shell and rollback protocols
+├── protocol/                   third-party protocol license notice
 ├── roms/                       private canonical ROM library and checksums
 ├── lisp/                       tracked Common Lisp policy runtime
-├── src/                        C++ dashboard rollback pending the live gate
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
 ├── vendor/emulators/           pinned emulator source and provenance

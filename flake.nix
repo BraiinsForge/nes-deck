@@ -29,19 +29,6 @@
       pkgs = nixpkgs.legacyPackages.${system};
       pkgsCross = pkgs.pkgsCross.armv7l-hf-multiplatform;
       staticCross = pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsStatic;
-      libffiStaticCross = pkgsCross.libffi.overrideAttrs (_old: {
-        dontDisableStatic = true;
-        doCheck = false;
-      });
-      waylandStaticCross = (pkgsCross.wayland.override {
-        libffi = libffiStaticCross;
-      }).overrideAttrs (old: {
-        mesonFlags = (old.mesonFlags or [ ]) ++ [ "--default-library=static" ];
-      });
-      libpngStaticCross = pkgsCross.libpng.overrideAttrs (_old: {
-        dontDisableStatic = true;
-        doCheck = false;
-      });
       rlwrapStaticCross = staticCross.rlwrap.override {
         libptytty = null;
       };
@@ -80,54 +67,6 @@
         install_strategy = null;
       };
 
-      waylandNativeInputs = [ pkgs.wayland-scanner ];
-      waylandStaticInputs = [ waylandStaticCross libffiStaticCross ];
-      # Keep each local build input narrow. Referencing ./src as an include
-      # directory would make every source edit invalidate every native runtime.
-      sourceTree = files: pkgs.lib.fileset.toSource {
-        root = ./src;
-        fileset = pkgs.lib.fileset.unions files;
-      };
-      menuSources = sourceTree [
-        ./src/deck_menu.cpp
-        ./src/deck_wayland.cpp
-        ./src/deck_wayland.h
-        ./src/menu_catalog.cpp
-        ./src/menu_catalog.h
-        ./src/menu_credits.cpp
-        ./src/menu_credits.h
-        ./src/menu_io.cpp
-        ./src/menu_io.h
-        ./src/menu_network.cpp
-        ./src/menu_network.h
-        ./src/menu_sound.cpp
-        ./src/menu_sound.h
-        ./src/menu_state.cpp
-        ./src/menu_state.h
-        ./src/menu_text.cpp
-        ./src/menu_text.h
-        ./src/menu_ui.cpp
-        ./src/menu_ui.h
-      ];
-      waylandProtocolBuild = ''
-        wayland-scanner client-header \
-          ${./protocol/deck-widget-v1.xml} \
-          deck-widget-v1-client-protocol.h
-        wayland-scanner private-code \
-          ${./protocol/deck-widget-v1.xml} \
-          deck-widget-v1-protocol.c
-        wayland-scanner client-header \
-          ${./protocol/wlr-layer-shell-unstable-v1.xml} \
-          wlr-layer-shell-unstable-v1-client-protocol.h
-        wayland-scanner private-code \
-          ${./protocol/wlr-layer-shell-unstable-v1.xml} \
-          wlr-layer-shell-unstable-v1-protocol.c
-        $CC -std=c99 -Os -Wall -Wextra -Werror \
-          -c deck-widget-v1-protocol.c -o deck-widget-v1-protocol.o
-        $CC -std=c99 -Os -Wall -Wextra -Werror \
-          -c wlr-layer-shell-unstable-v1-protocol.c \
-          -o wlr-layer-shell-unstable-v1-protocol.o
-      '';
       runtimeLicenses = import ./nix/runtime-licenses.nix {
         inherit pkgs pkgsCross staticCross;
         nixpkgsSource = nixpkgs.outPath;
@@ -290,70 +229,6 @@
           homepage = "https://github.com/libretro/libretro-fceumm";
           license = pkgs.lib.licenses.gpl2Only;
         };
-
-
-        deck-menu = pkgsCross.stdenv.mkDerivation {
-          pname = "deck-menu";
-          version = "1.0.0";
-
-          dontUnpack = true;
-          nativeBuildInputs = [ pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [
-            pkgsCross.glibc.static
-            libpngStaticCross
-            pkgsCross.zlib.static
-          ] ++ waylandStaticInputs;
-          allowedReferences = [ ];
-
-          NIX_CFLAGS_COMPILE = "-static -Os";
-          NIX_LDFLAGS = "-static";
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
-            cp ${menuSources}/deck_menu.cpp deck_menu.cpp
-            cp ${menuSources}/menu_sound.cpp menu_sound.cpp
-            cp ${menuSources}/menu_sound.h menu_sound.h
-            cp ${menuSources}/menu_catalog.cpp menu_catalog.cpp
-            cp ${menuSources}/menu_catalog.h menu_catalog.h
-            cp ${menuSources}/menu_credits.cpp menu_credits.cpp
-            cp ${menuSources}/menu_credits.h menu_credits.h
-            cp ${menuSources}/menu_io.cpp menu_io.cpp
-            cp ${menuSources}/menu_io.h menu_io.h
-            cp ${menuSources}/menu_network.cpp menu_network.cpp
-            cp ${menuSources}/menu_network.h menu_network.h
-            cp ${menuSources}/menu_state.cpp menu_state.cpp
-            cp ${menuSources}/menu_state.h menu_state.h
-            cp ${menuSources}/menu_text.cpp menu_text.cpp
-            cp ${menuSources}/menu_text.h menu_text.h
-            cp ${menuSources}/menu_ui.cpp menu_ui.cpp
-            cp ${menuSources}/menu_ui.h menu_ui.h
-            $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${menuSources} \
-              deck_menu.cpp menu_sound.cpp menu_catalog.cpp \
-              menu_credits.cpp menu_io.cpp \
-              menu_network.cpp menu_state.cpp menu_text.cpp menu_ui.cpp \
-              ${menuSources}/deck_wayland.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              -static -lpng -lz -lwayland-client -lffi -o deck-menu
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin
-            install -m755 deck-menu $out/bin/deck-menu
-            nuke-refs $out/bin/deck-menu
-            runHook postInstall
-          '';
-
-          meta = {
-            description = "Touch-first game launcher for the Braiins Forge Deck";
-            platforms = [ "armv7l-linux" ];
-          };
-        };
-
         chiptune-deck = pkgsCross.rustPlatform.buildRustPackage {
           pname = "chiptune-deck";
           version = "0.1.0";

@@ -10,17 +10,12 @@ cd "$repo_root"
 
 "$script_dir/vendor_emulators_test.sh"
 
-cxx=${CXX:-g++}
-for command in "$cxx" cargo nix pkg-config; do
+for command in cargo nix; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
   }
 done
-pkg-config --exists libpng || {
-  echo "Missing development package: libpng" >&2
-  exit 1
-}
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
@@ -31,51 +26,6 @@ cargo clippy --manifest-path "$dashboard_manifest" --workspace --all-targets \
   --no-default-features --features application-wire -- -D warnings
 cargo test --manifest-path "$dashboard_manifest" --workspace --all-targets \
   --no-default-features --features application-wire
-
-work=$(mktemp -d "${TMPDIR:-/tmp}/nes-deck-tests.XXXXXX")
-trap 'rm -rf "$work"' EXIT INT TERM HUP
-
-compile_cpp_test() {
-  local source=$1
-  local output=$2
-  shift 2
-  "$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-    "$source" "$@" -o "$work/$output"
-  "$work/$output"
-}
-
-compile_cpp_test tests/menu_text_test.cpp menu-text-test src/menu_text.cpp
-compile_cpp_test tests/menu_catalog_test.cpp menu-catalog-test \
-  src/menu_catalog.cpp src/menu_io.cpp src/menu_text.cpp
-compile_cpp_test tests/menu_network_test.cpp menu-network-test \
-  src/menu_network.cpp src/menu_text.cpp
-compile_cpp_test tests/menu_state_test.cpp menu-state-test \
-  src/menu_state.cpp src/menu_io.cpp src/menu_text.cpp
-compile_cpp_test tests/menu_ui_test.cpp menu-ui-test \
-  src/menu_ui.cpp src/menu_text.cpp
-"$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-  tests/menu_credits_test.cpp src/menu_credits.cpp src/menu_ui.cpp \
-  src/menu_text.cpp \
-  -o "$work/menu-credits-test"
-"$work/menu-credits-test" "$repo_root/deploy/menu/credits.tsv"
-
-png_flags=$(pkg-config --cflags --libs libpng)
-# pkg-config output is intentionally split into compiler arguments.
-# shellcheck disable=SC2086
-"$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-  src/deck_menu.cpp src/menu_sound.cpp src/menu_catalog.cpp \
-  src/menu_credits.cpp src/menu_io.cpp src/menu_network.cpp \
-  src/menu_state.cpp src/menu_text.cpp src/menu_ui.cpp \
-  $png_flags \
-  -o "$work/deck-menu-host"
-"$work/deck-menu-host" --geometry-test
-# shellcheck disable=SC2086
-"$cxx" -std=c++11 -O2 -Wall -Wextra -Wpedantic -Werror \
-  tests/deck_menu_test.cpp src/menu_sound.cpp src/menu_catalog.cpp \
-  src/menu_credits.cpp src/menu_io.cpp src/menu_network.cpp \
-  src/menu_state.cpp src/menu_text.cpp src/menu_ui.cpp $png_flags \
-  -o "$work/deck-menu-test"
-"$work/deck-menu-test"
 
 tests/rom_library_test.sh
 tests/catalog_test.sh
