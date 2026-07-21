@@ -15,6 +15,7 @@ const ENTRY_PREVIOUS: &str = "entry-previous";
 const ENTRY_NEXT: &str = "entry-next";
 const OPEN_SYSTEM_SETTINGS: &str = "open-system-settings";
 const MAXIMUM_VISIBLE_CARDS: usize = 3;
+const PANEL_STROKE: f32 = 4.0;
 
 /// Product action derived from one BMC tree touch key.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -334,22 +335,43 @@ fn panel_with_text(
 }
 
 fn panel_draws(width: f32, height: f32, fill: Color, border: Color) -> Vec<DrawCommand> {
+    let mut draws = pixel_cut_rect_draws(0.0, 0.0, width, height, PANEL_STROKE, border);
+    draws.extend(pixel_cut_rect_draws(
+        PANEL_STROKE,
+        PANEL_STROKE,
+        width - PANEL_STROKE * 2.0,
+        height - PANEL_STROKE * 2.0,
+        PANEL_STROKE,
+        fill,
+    ));
+    draws
+}
+
+fn pixel_cut_rect_draws(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    cut: f32,
+    fill: Color,
+) -> Vec<DrawCommand> {
+    if width <= cut * 2.0 || height <= cut * 2.0 {
+        return Vec::new();
+    }
     vec![
         DrawCommand::Rect {
-            x: 0.0,
-            y: 0.0,
-            w: width,
+            x: x + cut,
+            y,
+            w: width - cut * 2.0,
             h: height,
             fill: Fill::Solid(fill),
         },
-        DrawCommand::Path {
-            points: rectangle_points(1.5, 1.5, width - 3.0, height - 3.0),
-            paint: PathPaint::Stroke {
-                color: border,
-                width: 3.0,
-            },
-            closed: true,
-            smooth: false,
+        DrawCommand::Rect {
+            x,
+            y: y + cut,
+            w: width,
+            h: height - cut * 2.0,
+            fill: Fill::Solid(fill),
         },
     ]
 }
@@ -605,5 +627,35 @@ mod tests {
     fn long_titles_keep_one_fixed_display_size() {
         assert_eq!(card_title("SHORT"), "SHORT");
         assert_eq!(card_title("A VERY LONG GAME TITLE"), "A VERY LONG GAM...");
+    }
+
+    #[test]
+    fn panels_use_square_pixel_cut_corners() {
+        let border = Color::from_rgba(255, 95, 0, 255);
+        let fill = Color::from_rgba(32, 24, 20, 255);
+        let draws = panel_draws(100.0, 40.0, fill, border);
+        let actual = draws.iter().map(rect_geometry).collect::<Option<Vec<_>>>();
+        assert_eq!(
+            actual,
+            Some(vec![
+                ((4.0, 0.0, 92.0, 40.0), border),
+                ((0.0, 4.0, 100.0, 32.0), border),
+                ((8.0, 4.0, 84.0, 32.0), fill),
+                ((4.0, 8.0, 92.0, 24.0), fill),
+            ])
+        );
+    }
+
+    fn rect_geometry(command: &DrawCommand) -> Option<((f32, f32, f32, f32), Color)> {
+        match command {
+            DrawCommand::Rect {
+                x,
+                y,
+                w,
+                h,
+                fill: Fill::Solid(color),
+            } => Some(((*x, *y, *w, *h), *color)),
+            _ => None,
+        }
     }
 }
