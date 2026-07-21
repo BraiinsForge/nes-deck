@@ -1,6 +1,5 @@
-//! BMC widget and gameplay surfaces driven through the pure Rust Wayland client.
+//! Gameplay layer-shell surfaces for foreground Retro Deck applications.
 
-use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
 use std::fs::File;
@@ -16,10 +15,9 @@ use rustix::fs::{MemfdFlags, ftruncate, memfd_create};
 use wayland_client::backend::WaylandError as TransportError;
 use wayland_client::globals::{BindError, GlobalError, GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_region, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
-    wl_touch,
+    wl_buffer, wl_compositor, wl_region, wl_registry, wl_shm, wl_shm_pool, wl_surface,
 };
-use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum, delegate_noop};
+use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::display::{
@@ -27,96 +25,15 @@ use crate::display::{
     SlotId, gameplay_dimensions,
 };
 use crate::time::duration_timespec;
-use crate::wayland_protocol::deck_widget_v1::{deck_widget_manager_v1, deck_widget_surface_v1};
 
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(2);
 const CONFIGURE_POLL_SLICE: Duration = Duration::from_millis(100);
-const MAXIMUM_TOUCH_REPORTS: usize = 64;
 const BACKGROUND_COLOR: u32 = 0xff00_0000;
 const EXIT_HINT_COLOR: u32 = 0xffff_ffff;
 const EXIT_HINT_LEFT: usize = 20;
 const EXIT_HINT_TOP: usize = 20;
 const EXIT_HINT_CELL: usize = 4;
 const EXIT_HINT_STEPS: usize = 9;
-
-/// One bounded touch update delivered by the BMC widget seat.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TouchReport {
-    x: u16,
-    y: u16,
-    down: bool,
-    pressed: bool,
-    released: bool,
-}
-
-impl TouchReport {
-    /// Horizontal surface coordinate.
-    #[must_use]
-    pub const fn x(self) -> u16 {
-        self.x
-    }
-
-    /// Vertical surface coordinate.
-    #[must_use]
-    pub const fn y(self) -> u16 {
-        self.y
-    }
-
-    /// Whether the primary contact remains down.
-    #[must_use]
-    pub const fn down(self) -> bool {
-        self.down
-    }
-
-    /// Whether this report began the primary contact.
-    #[must_use]
-    pub const fn pressed(self) -> bool {
-        self.pressed
-    }
-
-    /// Whether this report ended or cancelled the primary contact.
-    #[must_use]
-    pub const fn released(self) -> bool {
-        self.released
-    }
-}
-
-#[derive(Debug)]
-struct TouchQueue {
-    reports: VecDeque<TouchReport>,
-    dropped: usize,
-}
-
-impl TouchQueue {
-    fn new() -> Self {
-        Self {
-            reports: VecDeque::with_capacity(8),
-            dropped: 0,
-        }
-    }
-
-    fn push(&mut self, report: TouchReport) {
-        if !report.pressed && !report.released {
-            if let Some(previous) = self.reports.back_mut() {
-                if !previous.pressed && !previous.released {
-                    *previous = report;
-                    return;
-                }
-            }
-        }
-        if self.reports.len() == MAXIMUM_TOUCH_REPORTS {
-            let _ = self.reports.pop_front();
-            self.dropped = self.dropped.saturating_add(1);
-        }
-        self.reports.push_back(report);
-    }
-
-    fn take(&mut self) -> (Vec<TouchReport>, usize) {
-        let reports = self.reports.drain(..).collect();
-        let dropped = std::mem::take(&mut self.dropped);
-        (reports, dropped)
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LayerRole {
@@ -126,8 +43,6 @@ enum LayerRole {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConfigureState {
-    AwaitingWidgetConfigure,
-    AwaitingWidgetDone,
     AwaitingGameplay { game: bool, background: bool },
     Ready,
     Invalid,
@@ -135,35 +50,11 @@ enum ConfigureState {
 }
 
 impl ConfigureState {
-    const fn widget() -> Self {
-        Self::AwaitingWidgetConfigure
-    }
-
     const fn gameplay() -> Self {
         Self::AwaitingGameplay {
             game: false,
             background: false,
         }
-    }
-
-    const fn widget_dimensions(&mut self) {
-        match self {
-            Self::AwaitingWidgetConfigure => *self = Self::AwaitingWidgetDone,
-            Self::AwaitingWidgetDone | Self::Ready => {}
-            Self::AwaitingGameplay { .. } | Self::Invalid | Self::Closed => {
-                *self = Self::Invalid;
-            }
-        }
-    }
-
-    const fn widget_done(&mut self) {
-        *self = match self {
-            Self::AwaitingWidgetDone | Self::Ready => Self::Ready,
-            Self::AwaitingWidgetConfigure
-            | Self::AwaitingGameplay { .. }
-            | Self::Invalid
-            | Self::Closed => Self::Invalid,
-        };
     }
 
     const fn layer_configured(&mut self, role: LayerRole) {
@@ -173,10 +64,7 @@ impl ConfigureState {
                 LayerRole::Background => *background = true,
             },
             Self::Ready => return,
-            Self::AwaitingWidgetConfigure
-            | Self::AwaitingWidgetDone
-            | Self::Invalid
-            | Self::Closed => {
+            Self::Invalid | Self::Closed => {
                 *self = Self::Invalid;
                 return;
             }
@@ -194,12 +82,6 @@ impl ConfigureState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Visibility {
-    Visible,
-    Hidden,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BufferRole {
     Frame(SlotId),
     Background,
@@ -207,39 +89,17 @@ enum BufferRole {
 
 #[derive(Debug)]
 struct EventState {
-    main_surface: wl_surface::WlSurface,
     dimensions: Dimensions,
     configure: ConfigureState,
-    visibility: Visibility,
-    touch: Option<wl_touch::WlTouch>,
-    primary_touch: Option<i32>,
-    touch_x: u16,
-    touch_y: u16,
-    touch_reports: TouchQueue,
     presentation_slots: PresentationSlots,
     slot_error: Option<SlotError>,
 }
 
 impl EventState {
-    fn new(
-        main_surface: wl_surface::WlSurface,
-        dimensions: Dimensions,
-        require_background: bool,
-    ) -> Self {
+    const fn new(dimensions: Dimensions) -> Self {
         Self {
-            main_surface,
             dimensions,
-            configure: if require_background {
-                ConfigureState::gameplay()
-            } else {
-                ConfigureState::widget()
-            },
-            visibility: Visibility::Visible,
-            touch: None,
-            primary_touch: None,
-            touch_x: 0,
-            touch_y: 0,
-            touch_reports: TouchQueue::new(),
+            configure: ConfigureState::gameplay(),
             presentation_slots: PresentationSlots::new(),
             slot_error: None,
         }
@@ -255,15 +115,6 @@ impl EventState {
 
     const fn shutdown(&self) -> bool {
         matches!(self.configure, ConfigureState::Closed)
-    }
-
-    fn apply_widget_configure(&mut self, width: u32, height: u32) {
-        let Some(dimensions) = dimensions_from_protocol(width, height) else {
-            self.configure = ConfigureState::Invalid;
-            return;
-        };
-        self.dimensions = dimensions;
-        self.configure.widget_dimensions();
     }
 
     fn apply_layer_configure(&mut self, role: LayerRole, width: u32, height: u32) {
@@ -287,52 +138,12 @@ impl EventState {
         }
         self.configure.layer_configured(role);
     }
-
-    fn update_touch_point(&mut self, x: f64, y: f64) {
-        self.touch_x = clamp_coordinate(x, self.dimensions.width());
-        self.touch_y = clamp_coordinate(y, self.dimensions.height());
-    }
-
-    fn push_touch(&mut self, pressed: bool, released: bool) {
-        let report = TouchReport {
-            x: self.touch_x,
-            y: self.touch_y,
-            down: self.primary_touch.is_some(),
-            pressed,
-            released,
-        };
-        self.touch_reports.push(report);
-    }
-
-    fn cancel_touch(&mut self) {
-        if self.primary_touch.take().is_some() {
-            self.push_touch(false, true);
-        }
-    }
 }
 
 fn dimensions_from_protocol(width: u32, height: u32) -> Option<Dimensions> {
     let width = usize::try_from(width).ok()?;
     let height = usize::try_from(height).ok()?;
     Dimensions::new(width, height)
-}
-
-fn clamp_coordinate(value: f64, extent: usize) -> u16 {
-    let maximum = extent.saturating_sub(1).min(usize::from(u16::MAX));
-    let maximum = u16::try_from(maximum).unwrap_or(u16::MAX);
-    if !value.is_finite() || value <= 0.0 {
-        return 0;
-    }
-    if value >= f64::from(maximum) {
-        return maximum;
-    }
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "finite positive Wayland coordinates are clamped below u16::MAX"
-    )]
-    let coordinate = value as u16;
-    coordinate
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -473,87 +284,23 @@ impl Drop for SharedBuffers {
     }
 }
 
-enum SurfaceObjects {
-    Widget {
-        widget_surface: deck_widget_surface_v1::DeckWidgetSurfaceV1,
-    },
-    Gameplay {
-        game_layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
-        background_surface: wl_surface::WlSurface,
-        background_layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
-    },
-}
-
-impl fmt::Debug for SurfaceObjects {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Widget { .. } => formatter.write_str("Widget"),
-            Self::Gameplay { .. } => formatter.write_str("Gameplay"),
-        }
-    }
-}
-
-/// Configured BMC widget or gameplay surface without presentation buffers.
+/// Configured foreground gameplay surface without presentation buffers.
 ///
 /// Buffer allocation and frame attachment are owned by the presentation layer;
-/// this type owns protocol event dispatch, lifecycle, and widget touch input.
+/// this type owns layer-shell event dispatch and surface lifecycle.
 #[derive(Debug)]
 pub struct WaylandSurface {
     event_queue: EventQueue<EventState>,
     state: EventState,
     main_surface: wl_surface::WlSurface,
-    objects: SurfaceObjects,
+    game_layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    background_surface: wl_surface::WlSurface,
+    background_layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     shm: wl_shm::WlShm,
     _compositor: wl_compositor::WlCompositor,
-    _seat: Option<wl_seat::WlSeat>,
 }
 
 impl WaylandSurface {
-    /// Connect to BMC and create a swipeable dashboard widget.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`WaylandSurfaceError`] when the compositor, required global,
-    /// surface role, or initial two-second configure handshake fails.
-    pub fn connect_widget() -> Result<Self, WaylandSurfaceError> {
-        let connection = Connection::connect_to_env().map_err(WaylandSurfaceError::Connect)?;
-        let (globals, event_queue) =
-            registry_queue_init::<EventState>(&connection).map_err(WaylandSurfaceError::Globals)?;
-        let handle = event_queue.handle();
-        let compositor = bind_required::<wl_compositor::WlCompositor, _>(
-            &globals,
-            &handle,
-            1..=4,
-            (),
-            "wl_compositor",
-        )?;
-        let manager = bind_required::<deck_widget_manager_v1::DeckWidgetManagerV1, _>(
-            &globals,
-            &handle,
-            1..=1,
-            (),
-            "deck_widget_manager_v1",
-        )?;
-        let shm = bind_required::<wl_shm::WlShm, _>(&globals, &handle, 1..=1, (), "wl_shm")?;
-        let seat = bind_optional::<wl_seat::WlSeat, _>(&globals, &handle, 1..=7, ());
-        let main_surface = compositor.create_surface(&handle, ());
-        let widget_surface = manager.get_widget_surface(&main_surface, &handle, ());
-        let state = EventState::new(main_surface.clone(), DECK_DIMENSIONS, false);
-        main_surface.commit();
-
-        let mut surface = Self {
-            event_queue,
-            state,
-            main_surface,
-            objects: SurfaceObjects::Widget { widget_surface },
-            shm,
-            _compositor: compositor,
-            _seat: seat,
-        };
-        surface.wait_until_configured()?;
-        Ok(surface)
-    }
-
     /// Connect to BMC and create a centered gameplay layer over black.
     ///
     /// # Errors
@@ -624,19 +371,16 @@ impl WaylandSurface {
         game_layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
         main_surface.commit();
 
-        let state = EventState::new(main_surface.clone(), dimensions, true);
+        let state = EventState::new(dimensions);
         let mut surface = Self {
             event_queue,
             state,
             main_surface,
-            objects: SurfaceObjects::Gameplay {
-                game_layer,
-                background_surface,
-                background_layer,
-            },
+            game_layer,
+            background_surface,
+            background_layer,
             shm,
             _compositor: compositor,
-            _seat: None,
         };
         surface.wait_until_configured()?;
         Ok(surface)
@@ -648,22 +392,16 @@ impl WaylandSurface {
         self.state.dimensions
     }
 
-    /// Whether BMC currently considers the dashboard widget visible.
+    /// Whether the foreground surface remains open.
     #[must_use]
     pub const fn visible(&self) -> bool {
-        matches!(self.state.visibility, Visibility::Visible)
+        !self.state.shutdown()
     }
 
     /// Whether the compositor requested permanent surface shutdown.
     #[must_use]
     pub const fn shutdown_requested(&self) -> bool {
         self.state.shutdown()
-    }
-
-    /// Drain bounded widget touch reports and return the number previously
-    /// dropped because the consumer fell behind.
-    pub fn take_touch_reports(&mut self) -> (Vec<TouchReport>, usize) {
-        self.state.touch_reports.take()
     }
 
     /// Read and dispatch any Wayland events currently available without
@@ -761,34 +499,10 @@ impl AsFd for WaylandSurface {
 
 impl Drop for WaylandSurface {
     fn drop(&mut self) {
-        match &self.objects {
-            SurfaceObjects::Widget { widget_surface } => widget_surface.destroy(),
-            SurfaceObjects::Gameplay {
-                game_layer,
-                background_surface,
-                background_layer,
-            } => {
-                game_layer.destroy();
-                background_layer.destroy();
-                background_surface.destroy();
-            }
-        }
+        self.game_layer.destroy();
+        self.background_layer.destroy();
+        self.background_surface.destroy();
         self.main_surface.destroy();
-    }
-}
-
-impl SurfaceObjects {
-    const fn is_widget(&self) -> bool {
-        matches!(self, Self::Widget { .. })
-    }
-
-    const fn background_surface(&self) -> Option<&wl_surface::WlSurface> {
-        match self {
-            Self::Widget { .. } => None,
-            Self::Gameplay {
-                background_surface, ..
-            } => Some(background_surface),
-        }
     }
 }
 
@@ -811,56 +525,19 @@ pub enum PresentOutcome {
     Busy,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SourceMode {
-    Fixed,
-    FrameDriven,
-}
-
-impl SourceMode {
-    fn prepare(self, scale: &mut ScalePlan, source: Dimensions) {
-        if matches!(self, Self::FrameDriven) {
-            let _changed = scale.update_source(source);
-        }
-    }
-}
-
-/// Configured Wayland surface with persistent XRGB8888 presentation buffers.
+/// Configured gameplay surface with persistent XRGB8888 presentation buffers.
 ///
-/// Widget source geometry is fixed. Gameplay source geometry may follow core
-/// frames while the compositor surface and its allocations remain unchanged.
+/// Source geometry may follow core frames while the compositor surface and its
+/// allocations remain unchanged.
 #[derive(Debug)]
 pub struct WaylandPresentation {
     frames: SharedBuffers,
-    background: Option<SharedBuffers>,
+    _background: SharedBuffers,
     surface: WaylandSurface,
     scale: ScalePlan,
-    source_mode: SourceMode,
 }
 
 impl WaylandPresentation {
-    /// Connect a swipeable BMC widget and allocate three persistent buffers.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`WaylandPresentationError`] for setup, mapping, protocol, or
-    /// dimension failures.
-    pub fn connect_widget(source: Dimensions) -> Result<Self, WaylandPresentationError> {
-        let surface =
-            WaylandSurface::connect_widget().map_err(WaylandPresentationError::Surface)?;
-        let target = surface.dimensions();
-        let handle = surface.event_queue.handle();
-        let roles = frame_roles()?;
-        let frames = SharedBuffers::new(&surface.shm, &handle, target, &roles)?;
-        Ok(Self {
-            frames,
-            background: None,
-            surface,
-            scale: ScalePlan::new(source, target),
-            source_mode: SourceMode::Fixed,
-        })
-    }
-
     /// Connect centered gameplay layers and retain a full-screen black buffer.
     ///
     /// # Errors
@@ -885,29 +562,18 @@ impl WaylandPresentation {
         )?;
         draw_gameplay_background(background.pixels_mut(0)?, DECK_DIMENSIONS, background_style);
         let buffer = background.buffer(0)?;
-        let background_surface = surface
-            .objects
-            .background_surface()
-            .ok_or(WaylandPresentationError::MissingBackground)?;
-        background_surface.attach(Some(buffer), 0, 0);
-        damage_full(background_surface);
-        background_surface.commit();
+        surface.background_surface.attach(Some(buffer), 0, 0);
+        damage_full(&surface.background_surface);
+        surface.background_surface.commit();
         flush_allowing_backpressure(&surface.event_queue)
             .map_err(WaylandPresentationError::Surface)?;
 
         Ok(Self {
             frames,
-            background: Some(background),
+            _background: background,
             surface,
             scale: ScalePlan::new(source, target),
-            source_mode: SourceMode::FrameDriven,
         })
-    }
-
-    /// Whether this is a swipeable widget rather than a gameplay overlay.
-    #[must_use]
-    pub const fn is_widget(&self) -> bool {
-        self.surface.objects.is_widget()
     }
 
     /// Configured presentation dimensions.
@@ -916,7 +582,7 @@ impl WaylandPresentation {
         self.surface.dimensions()
     }
 
-    /// Whether BMC currently considers this widget visible.
+    /// Whether the foreground gameplay surface remains open.
     #[must_use]
     pub const fn visible(&self) -> bool {
         self.surface.visible()
@@ -938,11 +604,6 @@ impl WaylandPresentation {
         self.surface
             .dispatch_nonblocking()
             .map_err(WaylandPresentationError::Surface)
-    }
-
-    /// Drain bounded widget touch reports and the overflow count.
-    pub fn take_touch_reports(&mut self) -> (Vec<TouchReport>, usize) {
-        self.surface.take_touch_reports()
     }
 
     /// Convert and commit one frame without waiting for a compositor release.
@@ -994,19 +655,11 @@ impl WaylandPresentation {
         slot: SlotId,
         frame: Frame<'_>,
     ) -> Result<(), WaylandPresentationError> {
-        self.source_mode
-            .prepare(&mut self.scale, frame.dimensions());
+        let _changed = self.scale.update_source(frame.dimensions());
         let pixels = self.frames.pixels_mut(slot.index())?;
         self.scale
             .blit(frame, pixels)
             .map_err(WaylandPresentationError::Display)
-    }
-
-    /// Keep the retained gameplay background allocation observable for
-    /// diagnostics without exposing mutable shared memory.
-    #[must_use]
-    pub const fn has_background(&self) -> bool {
-        self.background.is_some()
     }
 }
 
@@ -1096,8 +749,6 @@ pub enum WaylandPresentationError {
     SharedMemory(io::Error),
     /// Dimensions, offsets, or slot count cannot form a Wayland SHM pool.
     InvalidBufferLayout,
-    /// The configured gameplay background surface was absent.
-    MissingBackground,
     /// The compositor changed dimensions after fixed buffers were allocated.
     SurfaceDimensionsChanged,
     /// The compositor closed the surface before presentation.
@@ -1118,9 +769,6 @@ impl fmt::Display for WaylandPresentationError {
             Self::InvalidBufferLayout => {
                 formatter.write_str("Wayland shared-memory buffer layout is invalid")
             }
-            Self::MissingBackground => {
-                formatter.write_str("gameplay background surface is missing")
-            }
             Self::SurfaceDimensionsChanged => {
                 formatter.write_str("Wayland surface dimensions changed after buffer allocation")
             }
@@ -1136,10 +784,9 @@ impl Error for WaylandPresentationError {
             Self::Display(source) => Some(source),
             Self::BufferOwnership(source) => Some(source),
             Self::SharedMemory(source) => Some(source),
-            Self::InvalidBufferLayout
-            | Self::MissingBackground
-            | Self::SurfaceDimensionsChanged
-            | Self::SurfaceClosed => None,
+            Self::InvalidBufferLayout | Self::SurfaceDimensionsChanged | Self::SurfaceClosed => {
+                None
+            }
         }
     }
 }
@@ -1169,20 +816,6 @@ where
     globals
         .bind(handle, version, data)
         .map_err(|source| WaylandSurfaceError::Bind { interface, source })
-}
-
-fn bind_optional<I, U>(
-    globals: &wayland_client::globals::GlobalList,
-    handle: &QueueHandle<EventState>,
-    version: std::ops::RangeInclusive<u32>,
-    data: U,
-) -> Option<I>
-where
-    I: Proxy + 'static,
-    EventState: Dispatch<I, U>,
-    U: Send + Sync + 'static,
-{
-    globals.bind(handle, version, data).ok()
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for EventState {
@@ -1220,49 +853,6 @@ impl Dispatch<wl_buffer::WlBuffer, BufferRole> for EventState {
     }
 }
 
-impl Dispatch<deck_widget_manager_v1::DeckWidgetManagerV1, ()> for EventState {
-    fn event(
-        _state: &mut Self,
-        _manager: &deck_widget_manager_v1::DeckWidgetManagerV1,
-        _event: deck_widget_manager_v1::Event,
-        _data: &(),
-        _connection: &Connection,
-        _handle: &QueueHandle<Self>,
-    ) {
-    }
-}
-
-impl Dispatch<deck_widget_surface_v1::DeckWidgetSurfaceV1, ()> for EventState {
-    fn event(
-        state: &mut Self,
-        _surface: &deck_widget_surface_v1::DeckWidgetSurfaceV1,
-        event: deck_widget_surface_v1::Event,
-        _data: &(),
-        _connection: &Connection,
-        _handle: &QueueHandle<Self>,
-    ) {
-        match event {
-            deck_widget_surface_v1::Event::Configure { width, height, .. } => {
-                state.apply_widget_configure(width, height);
-            }
-            deck_widget_surface_v1::Event::ConfigureDone => {
-                state.configure.widget_done();
-            }
-            deck_widget_surface_v1::Event::Lifecycle { state: lifecycle } => {
-                state.visibility = if lifecycle == 0 {
-                    Visibility::Hidden
-                } else {
-                    Visibility::Visible
-                };
-            }
-            deck_widget_surface_v1::Event::Shutdown => {
-                state.configure = ConfigureState::Closed;
-            }
-            _ => {}
-        }
-    }
-}
-
 impl Dispatch<zwlr_layer_shell_v1::ZwlrLayerShellV1, ()> for EventState {
     fn event(
         _state: &mut Self,
@@ -1296,66 +886,6 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, LayerRole> for EventSta
             zwlr_layer_surface_v1::Event::Closed => {
                 state.configure = ConfigureState::Closed;
             }
-            _ => {}
-        }
-    }
-}
-
-impl Dispatch<wl_seat::WlSeat, ()> for EventState {
-    fn event(
-        state: &mut Self,
-        seat: &wl_seat::WlSeat,
-        event: wl_seat::Event,
-        _data: &(),
-        _connection: &Connection,
-        handle: &QueueHandle<Self>,
-    ) {
-        let wl_seat::Event::Capabilities { capabilities } = event else {
-            return;
-        };
-        let WEnum::Value(capabilities) = capabilities else {
-            return;
-        };
-        let have_touch = capabilities.contains(wl_seat::Capability::Touch);
-        if have_touch && state.touch.is_none() {
-            state.touch = Some(seat.get_touch(handle, ()));
-        } else if !have_touch {
-            state.cancel_touch();
-            if let Some(touch) = state.touch.take() {
-                if touch.version() >= 3 {
-                    touch.release();
-                }
-            }
-        }
-    }
-}
-
-impl Dispatch<wl_touch::WlTouch, ()> for EventState {
-    fn event(
-        state: &mut Self,
-        _touch: &wl_touch::WlTouch,
-        event: wl_touch::Event,
-        _data: &(),
-        _connection: &Connection,
-        _handle: &QueueHandle<Self>,
-    ) {
-        match event {
-            wl_touch::Event::Down {
-                surface, id, x, y, ..
-            } if surface == state.main_surface && state.primary_touch.is_none() => {
-                state.primary_touch = Some(id);
-                state.update_touch_point(x, y);
-                state.push_touch(true, false);
-            }
-            wl_touch::Event::Motion { id, x, y, .. } if state.primary_touch == Some(id) => {
-                state.update_touch_point(x, y);
-                state.push_touch(false, false);
-            }
-            wl_touch::Event::Up { id, .. } if state.primary_touch == Some(id) => {
-                state.primary_touch = None;
-                state.push_touch(false, true);
-            }
-            wl_touch::Event::Cancel => state.cancel_touch(),
             _ => {}
         }
     }
@@ -1456,19 +986,6 @@ mod tests {
     }
 
     #[test]
-    fn widget_requires_dimensions_before_configure_done() {
-        let mut configure = ConfigureState::widget();
-        configure.widget_done();
-        assert_eq!(configure, ConfigureState::Invalid);
-
-        let mut configure = ConfigureState::widget();
-        configure.widget_dimensions();
-        assert_eq!(configure, ConfigureState::AwaitingWidgetDone);
-        configure.widget_done();
-        assert_eq!(configure, ConfigureState::Ready);
-    }
-
-    #[test]
     fn gameplay_requires_both_layer_configures_in_either_order() {
         let mut background_first = ConfigureState::gameplay();
         background_first.layer_configured(LayerRole::Background);
@@ -1481,78 +998,6 @@ mod tests {
         assert_ne!(game_first, ConfigureState::Ready);
         game_first.layer_configured(LayerRole::Background);
         assert_eq!(game_first, ConfigureState::Ready);
-    }
-
-    #[test]
-    fn wrong_surface_role_invalidates_the_handshake() {
-        let mut widget = ConfigureState::widget();
-        widget.layer_configured(LayerRole::Game);
-        assert_eq!(widget, ConfigureState::Invalid);
-
-        let mut gameplay = ConfigureState::gameplay();
-        gameplay.widget_dimensions();
-        assert_eq!(gameplay, ConfigureState::Invalid);
-    }
-
-    #[test]
-    fn touch_motion_is_coalesced_without_losing_edges() {
-        let mut queue = TouchQueue::new();
-        queue.push(TouchReport {
-            x: 1,
-            y: 2,
-            down: true,
-            pressed: true,
-            released: false,
-        });
-        for x in 3..40 {
-            queue.push(TouchReport {
-                x,
-                y: 4,
-                down: true,
-                pressed: false,
-                released: false,
-            });
-        }
-        queue.push(TouchReport {
-            x: 39,
-            y: 4,
-            down: false,
-            pressed: false,
-            released: true,
-        });
-        let (reports, dropped) = queue.take();
-        assert_eq!(dropped, 0);
-        assert_eq!(reports.len(), 3);
-        assert!(reports.first().is_some_and(|report| report.pressed));
-        assert!(reports.get(1).is_some_and(|report| report.x == 39));
-        assert!(reports.last().is_some_and(|report| report.released));
-    }
-
-    #[test]
-    fn bounded_touch_queue_preserves_the_newest_release() {
-        let mut queue = TouchQueue::new();
-        for x in 0..MAXIMUM_TOUCH_REPORTS {
-            queue.push(TouchReport {
-                x: u16::try_from(x).unwrap_or_default(),
-                y: 0,
-                down: true,
-                pressed: true,
-                released: false,
-            });
-        }
-        queue.push(TouchReport {
-            x: 100,
-            y: 0,
-            down: false,
-            pressed: false,
-            released: true,
-        });
-        let (reports, dropped) = queue.take();
-        assert_eq!(reports.len(), MAXIMUM_TOUCH_REPORTS);
-        assert_eq!(dropped, 1);
-        assert!(reports.last().is_some_and(|report| report.released));
-        let (_, dropped_after_take) = queue.take();
-        assert_eq!(dropped_after_take, 0);
     }
 
     #[test]
@@ -1590,31 +1035,6 @@ mod tests {
         for (index, role) in roles.into_iter().enumerate() {
             assert!(matches!(role, BufferRole::Frame(slot) if slot.index() == index));
         }
-    }
-
-    #[test]
-    fn only_gameplay_scale_maps_follow_source_frames() {
-        let first = Dimensions::new(2, 2).unwrap_or(DECK_DIMENSIONS);
-        let second = Dimensions::new(4, 1).unwrap_or(DECK_DIMENSIONS);
-        let target = Dimensions::new(8, 4).unwrap_or(DECK_DIMENSIONS);
-
-        let mut fixed = ScalePlan::new(first, target);
-        SourceMode::Fixed.prepare(&mut fixed, second);
-        assert_eq!(fixed.source(), first);
-
-        let mut gameplay = ScalePlan::new(first, target);
-        SourceMode::FrameDriven.prepare(&mut gameplay, second);
-        assert_eq!(gameplay.source(), second);
-        assert_eq!(gameplay.target(), target);
-    }
-
-    #[test]
-    fn floating_touch_coordinates_are_finite_and_clamped() {
-        assert_eq!(clamp_coordinate(f64::NAN, 1_280), 0);
-        assert_eq!(clamp_coordinate(-1.0, 1_280), 0);
-        assert_eq!(clamp_coordinate(17.9, 1_280), 17);
-        assert_eq!(clamp_coordinate(1_280.0, 1_280), 1_279);
-        assert_eq!(clamp_coordinate(f64::INFINITY, 1_280), 0);
     }
 
     #[test]

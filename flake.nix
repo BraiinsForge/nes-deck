@@ -117,20 +117,13 @@
         ./deploy/menu/games.tsv
         ./deploy/menu/palette.tsv
       ];
-      timerRustSources = rustWorkspaceSources [
-        ./protocol/deck-widget-v1.xml
-      ];
-      chiptuneRustSources = rustWorkspaceSources [
-        ./protocol/deck-widget-v1.xml
-      ];
+      timerRustSources = rustWorkspaceSources [ ];
+      chiptuneRustSources = rustWorkspaceSources [ ];
       chip8RustSources = rustWorkspaceSources [
-        ./protocol/deck-widget-v1.xml
         ./vendor/emulators/c-octo/LICENSE.txt
         ./vendor/emulators/c-octo/upstream/octo_emulator.h
       ];
-      libretroRustSources = rustWorkspaceSources [
-        ./protocol/deck-widget-v1.xml
-      ];
+      libretroRustSources = rustWorkspaceSources [ ];
       nativeStaticLibraries = [
         "-lm"
         "-lutil"

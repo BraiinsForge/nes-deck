@@ -78,8 +78,9 @@ properties, not justification for recreating a mature library.
 
 ## Code to replace and delete
 
-- Replace the widget half of `retro-deck-platform` Wayland, shared-memory
-  presentation, visibility and touch code with `bmc-widget`.
+- The dashboard widget half of `retro-deck-platform` has been replaced by
+  `bmc-widget` and deleted, including its generated private protocol bindings.
+  The remaining Wayland adapter is gameplay-only and migration-scoped.
 - Replace dashboard raster primitives, layout, PNG scaling and duplicated
   interaction geometry with `bmc-render`. Retro pixel art remains an asset or
   a small renderer component, not a parallel UI toolkit.

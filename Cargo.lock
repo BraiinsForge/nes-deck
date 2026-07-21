@@ -790,7 +790,6 @@ dependencies = [
  "signal-hook",
  "wayland-client",
  "wayland-protocols-wlr",
- "wayland-scanner",
 ]
 
 [[package]]

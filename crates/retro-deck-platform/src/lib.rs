@@ -7,7 +7,6 @@ pub mod input;
 pub mod shutdown;
 pub mod time;
 pub mod wayland;
-pub mod wayland_protocol;
 
 /// Logical width exposed by the Deck compositor and touchscreen.
 pub const DECK_LOGICAL_WIDTH: u16 = 1_280;
