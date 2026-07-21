@@ -32,9 +32,23 @@ service_needs_restart=0
 uploader_needs_restart=0
 bmc_mode=0
 compositor_needs_restart=0
+wifi_service_was_running=0
+wifi_files_changed=0
 if [ -x /etc/init.d/bmc-compositor ]; then
   bmc_mode=1
 fi
+if [ -x /etc/init.d/deck-wifi ] && \
+   /etc/init.d/deck-wifi status >/dev/null 2>&1; then
+  wifi_service_was_running=1
+fi
+for wifi_file in \
+  etc/init.d/deck-wifi \
+  usr/sbin/deck-wifi-profile-add \
+  usr/sbin/deck-wifi-select \
+  usr/sbin/deck-wifi-watch; do
+  cmp -s "$stage/$wifi_file" "/$wifi_file" 2>/dev/null || \
+    wifi_files_changed=1
+done
 restore_service_after_failure() {
   result=$?
   trap - EXIT
@@ -263,7 +277,12 @@ if [ -x /etc/init.d/bmc ]; then
   /etc/init.d/bmc disable 2>/dev/null || :
 fi
 /etc/init.d/deck-wifi enable
-/etc/init.d/deck-wifi restart
+if [ "$wifi_service_was_running" -eq 1 ] && \
+   [ "$wifi_files_changed" -eq 0 ]; then
+  echo "Deck Wi-Fi watcher is unchanged and running; preserving connection."
+else
+  /etc/init.d/deck-wifi restart
+fi
 # Remove links created with an older START or STOP value before re-enabling.
 rm -f /etc/rc.d/S??nes-deck-swap /etc/rc.d/K??nes-deck-swap
 if [ "$bmc_mode" -eq 1 ]; then
