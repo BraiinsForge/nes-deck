@@ -14,7 +14,7 @@ use retro_deck_apps::ten_seconds::{
     TimerFrame, TimerGame,
 };
 use retro_deck_audio::{SampleRate, ToneNote, Volume};
-use retro_deck_platform::audio::{ToneCueWorker, ToneWorkerReport};
+use retro_deck_platform::audio::{AudioGate, ToneCuePlayer};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
 use retro_deck_platform::input::{Button, ButtonEdge, InputEvent};
 use retro_deck_platform::shutdown::ShutdownFlag;
@@ -66,7 +66,7 @@ struct TimerRuntime {
     source_dimensions: Dimensions,
     game: TimerGame,
     frame: TimerFrame,
-    audio: Option<ToneCueWorker<Cue>>,
+    audio: Option<ToneCuePlayer<Cue>>,
     policy: Option<PolicyClient>,
     dirty: bool,
 }
@@ -118,6 +118,7 @@ impl TimerRuntime {
             self.presentation
                 .dispatch_with_timeout(EVENT_POLL_INTERVAL)
                 .map_err(RuntimeError::Presentation)?;
+            self.sync_audio_gate();
             if self.shutdown.requested() || self.presentation.shutdown_requested() {
                 break;
             }
@@ -241,7 +242,7 @@ impl TimerRuntime {
                         self.policy = start_policy();
                     }
                     if let Some(audio) = &self.audio {
-                        let _ = audio.try_play(cue);
+                        audio.play(cue);
                     }
                     return;
                 }
@@ -266,19 +267,27 @@ impl TimerRuntime {
 
     fn report_audio_errors(&self) {
         if let Some(audio) = &self.audio {
-            for error in audio.take_errors() {
+            if let Some(error) = audio.take_error() {
                 eprintln!("{APPLICATION}: {error}");
             }
         }
     }
 
+    fn sync_audio_gate(&self) {
+        if let Some(audio) = &self.audio {
+            audio.set_gate(if self.presentation.visible() {
+                AudioGate::Active
+            } else {
+                AudioGate::Hidden
+            });
+        }
+    }
+
     fn finish_audio(&mut self) {
         self.report_audio_errors();
-        let Some(audio) = self.audio.take() else {
-            return;
-        };
-        let report = audio.shutdown();
-        report_audio_shutdown(report);
+        if let Some(audio) = self.audio.take() {
+            audio.release();
+        }
     }
 }
 
@@ -325,15 +334,20 @@ impl fmt::Display for VolumeConfigError {
     }
 }
 
-fn start_audio(volume: Volume) -> Option<ToneCueWorker<Cue>> {
+fn start_audio(volume: Volume) -> Option<ToneCuePlayer<Cue>> {
     let Some(rate) = SampleRate::new(CUE_SAMPLE_RATE) else {
         eprintln!("{APPLICATION}: internal cue sample rate is invalid; game cues disabled");
         return None;
     };
-    match ToneCueWorker::spawn(rate, volume, timer_notes) {
-        Ok(worker) => Some(worker),
+    let cues = [
+        (Cue::Start, timer_notes(Cue::Start)),
+        (Cue::Exact, timer_notes(Cue::Exact)),
+        (Cue::Miss, timer_notes(Cue::Miss)),
+    ];
+    match ToneCuePlayer::from_inherited(rate, volume, cues) {
+        Ok(player) => Some(player),
         Err(error) => {
-            eprintln!("{APPLICATION}: cannot start audio worker: {error}; game cues disabled");
+            eprintln!("{APPLICATION}: cannot prepare game cues: {error}; game cues disabled");
             None
         }
     }
@@ -357,18 +371,6 @@ fn validated_notes(specification: &[(u32, u32)]) -> Vec<ToneNote> {
         .iter()
         .filter_map(|(frequency, duration)| ToneNote::new(*frequency, *duration))
         .collect()
-}
-
-fn report_audio_shutdown(report: ToneWorkerReport) {
-    if report.panicked {
-        eprintln!("{APPLICATION}: audio worker panicked during shutdown");
-    }
-    if report.errors != 0 || report.dropped_errors != 0 {
-        eprintln!(
-            "{APPLICATION}: audio worker stopped with {} error(s), including {} unreported",
-            report.errors, report.dropped_errors
-        );
-    }
 }
 
 fn start_policy() -> Option<PolicyClient> {

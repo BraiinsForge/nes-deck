@@ -3,14 +3,13 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::{SampleRate, Volume};
+use crate::SampleRate;
 
 const MAXIMUM_FREQUENCY: u32 = 24_000;
 const MAXIMUM_NOTE_DURATION_MS: u32 = 2_000;
 const MAXIMUM_TONE_DURATION_MS: u32 = 5_000;
 const MAXIMUM_NOTES: usize = 16;
 const MAXIMUM_AMPLITUDE: i32 = 5_000;
-const MINIMUM_AUDIBLE_AMPLITUDE: i32 = 256;
 
 /// One positive square-wave note in a short cue.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -60,27 +59,18 @@ pub struct SquareTone {
 impl SquareTone {
     /// Render a bounded sequence with a five-millisecond edge envelope.
     ///
-    /// Muted volume produces an empty tone so callers can skip opening the
-    /// audio device. Each note restarts square-wave phase, matching the
-    /// existing dashboard and timer cues.
+    /// Each note restarts square-wave phase, matching the existing dashboard
+    /// and timer cues. Playback gain is applied centrally by BMC.
     ///
     /// # Errors
     ///
     /// Returns [`ToneError`] when there are no notes, too many notes, the
     /// combined duration exceeds five seconds, or sample sizing overflows.
-    pub fn render(notes: &[ToneNote], rate: SampleRate, volume: Volume) -> Result<Self, ToneError> {
+    pub fn render(notes: &[ToneNote], rate: SampleRate) -> Result<Self, ToneError> {
         let sample_count = sample_count(notes, rate)?;
-        if volume.muted() {
-            return Ok(Self {
-                rate,
-                samples: Box::new([]),
-            });
-        }
-
         let mut samples = Vec::with_capacity(sample_count);
         let rate_value = usize::try_from(rate.get()).map_err(|_| ToneError::SampleCountOverflow)?;
-        let amplitude =
-            (MAXIMUM_AMPLITUDE * i32::from(volume.percent()) / 100).max(MINIMUM_AUDIBLE_AMPLITUDE);
+        let amplitude = MAXIMUM_AMPLITUDE;
         let ramp_samples = (rate_value / 200).max(1);
 
         for note in notes {
@@ -123,12 +113,6 @@ impl SquareTone {
     #[must_use]
     pub const fn samples(&self) -> &[i16] {
         &self.samples
-    }
-
-    /// Whether muted rendering intentionally produced no samples.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.samples.is_empty()
     }
 }
 
@@ -196,11 +180,6 @@ mod tests {
         Some(rate) => rate,
         None => panic!("test sample rate must be valid"),
     };
-    const FULL: Volume = match Volume::new(100) {
-        Some(volume) => volume,
-        None => panic!("test volume must be valid"),
-    };
-
     fn note(frequency: u32, duration: u32) -> ToneNote {
         ToneNote::new(frequency, duration).unwrap_or(ToneNote {
             frequency_hz: 1,
@@ -218,7 +197,7 @@ mod tests {
 
     #[test]
     fn start_cue_matches_the_legacy_length_phase_and_envelope() {
-        let tone = SquareTone::render(&[note(523, 28), note(784, 38)], RATE, FULL);
+        let tone = SquareTone::render(&[note(523, 28), note(784, 38)], RATE);
         assert!(tone.is_ok());
         let tone = tone.unwrap_or(SquareTone {
             rate: RATE,
@@ -234,35 +213,26 @@ mod tests {
     }
 
     #[test]
-    fn volume_scales_without_clipping_and_muting_allocates_no_pcm() {
-        let Some(quiet_volume) = Volume::new(1) else {
-            return;
-        };
-        let quiet = SquareTone::render(&[note(440, 20)], RATE, quiet_volume);
-        assert!(quiet.is_ok());
-        let quiet = quiet.unwrap_or(SquareTone {
+    fn synthesis_uses_a_bounded_unscaled_amplitude() {
+        let tone = SquareTone::render(&[note(440, 20)], RATE);
+        assert!(tone.is_ok());
+        let tone = tone.unwrap_or(SquareTone {
             rate: RATE,
             samples: Box::new([]),
         });
-        assert_eq!(quiet.samples().iter().copied().max(), Some(256));
-        assert_eq!(quiet.samples().iter().copied().min(), Some(-256));
-
-        let muted = SquareTone::render(&[note(440, 20)], RATE, Volume::MUTED);
-        assert!(muted.is_ok_and(|tone| tone.is_empty()));
+        assert_eq!(tone.samples().iter().copied().max(), Some(5_000));
+        assert_eq!(tone.samples().iter().copied().min(), Some(-5_000));
     }
 
     #[test]
     fn descriptions_are_bounded_before_allocation() {
-        assert_eq!(SquareTone::render(&[], RATE, FULL), Err(ToneError::Empty));
+        assert_eq!(SquareTone::render(&[], RATE), Err(ToneError::Empty));
         let many = [note(440, 1); MAXIMUM_NOTES + 1];
         assert_eq!(
-            SquareTone::render(&many, RATE, FULL),
+            SquareTone::render(&many, RATE),
             Err(ToneError::TooManyNotes)
         );
         let long = [note(440, 1_001); 5];
-        assert_eq!(
-            SquareTone::render(&long, RATE, FULL),
-            Err(ToneError::TooLong)
-        );
+        assert_eq!(SquareTone::render(&long, RATE), Err(ToneError::TooLong));
     }
 }

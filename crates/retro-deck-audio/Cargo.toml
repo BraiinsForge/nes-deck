@@ -1,6 +1,6 @@
 [package]
 name = "retro-deck-audio"
-description = "Audio device ownership policy for Retro Deck runtimes"
+description = "Validated PCM values and bounded tone synthesis for Retro Deck"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

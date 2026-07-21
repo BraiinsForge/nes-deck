@@ -805,7 +805,6 @@ version = "0.1.0"
 dependencies = [
  "deck-audio-v1",
  "deck-gamepad-v1",
- "libc",
  "memmap2",
  "retro-deck-audio",
  "rustix",
