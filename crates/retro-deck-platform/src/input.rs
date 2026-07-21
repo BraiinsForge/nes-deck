@@ -2,11 +2,13 @@
 
 mod linux;
 mod tty;
+mod wayland;
 
 pub use linux::{
     ControllerDevices, ControllerScanStats, DrainStats, InputDevices, InputError, TouchscreenDevice,
 };
 pub use tty::{MediumRawKeyboard, MediumRawKeyboardError};
+pub(crate) use wayland::WaylandControllers;
 
 /// Logical width reported by the Deck touchscreen.
 pub const LOGICAL_WIDTH: u16 = crate::DECK_LOGICAL_WIDTH;
@@ -320,6 +322,10 @@ impl TouchState {
 }
 
 impl TouchPoint {
+    pub(crate) const fn new(x: u16, y: u16) -> Self {
+        Self { x, y }
+    }
+
     /// Logical horizontal coordinate.
     #[must_use]
     pub const fn x(self) -> u16 {

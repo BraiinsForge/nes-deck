@@ -5,7 +5,6 @@ use std::error::Error;
 use std::ffi::OsStr;
 use std::fmt;
 use std::io;
-use std::os::fd::AsFd as _;
 use std::process::ExitCode;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -17,7 +16,7 @@ use retro_deck_apps::ten_seconds::{
 use retro_deck_audio::{SampleRate, ToneNote, Volume};
 use retro_deck_platform::audio::{ToneCueWorker, ToneWorkerReport};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
-use retro_deck_platform::input::{Button, ButtonEdge, InputDevices, InputError, InputEvent};
+use retro_deck_platform::input::{Button, ButtonEdge, InputEvent};
 use retro_deck_platform::shutdown::ShutdownFlag;
 use retro_deck_platform::time::MonotonicClock;
 use retro_deck_platform::wayland::{
@@ -63,7 +62,6 @@ fn main() -> ExitCode {
 struct TimerRuntime {
     shutdown: ShutdownFlag,
     clock: MonotonicClock,
-    input: InputDevices,
     input_events: Vec<InputEvent>,
     presentation: WaylandPresentation,
     source_dimensions: Dimensions,
@@ -81,13 +79,8 @@ impl TimerRuntime {
         let source_dimensions = Dimensions::new(CANVAS_WIDTH, CANVAS_HEIGHT)
             .ok_or(RuntimeError::InvalidCanvasDimensions)?;
         let presentation =
-            WaylandPresentation::connect_gameplay(source_dimensions, GameplayBackground::Plain)
+            WaylandPresentation::connect_application(source_dimensions, GameplayBackground::Plain)
                 .map_err(RuntimeError::Presentation)?;
-        let input = InputDevices::discover().map_err(RuntimeError::Input)?;
-        eprintln!(
-            "{APPLICATION}: {} THEGamepad controller(s) ready; physical A starts and stops the timer",
-            input.controller_count()
-        );
 
         let game = TimerGame::new();
         let frame = TimerFrame::render(game.view()).map_err(RuntimeError::Render)?;
@@ -96,7 +89,6 @@ impl TimerRuntime {
         Ok(Self {
             shutdown,
             clock: MonotonicClock::start(),
-            input,
             input_events: Vec::with_capacity(64),
             presentation,
             source_dimensions,
@@ -126,16 +118,13 @@ impl TimerRuntime {
             }
             self.report_audio_errors();
 
-            self.input
-                .wait_readable_with(self.presentation.as_fd(), EVENT_POLL_INTERVAL)
-                .map_err(RuntimeError::Input)?;
             self.presentation
-                .dispatch_nonblocking()
+                .dispatch_with_timeout(EVENT_POLL_INTERVAL)
                 .map_err(RuntimeError::Presentation)?;
             if self.shutdown.requested() || self.presentation.shutdown_requested() {
                 break;
             }
-            if self.handle_input()? == LoopControl::Exit {
+            if self.handle_input() == LoopControl::Exit {
                 break;
             }
         }
@@ -161,17 +150,11 @@ impl TimerRuntime {
         }
     }
 
-    fn handle_input(&mut self) -> Result<LoopControl, RuntimeError> {
+    fn handle_input(&mut self) -> LoopControl {
         self.input_events.clear();
-        let stats = self
-            .input
-            .drain_into(&mut self.input_events)
-            .map_err(RuntimeError::Input)?;
-        if stats.dropped() != 0 {
-            eprintln!(
-                "{APPLICATION}: discarded {} input event(s) after the bounded drain",
-                stats.dropped()
-            );
+        let dropped = self.presentation.drain_input_into(&mut self.input_events);
+        if dropped != 0 {
+            eprintln!("{APPLICATION}: discarded {dropped} input event(s) after the bounded drain");
         }
 
         let mut back = false;
@@ -196,7 +179,7 @@ impl TimerRuntime {
         }
 
         if back {
-            return Ok(LoopControl::Exit);
+            return LoopControl::Exit;
         }
         let activation = if controller {
             Some(InputSource::ControllerA)
@@ -210,7 +193,7 @@ impl TimerRuntime {
             self.dirty = true;
             self.apply_effect(effect);
         }
-        Ok(LoopControl::Continue)
+        LoopControl::Continue
     }
 
     fn handle_policy_events(&mut self) {
@@ -428,7 +411,6 @@ enum RuntimeError {
     Signals(io::Error),
     InvalidCanvasDimensions,
     Presentation(WaylandPresentationError),
-    Input(InputError),
     Render(RenderError),
     Frame(DisplayError),
 }
@@ -441,7 +423,6 @@ impl fmt::Display for RuntimeError {
                 formatter.write_str("timer canvas dimensions are invalid")
             }
             Self::Presentation(source) => write!(formatter, "{source}"),
-            Self::Input(source) => write!(formatter, "{source}"),
             Self::Render(source) => write!(formatter, "{source}"),
             Self::Frame(source) => write!(formatter, "cannot construct timer frame: {source}"),
         }
@@ -453,7 +434,6 @@ impl Error for RuntimeError {
         match self {
             Self::Signals(source) => Some(source),
             Self::Presentation(source) => Some(source),
-            Self::Input(source) => Some(source),
             Self::Render(source) => Some(source),
             Self::Frame(source) => Some(source),
             Self::InvalidCanvasDimensions => None,

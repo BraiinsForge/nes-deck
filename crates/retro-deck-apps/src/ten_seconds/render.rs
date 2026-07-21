@@ -316,9 +316,9 @@ mod tests {
         };
         assert_eq!(exact.pixel(194, 60), Some(SUCCESS));
         assert_eq!(miss.pixel(194, 60), Some(AMBER));
-        assert!(exact.pixels().iter().any(|pixel| *pixel == SUCCESS));
-        assert!(!miss.pixels().iter().any(|pixel| *pixel == SUCCESS));
-        assert!(miss.pixels().iter().any(|pixel| *pixel == MUTED));
+        assert!(exact.pixels().contains(&SUCCESS));
+        assert!(!miss.pixels().contains(&SUCCESS));
+        assert!(miss.pixels().contains(&MUTED));
     }
 
     #[test]

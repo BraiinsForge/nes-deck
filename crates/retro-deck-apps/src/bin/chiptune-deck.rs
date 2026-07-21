@@ -6,7 +6,6 @@ use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs::File;
 use std::io::{self, BufWriter, Write as _};
-use std::os::fd::AsFd as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -19,7 +18,7 @@ use retro_deck_audio::{SampleRate, Volume};
 use retro_deck_platform::audio::{AudioGate, PcmStreamWorker, PcmWorkerReport};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame, rgb565_to_xrgb8888};
 use retro_deck_platform::file::write_private_atomic;
-use retro_deck_platform::input::{InputDevices, InputError, InputEvent};
+use retro_deck_platform::input::InputEvent;
 use retro_deck_platform::shutdown::ShutdownFlag;
 use retro_deck_platform::time::{FrameClock, FrameRate};
 use retro_deck_platform::wayland::{
@@ -110,7 +109,6 @@ fn print_usage() {
 #[derive(Debug)]
 struct PlayerRuntime {
     shutdown: ShutdownFlag,
-    input: InputDevices,
     input_events: Vec<InputEvent>,
     presentation: WaylandPresentation,
     source_dimensions: Dimensions,
@@ -131,13 +129,8 @@ impl PlayerRuntime {
         let source_dimensions = Dimensions::new(CANVAS_WIDTH, CANVAS_HEIGHT)
             .ok_or(RuntimeError::InvalidCanvasDimensions)?;
         let presentation =
-            WaylandPresentation::connect_gameplay(source_dimensions, GameplayBackground::Plain)
+            WaylandPresentation::connect_application(source_dimensions, GameplayBackground::Plain)
                 .map_err(RuntimeError::Presentation)?;
-        let input = InputDevices::discover().map_err(RuntimeError::Input)?;
-        eprintln!(
-            "{APPLICATION}: {} THEGamepad controller(s) ready",
-            input.controller_count()
-        );
 
         let (player, status) = load_catalog(directory);
         let volume = configured_volume();
@@ -153,7 +146,6 @@ impl PlayerRuntime {
 
         let mut runtime = Self {
             shutdown,
-            input,
             input_events: Vec::with_capacity(INPUT_EVENT_CAPACITY),
             presentation,
             source_dimensions,
@@ -186,7 +178,7 @@ impl PlayerRuntime {
                 break;
             }
             self.sync_audio_gate();
-            if self.handle_input()? == LoopControl::Exit {
+            if self.handle_input() == LoopControl::Exit {
                 break;
             }
 
@@ -199,24 +191,18 @@ impl PlayerRuntime {
             }
             self.report_audio_errors();
 
-            self.input
-                .wait_readable_with(self.presentation.as_fd(), self.clock.wait_duration())
-                .map_err(RuntimeError::Input)?;
+            self.presentation
+                .dispatch_with_timeout(self.clock.wait_duration())
+                .map_err(RuntimeError::Presentation)?;
         }
         Ok(())
     }
 
-    fn handle_input(&mut self) -> Result<LoopControl, RuntimeError> {
+    fn handle_input(&mut self) -> LoopControl {
         self.input_events.clear();
-        let stats = self
-            .input
-            .drain_into(&mut self.input_events)
-            .map_err(RuntimeError::Input)?;
-        if stats.dropped() != 0 {
-            eprintln!(
-                "{APPLICATION}: discarded {} input event(s) after the bounded drain",
-                stats.dropped()
-            );
+        let dropped = self.presentation.drain_input_into(&mut self.input_events);
+        if dropped != 0 {
+            eprintln!("{APPLICATION}: discarded {dropped} input event(s) after the bounded drain");
         }
 
         let mut controls = [None; INPUT_EVENT_CAPACITY];
@@ -229,10 +215,10 @@ impl PlayerRuntime {
         for control in controls.into_iter().flatten() {
             let effect = self.model.apply(control);
             if self.apply_effect(effect) == LoopControl::Exit {
-                return Ok(LoopControl::Exit);
+                return LoopControl::Exit;
             }
         }
-        Ok(LoopControl::Continue)
+        LoopControl::Continue
     }
 
     fn apply_effect(&mut self, effect: PlayerEffect) -> LoopControl {
@@ -643,7 +629,6 @@ enum RuntimeError {
     InvalidCanvasDimensions,
     InvalidFrameRate,
     Presentation(WaylandPresentationError),
-    Input(InputError),
     Render(RenderError),
     Frame(DisplayError),
 }
@@ -657,7 +642,6 @@ impl fmt::Display for RuntimeError {
             }
             Self::InvalidFrameRate => formatter.write_str("chiptune frame rate is invalid"),
             Self::Presentation(source) => source.fmt(formatter),
-            Self::Input(source) => source.fmt(formatter),
             Self::Render(source) => source.fmt(formatter),
             Self::Frame(source) => source.fmt(formatter),
         }
@@ -669,7 +653,6 @@ impl Error for RuntimeError {
         match self {
             Self::Signals(source) => Some(source),
             Self::Presentation(source) => Some(source),
-            Self::Input(source) => Some(source),
             Self::Render(source) => Some(source),
             Self::Frame(source) => Some(source),
             Self::InvalidCanvasDimensions | Self::InvalidFrameRate => None,

@@ -1,3 +1,4 @@
 # Keep GitHub's language chart focused on first-party Retro Deck code.
 terminal/fbterm/** linguist-vendored
 vendor/emulators/** linguist-vendored -whitespace
+vendor/bmc/** linguist-vendored

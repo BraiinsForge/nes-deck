@@ -8,6 +8,7 @@ members = [
   "crates/retro-deck-policy",
   "crates/retro-deck-ui",
   "crates/retro-deck-uploader",
+  "vendor/bmc/deck-gamepad-v1",
 ]
 exclude = ["crates/retro-deck-dashboard"]
 resolver = "2"

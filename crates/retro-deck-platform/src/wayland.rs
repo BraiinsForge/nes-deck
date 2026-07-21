@@ -9,21 +9,27 @@ use std::ops::Range;
 use std::os::fd::{AsFd, BorrowedFd};
 use std::time::{Duration, Instant};
 
+use deck_gamepad_v1::client::{
+    deck_gamepad_input_v1::{self, DeckGamepadInputV1},
+    deck_gamepad_manager_v1::DeckGamepadManagerV1,
+};
 use memmap2::{MmapMut, MmapOptions};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::fs::{MemfdFlags, ftruncate, memfd_create};
 use wayland_client::backend::WaylandError as TransportError;
 use wayland_client::globals::{BindError, GlobalError, GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_region, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_compositor, wl_region, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+    wl_touch,
 };
-use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop};
+use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum, delegate_noop};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::display::{
     DECK_DIMENSIONS, Dimensions, DisplayError, Frame, PresentationSlots, ScalePlan, SlotError,
     SlotId, gameplay_dimensions,
 };
+use crate::input::{InputEvent, Player, TouchPoint, WaylandControllers};
 use crate::time::duration_timespec;
 
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -34,11 +40,18 @@ const EXIT_HINT_LEFT: usize = 20;
 const EXIT_HINT_TOP: usize = 20;
 const EXIT_HINT_CELL: usize = 4;
 const EXIT_HINT_STEPS: usize = 9;
+const MAXIMUM_PENDING_INPUT_EVENTS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LayerRole {
     Game,
     Background,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TouchRouting {
+    Passthrough,
+    Surface,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,15 +106,27 @@ struct EventState {
     configure: ConfigureState,
     presentation_slots: PresentationSlots,
     slot_error: Option<SlotError>,
+    accepts_touch: bool,
+    touch: Option<wl_touch::WlTouch>,
+    active_touch: Option<i32>,
+    input_events: Vec<InputEvent>,
+    dropped_input_events: usize,
+    controllers: WaylandControllers,
 }
 
 impl EventState {
-    const fn new(dimensions: Dimensions) -> Self {
+    fn new(dimensions: Dimensions, touch_routing: TouchRouting) -> Self {
         Self {
             dimensions,
             configure: ConfigureState::gameplay(),
             presentation_slots: PresentationSlots::new(),
             slot_error: None,
+            accepts_touch: touch_routing == TouchRouting::Surface,
+            touch: None,
+            active_touch: None,
+            input_events: Vec::with_capacity(MAXIMUM_PENDING_INPUT_EVENTS),
+            dropped_input_events: 0,
+            controllers: WaylandControllers::default(),
         }
     }
 
@@ -137,6 +162,64 @@ impl EventState {
             }
         }
         self.configure.layer_configured(role);
+    }
+
+    fn push_input(&mut self, event: InputEvent) {
+        if self.input_events.len() < MAXIMUM_PENDING_INPUT_EVENTS {
+            self.input_events.push(event);
+        } else {
+            self.dropped_input_events = self.dropped_input_events.saturating_add(1);
+        }
+    }
+
+    fn cap_controller_input(&mut self, previous_len: usize) {
+        if self.input_events.len() <= MAXIMUM_PENDING_INPUT_EVENTS {
+            return;
+        }
+        let dropped = self.input_events.len() - MAXIMUM_PENDING_INPUT_EVENTS;
+        self.input_events.truncate(MAXIMUM_PENDING_INPUT_EVENTS);
+        self.dropped_input_events = self.dropped_input_events.saturating_add(dropped);
+        debug_assert!(previous_len <= MAXIMUM_PENDING_INPUT_EVENTS);
+    }
+
+    fn drain_input_into(&mut self, output: &mut Vec<InputEvent>) -> usize {
+        output.append(&mut self.input_events);
+        std::mem::take(&mut self.dropped_input_events)
+    }
+
+    fn touch_point(&self, x: f64, y: f64) -> Option<TouchPoint> {
+        let origin_x = DECK_DIMENSIONS
+            .width()
+            .saturating_sub(self.dimensions.width())
+            / 2;
+        let origin_y = DECK_DIMENSIONS
+            .height()
+            .saturating_sub(self.dimensions.height())
+            / 2;
+        Some(TouchPoint::new(
+            logical_touch_coordinate(x, origin_x, crate::DECK_LOGICAL_WIDTH - 1)?,
+            logical_touch_coordinate(y, origin_y, crate::DECK_LOGICAL_HEIGHT - 1)?,
+        ))
+    }
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "finite surface coordinates are clamped to the small Deck logical extent before casting"
+)]
+fn logical_touch_coordinate(local: f64, origin: usize, maximum: u16) -> Option<u16> {
+    if !local.is_finite() {
+        return None;
+    }
+    let logical = local + origin as f64;
+    if logical <= 0.0 {
+        Some(0)
+    } else if logical >= f64::from(maximum) {
+        Some(maximum)
+    } else {
+        Some(logical as u16)
     }
 }
 
@@ -298,6 +381,9 @@ pub struct WaylandSurface {
     background_layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     shm: wl_shm::WlShm,
     _compositor: wl_compositor::WlCompositor,
+    _seat: Option<wl_seat::WlSeat>,
+    _gamepad_manager: Option<DeckGamepadManagerV1>,
+    _gamepad_input: Option<DeckGamepadInputV1>,
 }
 
 impl WaylandSurface {
@@ -308,7 +394,10 @@ impl WaylandSurface {
     /// Returns [`WaylandSurfaceError`] when dimensions do not fit, the
     /// compositor lacks layer-shell, or either surface misses its configure
     /// deadline.
-    pub fn connect_gameplay(source: Dimensions) -> Result<Self, WaylandSurfaceError> {
+    fn connect_gameplay(
+        source: Dimensions,
+        touch_routing: TouchRouting,
+    ) -> Result<Self, WaylandSurfaceError> {
         let dimensions = gameplay_dimensions(source).map_err(WaylandSurfaceError::Display)?;
         let connection = Connection::connect_to_env().map_err(WaylandSurfaceError::Connect)?;
         let (globals, event_queue) =
@@ -329,6 +418,12 @@ impl WaylandSurface {
             "zwlr_layer_shell_v1",
         )?;
         let shm = bind_required::<wl_shm::WlShm, _>(&globals, &handle, 1..=1, (), "wl_shm")?;
+        let seat = globals
+            .bind::<wl_seat::WlSeat, _, _>(&handle, 1..=9, ())
+            .ok();
+        let gamepad_manager = globals
+            .bind::<DeckGamepadManagerV1, _, _>(&handle, 1..=1, ())
+            .ok();
 
         let empty_region = compositor.create_region(&handle, ());
         let background_surface = compositor.create_surface(&handle, ());
@@ -354,7 +449,9 @@ impl WaylandSurface {
         background_surface.commit();
 
         let main_surface = compositor.create_surface(&handle, ());
-        main_surface.set_input_region(Some(&empty_region));
+        if touch_routing == TouchRouting::Passthrough {
+            main_surface.set_input_region(Some(&empty_region));
+        }
         empty_region.destroy();
         let game_layer = layer_shell.get_layer_surface(
             &main_surface,
@@ -369,9 +466,12 @@ impl WaylandSurface {
             u32::try_from(dimensions.height()).map_err(|_| WaylandSurfaceError::InvalidSize)?,
         );
         game_layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
+        let gamepad_input = gamepad_manager
+            .as_ref()
+            .map(|manager| manager.get_gamepad_input(&main_surface, &handle, ()));
         main_surface.commit();
 
-        let state = EventState::new(dimensions);
+        let state = EventState::new(dimensions, touch_routing);
         let mut surface = Self {
             event_queue,
             state,
@@ -381,6 +481,9 @@ impl WaylandSurface {
             background_layer,
             shm,
             _compositor: compositor,
+            _seat: seat,
+            _gamepad_manager: gamepad_manager,
+            _gamepad_input: gamepad_input,
         };
         surface.wait_until_configured()?;
         Ok(surface)
@@ -413,6 +516,10 @@ impl WaylandSurface {
     /// configure state.
     pub fn dispatch_nonblocking(&mut self) -> Result<usize, WaylandSurfaceError> {
         self.drive(Some(Duration::ZERO))
+    }
+
+    fn dispatch_with_timeout(&mut self, timeout: Duration) -> Result<usize, WaylandSurfaceError> {
+        self.drive(Some(timeout))
     }
 
     fn wait_until_configured(&mut self) -> Result<(), WaylandSurfaceError> {
@@ -548,8 +655,29 @@ impl WaylandPresentation {
         source: Dimensions,
         background_style: GameplayBackground,
     ) -> Result<Self, WaylandPresentationError> {
-        let surface =
-            WaylandSurface::connect_gameplay(source).map_err(WaylandPresentationError::Surface)?;
+        Self::connect(source, background_style, TouchRouting::Passthrough)
+    }
+
+    /// Connect an application surface that receives compositor-routed touch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WaylandPresentationError`] for setup, mapping, protocol, or
+    /// dimension failures.
+    pub fn connect_application(
+        source: Dimensions,
+        background_style: GameplayBackground,
+    ) -> Result<Self, WaylandPresentationError> {
+        Self::connect(source, background_style, TouchRouting::Surface)
+    }
+
+    fn connect(
+        source: Dimensions,
+        background_style: GameplayBackground,
+        touch_routing: TouchRouting,
+    ) -> Result<Self, WaylandPresentationError> {
+        let surface = WaylandSurface::connect_gameplay(source, touch_routing)
+            .map_err(WaylandPresentationError::Surface)?;
         let target = surface.dimensions();
         let handle = surface.event_queue.handle();
         let roles = frame_roles()?;
@@ -604,6 +732,28 @@ impl WaylandPresentation {
         self.surface
             .dispatch_nonblocking()
             .map_err(WaylandPresentationError::Surface)
+    }
+
+    /// Wait up to `timeout` for compositor input or surface events and dispatch them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WaylandPresentationError`] on transport, protocol, or buffer
+    /// ownership failure.
+    pub fn dispatch_with_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<usize, WaylandPresentationError> {
+        self.surface
+            .dispatch_with_timeout(timeout)
+            .map_err(WaylandPresentationError::Surface)
+    }
+
+    /// Drain bounded touch and semantic controller events into `output`.
+    ///
+    /// Returns the number of events discarded since the previous drain.
+    pub fn drain_input_into(&mut self, output: &mut Vec<InputEvent>) -> usize {
+        self.surface.state.drain_input_into(output)
     }
 
     /// Convert and commit one frame without waiting for a compositor release.
@@ -827,6 +977,154 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for EventState {
         _connection: &Connection,
         _handle: &QueueHandle<Self>,
     ) {
+    }
+}
+
+impl Dispatch<wl_seat::WlSeat, ()> for EventState {
+    fn event(
+        state: &mut Self,
+        seat: &wl_seat::WlSeat,
+        event: wl_seat::Event,
+        (): &(),
+        _connection: &Connection,
+        handle: &QueueHandle<Self>,
+    ) {
+        let wl_seat::Event::Capabilities {
+            capabilities: WEnum::Value(capabilities),
+        } = event
+        else {
+            return;
+        };
+        let available = state.accepts_touch && capabilities.contains(wl_seat::Capability::Touch);
+        if available && state.touch.is_none() {
+            state.touch = Some(seat.get_touch(handle, ()));
+        } else if !available {
+            state.active_touch = None;
+            if let Some(touch) = state.touch.take() {
+                if touch.version() >= 3 {
+                    touch.release();
+                }
+            }
+        }
+    }
+}
+
+impl Dispatch<wl_touch::WlTouch, ()> for EventState {
+    fn event(
+        state: &mut Self,
+        _touch: &wl_touch::WlTouch,
+        event: wl_touch::Event,
+        (): &(),
+        _connection: &Connection,
+        _handle: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_touch::Event::Down { id, x, y, .. } if state.active_touch.is_none() => {
+                state.active_touch = Some(id);
+                if let Some(point) = state.touch_point(x, y) {
+                    state.push_input(InputEvent::TouchPressed(point));
+                }
+            }
+            wl_touch::Event::Up { id, .. } if state.active_touch == Some(id) => {
+                state.active_touch = None;
+            }
+            wl_touch::Event::Cancel => state.active_touch = None,
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<DeckGamepadManagerV1, ()> for EventState {
+    fn event(
+        _state: &mut Self,
+        _manager: &DeckGamepadManagerV1,
+        _event: <DeckGamepadManagerV1 as Proxy>::Event,
+        (): &(),
+        _connection: &Connection,
+        _handle: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<DeckGamepadInputV1, ()> for EventState {
+    fn event(
+        state: &mut Self,
+        _input: &DeckGamepadInputV1,
+        event: deck_gamepad_input_v1::Event,
+        (): &(),
+        _connection: &Connection,
+        _handle: &QueueHandle<Self>,
+    ) {
+        match event {
+            deck_gamepad_input_v1::Event::Connected { player, .. } => {
+                if let Some(player) = protocol_player(player) {
+                    state.controllers.connected(player);
+                }
+            }
+            deck_gamepad_input_v1::Event::AxisInfo {
+                player,
+                code,
+                minimum,
+                maximum,
+            } => {
+                if let (Some(player), Ok(code)) = (protocol_player(player), u16::try_from(code)) {
+                    state.controllers.axis_info(player, code, minimum, maximum);
+                }
+            }
+            deck_gamepad_input_v1::Event::Disconnected { player } => {
+                if let Some(player) = protocol_player(player) {
+                    state.controllers.disconnected(player);
+                }
+            }
+            deck_gamepad_input_v1::Event::Button {
+                player,
+                code,
+                state: button_state,
+            } => {
+                if let (Some(player), Ok(code), Some(pressed)) = (
+                    protocol_player(player),
+                    u16::try_from(code),
+                    protocol_button_pressed(button_state),
+                ) {
+                    state.controllers.button(player, code, pressed);
+                }
+            }
+            deck_gamepad_input_v1::Event::Axis {
+                player,
+                code,
+                value,
+            } => {
+                if let (Some(player), Ok(code)) = (protocol_player(player), u16::try_from(code)) {
+                    state.controllers.axis(player, code, value);
+                }
+            }
+            deck_gamepad_input_v1::Event::Frame { player } => {
+                if let Some(player) = protocol_player(player) {
+                    let previous_len = state.input_events.len();
+                    state
+                        .controllers
+                        .finish_report(player, &mut state.input_events);
+                    state.cap_controller_input(previous_len);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn protocol_player(player: WEnum<deck_gamepad_input_v1::Player>) -> Option<Player> {
+    match player.into_result().ok()? {
+        deck_gamepad_input_v1::Player::One => Some(Player::One),
+        deck_gamepad_input_v1::Player::Two => Some(Player::Two),
+        _ => None,
+    }
+}
+
+fn protocol_button_pressed(state: WEnum<deck_gamepad_input_v1::ButtonState>) -> Option<bool> {
+    match state.into_result().ok()? {
+        deck_gamepad_input_v1::ButtonState::Released => Some(false),
+        deck_gamepad_input_v1::ButtonState::Pressed => Some(true),
+        _ => None,
     }
 }
 

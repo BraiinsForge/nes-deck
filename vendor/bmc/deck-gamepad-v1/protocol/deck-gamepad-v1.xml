@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="deck_gamepad_v1">
+  <copyright>
+    Copyright (C) 2026  Braiins Systems s.r.o.
+    SPDX-License-Identifier: MIT
+  </copyright>
+
+  <interface name="deck_gamepad_manager_v1" version="1">
+    <description summary="surface-scoped gamepad input manager">
+      Creates a gamepad input object for a wl_surface owned by the client.
+
+      The compositor owns device discovery, hotplug, stable player slots, and
+      focus routing. The protocol deliberately carries Linux event codes and
+      raw axis values: controller-specific layouts and application semantics
+      remain client policy rather than compositor policy.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Existing gamepad input objects remain valid.
+      </description>
+    </request>
+
+    <request name="get_gamepad_input">
+      <description summary="subscribe a surface to focused gamepad input">
+        Creates one input object associated with surface. Connection metadata
+        is reported regardless of focus. Button, axis, and frame events are
+        delivered only while surface is the compositor's gamepad focus.
+      </description>
+      <arg name="id" type="new_id" interface="deck_gamepad_input_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+  </interface>
+
+  <interface name="deck_gamepad_input_v1" version="1">
+    <description summary="raw reports from gamepads routed to one surface">
+      Player slots remain stable while a physical controller is connected and
+      are reclaimed by the same physical path after a reconnect when possible.
+
+      Axis metadata follows connected and precedes axis values for that player.
+      A frame event commits all preceding button and axis changes from one
+      EV_SYN report. Clients should update semantic state at frame boundaries.
+    </description>
+
+    <enum name="player">
+      <entry name="one" value="0" summary="first stable controller slot"/>
+      <entry name="two" value="1" summary="second stable controller slot"/>
+    </enum>
+
+    <enum name="button_state">
+      <entry name="released" value="0" summary="button is released"/>
+      <entry name="pressed" value="1" summary="button is pressed"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy this surface subscription"/>
+    </request>
+
+    <event name="connected">
+      <description summary="a controller occupies a stable player slot">
+        name is diagnostic only. Clients should select a mapping from vendor,
+        product, and the raw event capabilities that follow.
+      </description>
+      <arg name="player" type="uint" enum="player"/>
+      <arg name="vendor" type="uint"/>
+      <arg name="product" type="uint"/>
+      <arg name="name" type="string"/>
+    </event>
+
+    <event name="axis_info">
+      <description summary="range for one Linux EV_ABS code">
+        minimum is strictly lower than maximum. The compositor sends this
+        metadata after connected and before values for the same axis.
+      </description>
+      <arg name="player" type="uint" enum="player"/>
+      <arg name="code" type="uint"/>
+      <arg name="minimum" type="int"/>
+      <arg name="maximum" type="int"/>
+    </event>
+
+    <event name="disconnected">
+      <description summary="the player slot no longer has a controller"/>
+      <arg name="player" type="uint" enum="player"/>
+    </event>
+
+    <event name="button">
+      <description summary="one Linux EV_KEY value changed">
+        code is a Linux input-event key code. Repeats are folded into pressed.
+      </description>
+      <arg name="player" type="uint" enum="player"/>
+      <arg name="code" type="uint"/>
+      <arg name="state" type="uint" enum="button_state"/>
+    </event>
+
+    <event name="axis">
+      <description summary="one Linux EV_ABS value changed">
+        value is in the inclusive range advertised by axis_info.
+      </description>
+      <arg name="player" type="uint" enum="player"/>
+      <arg name="code" type="uint"/>
+      <arg name="value" type="int"/>
+    </event>
+
+    <event name="frame">
+      <description summary="commit one complete controller report">
+        Applies all button and axis events for player since its previous frame.
+      </description>
+      <arg name="player" type="uint" enum="player"/>
+    </event>
+  </interface>
+</protocol>

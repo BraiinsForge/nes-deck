@@ -329,7 +329,7 @@ mod tests {
         apply_bytes(&mut state, &[30, 103]);
         assert!(state.contains(letter_a));
         assert!(state.contains(arrow_up));
-        apply_bytes(&mut state, &[30 | 0x80]);
+        apply_bytes(&mut state, &[0x1e | 0x80]);
         assert!(!state.contains(letter_a));
         assert!(state.contains(arrow_up));
     }

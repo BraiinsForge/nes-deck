@@ -852,8 +852,8 @@ mod tests {
     fn waveform_progress_and_file_indicator_are_visible() {
         let frame = ChiptuneFrame::render(view(PlayerContent::Track(track())))
             .expect("chiptune frame allocation succeeds");
-        assert!(frame.pixels().iter().any(|pixel| *pixel == GREEN));
-        assert!(frame.pixels().iter().any(|pixel| *pixel == ORANGE));
+        assert!(frame.pixels().contains(&GREEN));
+        assert!(frame.pixels().contains(&ORANGE));
         assert_eq!(frame.pixel(96 + 215, 135), Some(GREEN));
     }
 
@@ -864,8 +864,8 @@ mod tests {
         });
         empty.volume = Volume::MUTED;
         let frame = ChiptuneFrame::render(empty).expect("chiptune frame allocation succeeds");
-        assert!(frame.pixels().iter().any(|pixel| *pixel == RED));
-        assert!(frame.pixels().iter().any(|pixel| *pixel == MUTED));
+        assert!(frame.pixels().contains(&RED));
+        assert!(frame.pixels().contains(&MUTED));
     }
 
     #[test]

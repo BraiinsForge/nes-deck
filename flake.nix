@@ -111,7 +111,12 @@
       rustWorkspaceSources = extraFiles: pkgs.lib.fileset.toSource {
         root = ./.;
         fileset = pkgs.lib.fileset.unions (
-          [ ./Cargo.lock ./Cargo.toml rootRustCrates ] ++ extraFiles
+          [
+            ./Cargo.lock
+            ./Cargo.toml
+            rootRustCrates
+            ./vendor/bmc/deck-gamepad-v1
+          ] ++ extraFiles
         );
       };
       uploaderSources = rustWorkspaceSources [

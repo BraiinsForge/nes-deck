@@ -195,12 +195,15 @@ mod tests {
         assert_eq!(schedule.wait_duration(Duration::ZERO), Duration::ZERO);
 
         schedule.complete_frame(processing);
-        assert_eq!(schedule.wait_duration(processing), period - processing);
+        assert_eq!(
+            schedule.wait_duration(processing),
+            period.saturating_sub(processing)
+        );
 
         schedule.complete_frame(period + processing);
         assert_eq!(
             schedule.wait_duration(period + processing),
-            period - processing
+            period.saturating_sub(processing)
         );
         assert_eq!(schedule.deadline, period.saturating_mul(2));
     }
