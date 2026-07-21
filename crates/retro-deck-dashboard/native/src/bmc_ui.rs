@@ -46,6 +46,17 @@ pub enum BmcUiAction {
     OpenSystemSettings,
 }
 
+/// Device-independent dashboard navigation from a keyboard or controller.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BmcNavigation {
+    Up,
+    Down,
+    Left,
+    Right,
+    Confirm,
+    Back,
+}
+
 /// Translate a stable `bmc-render` hit-test key into product behavior.
 #[must_use]
 pub fn bmc_action_for_touch(screen: BmcScreen, key: &str) -> Option<BmcUiAction> {
@@ -60,6 +71,28 @@ pub fn bmc_action_for_touch(screen: BmcScreen, key: &str) -> Option<BmcUiAction>
         (BmcScreen::Carousel, OPEN_ENTRY) => Some(BmcUiAction::Model(Action::Confirm)),
         (BmcScreen::Carousel, CLOSE_CAROUSEL) => Some(BmcUiAction::CloseCarousel),
         (BmcScreen::Carousel, OPEN_SYSTEM_SETTINGS) => Some(BmcUiAction::OpenSystemSettings),
+        _ => None,
+    }
+}
+
+/// Translate one semantic navigation edge into product behavior.
+#[must_use]
+pub const fn bmc_action_for_navigation(
+    screen: BmcScreen,
+    navigation: BmcNavigation,
+) -> Option<BmcUiAction> {
+    match (screen, navigation) {
+        (BmcScreen::Categories, BmcNavigation::Up) => {
+            Some(BmcUiAction::Model(Action::CategoryPrevious))
+        }
+        (BmcScreen::Categories, BmcNavigation::Down) => {
+            Some(BmcUiAction::Model(Action::CategoryNext))
+        }
+        (BmcScreen::Categories, BmcNavigation::Confirm) => Some(BmcUiAction::OpenCarousel),
+        (BmcScreen::Carousel, BmcNavigation::Left) => Some(BmcUiAction::Model(Action::Previous)),
+        (BmcScreen::Carousel, BmcNavigation::Right) => Some(BmcUiAction::Model(Action::Next)),
+        (BmcScreen::Carousel, BmcNavigation::Confirm) => Some(BmcUiAction::Model(Action::Confirm)),
+        (BmcScreen::Carousel, BmcNavigation::Back) => Some(BmcUiAction::CloseCarousel),
         _ => None,
     }
 }
@@ -423,6 +456,26 @@ mod tests {
         assert_eq!(
             bmc_action_for_touch(BmcScreen::Carousel, OPEN_SYSTEM_SETTINGS),
             Some(BmcUiAction::OpenSystemSettings)
+        );
+    }
+
+    #[test]
+    fn semantic_navigation_is_screen_specific() {
+        assert_eq!(
+            bmc_action_for_navigation(BmcScreen::Categories, BmcNavigation::Down),
+            Some(BmcUiAction::Model(Action::CategoryNext))
+        );
+        assert_eq!(
+            bmc_action_for_navigation(BmcScreen::Carousel, BmcNavigation::Right),
+            Some(BmcUiAction::Model(Action::Next))
+        );
+        assert_eq!(
+            bmc_action_for_navigation(BmcScreen::Carousel, BmcNavigation::Back),
+            Some(BmcUiAction::CloseCarousel)
+        );
+        assert_eq!(
+            bmc_action_for_navigation(BmcScreen::Categories, BmcNavigation::Left),
+            None
         );
     }
 

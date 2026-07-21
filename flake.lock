@@ -11,17 +11,17 @@
         "uv2nix": "uv2nix"
       },
       "locked": {
-        "lastModified": 1784598178,
+        "lastModified": 1784600383,
         "lfs": true,
-        "narHash": "sha256-zMSrV0wHmNCKSm/hd2im9zv7q76J0Fo5+clZNABjjxg=",
+        "narHash": "sha256-IqUl/oPS00mTvENg8CKVSp/eY43P11u8AINLQq9yMSA=",
         "ref": "refs/heads/master",
-        "rev": "615dc57a249a6f23eba47a9ec9491d87284fffcb",
-        "revCount": 2453,
+        "rev": "d648e791e04a303a1236f78de6b79122f61fca93",
+        "revCount": 2454,
         "type": "git",
         "url": "ssh://git@gitlab.ii.zone/bos/bmc-main.git"
       },
       "original": {
-        "rev": "615dc57a249a6f23eba47a9ec9491d87284fffcb",
+        "rev": "d648e791e04a303a1236f78de6b79122f61fca93",
         "type": "git",
         "url": "ssh://git@gitlab.ii.zone/bos/bmc-main.git"
       }

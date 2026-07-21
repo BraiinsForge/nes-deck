@@ -16,13 +16,13 @@ use bmc_widget::egl::{
     Depth, DoubleBufferState, EglContext, SharedRenderScratch, SlotReleaseState,
 };
 use bmc_widget::surface::{
-    DeckWidgetSurfaceClient, LifecycleState, WidgetEvent, WidgetSurface as _,
+    DeckWidgetSurfaceClient, KeyboardKeyState, LifecycleState, WidgetEvent, WidgetSurface as _,
 };
 use glow::HasContext as _;
 use retro_deck_dashboard::{
-    ApplicationRequest, BMC_APPLICATION_ID, BmcScreen, BmcUiAction, DashboardModel, Intent, Keymap,
-    LaunchTarget, MenuCue, VolumeState, applications_from_policy, bmc_action_for_touch,
-    build_bmc_tree, load_native_catalog,
+    ApplicationRequest, BMC_APPLICATION_ID, BmcNavigation, BmcScreen, BmcUiAction, DashboardModel,
+    Intent, Keymap, LaunchTarget, MenuCue, VolumeState, applications_from_policy,
+    bmc_action_for_navigation, bmc_action_for_touch, build_bmc_tree, load_native_catalog,
 };
 use retro_deck_policy::{
     PolicyClient, PolicyEvent, PolicyEventPoll, PolicyResponse, PolicySubmit, RequestId, Value,
@@ -39,6 +39,14 @@ const LISP_SITE_DIRECTORY: &str = "/mnt/data/nes-deck/lisp/site.d";
 const APPLICATION_POLICY_HOOK: &str = "dashboard/applications";
 const POLICY_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SETTINGS_COG_PATH: &str = "assets/gear-knekko-09.png";
+const KEY_ESCAPE: u32 = 1;
+const KEY_ENTER: u32 = 28;
+const KEY_SPACE: u32 = 57;
+const KEY_KEYPAD_ENTER: u32 = 96;
+const KEY_UP: u32 = 103;
+const KEY_LEFT: u32 = 105;
+const KEY_RIGHT: u32 = 106;
+const KEY_DOWN: u32 = 108;
 
 fn main() -> ExitCode {
     bmc_log::init_console();
@@ -250,13 +258,26 @@ impl NativeRuntime {
                     self.cancel_touch();
                     self.pending_render = true;
                 }
+                WidgetEvent::Key {
+                    key,
+                    state: KeyboardKeyState::Pressed,
+                } => {
+                    if let Some(navigation) = navigation_for_linux_key(key) {
+                        self.apply_navigation(navigation);
+                    }
+                }
+                WidgetEvent::Key {
+                    state: KeyboardKeyState::Released,
+                    ..
+                }
+                | WidgetEvent::Setting(_)
+                | WidgetEvent::ParamUpdate(_) => {}
                 WidgetEvent::Shutdown => self.surface.request_shutdown(),
                 WidgetEvent::TransitionIncoming => {
                     if has_render_target(self.lifecycle) {
                         self.pending_render = true;
                     }
                 }
-                WidgetEvent::Setting(_) | WidgetEvent::ParamUpdate(_) => {}
             }
         }
     }
@@ -326,30 +347,40 @@ impl NativeRuntime {
             let Some(action) = bmc_action_for_touch(self.screen, &key) else {
                 continue;
             };
-            match action {
-                BmcUiAction::OpenCarousel => {
-                    self.screen = BmcScreen::Carousel;
-                    self.pending_render = true;
-                    self.play_menu_cue(MenuCue::Confirm);
+            self.apply_ui_action(action);
+        }
+    }
+
+    fn apply_navigation(&mut self, navigation: BmcNavigation) {
+        if let Some(action) = bmc_action_for_navigation(self.screen, navigation) {
+            self.apply_ui_action(action);
+        }
+    }
+
+    fn apply_ui_action(&mut self, action: BmcUiAction) {
+        match action {
+            BmcUiAction::OpenCarousel => {
+                self.screen = BmcScreen::Carousel;
+                self.pending_render = true;
+                self.play_menu_cue(MenuCue::Confirm);
+            }
+            BmcUiAction::CloseCarousel => {
+                self.screen = BmcScreen::Categories;
+                self.pending_render = true;
+                self.play_menu_cue(MenuCue::Back);
+            }
+            BmcUiAction::OpenSystemSettings => {
+                self.open_system_settings();
+                self.play_menu_cue(MenuCue::Confirm);
+            }
+            BmcUiAction::Model(action) => {
+                let transition = self.model.apply(action);
+                self.pending_render |= transition.redraw;
+                if let Some(cue) = transition.cue {
+                    self.play_menu_cue(cue);
                 }
-                BmcUiAction::CloseCarousel => {
-                    self.screen = BmcScreen::Categories;
-                    self.pending_render = true;
-                    self.play_menu_cue(MenuCue::Back);
-                }
-                BmcUiAction::OpenSystemSettings => {
-                    self.open_system_settings();
-                    self.play_menu_cue(MenuCue::Confirm);
-                }
-                BmcUiAction::Model(action) => {
-                    let transition = self.model.apply(action);
-                    self.pending_render |= transition.redraw;
-                    if let Some(cue) = transition.cue {
-                        self.play_menu_cue(cue);
-                    }
-                    if let Some(intent) = transition.intent {
-                        self.request_intent(intent);
-                    }
+                if let Some(intent) = transition.intent {
+                    self.request_intent(intent);
                 }
             }
         }
@@ -446,6 +477,18 @@ fn spawn_dashboard_policy() -> Option<PolicyClient> {
             tracing::warn!(?error, "cannot start Common Lisp dashboard supervisor");
             None
         }
+    }
+}
+
+const fn navigation_for_linux_key(key: u32) -> Option<BmcNavigation> {
+    match key {
+        KEY_ESCAPE => Some(BmcNavigation::Back),
+        KEY_ENTER | KEY_SPACE | KEY_KEYPAD_ENTER => Some(BmcNavigation::Confirm),
+        KEY_UP => Some(BmcNavigation::Up),
+        KEY_LEFT => Some(BmcNavigation::Left),
+        KEY_RIGHT => Some(BmcNavigation::Right),
+        KEY_DOWN => Some(BmcNavigation::Down),
+        _ => None,
     }
 }
 
@@ -643,5 +686,30 @@ mod tests {
         assert_eq!(menu_cue_sound(MenuCue::Next), "PriceUp");
         assert_eq!(menu_cue_sound(MenuCue::Confirm), "Confirmation");
         assert_eq!(menu_cue_sound(MenuCue::Back), "PriceDown");
+    }
+
+    #[test]
+    fn linux_navigation_keys_map_without_layout_dependent_text() {
+        assert_eq!(navigation_for_linux_key(KEY_UP), Some(BmcNavigation::Up));
+        assert_eq!(
+            navigation_for_linux_key(KEY_DOWN),
+            Some(BmcNavigation::Down)
+        );
+        assert_eq!(
+            navigation_for_linux_key(KEY_LEFT),
+            Some(BmcNavigation::Left)
+        );
+        assert_eq!(
+            navigation_for_linux_key(KEY_RIGHT),
+            Some(BmcNavigation::Right)
+        );
+        for key in [KEY_ENTER, KEY_SPACE, KEY_KEYPAD_ENTER] {
+            assert_eq!(navigation_for_linux_key(key), Some(BmcNavigation::Confirm));
+        }
+        assert_eq!(
+            navigation_for_linux_key(KEY_ESCAPE),
+            Some(BmcNavigation::Back)
+        );
+        assert_eq!(navigation_for_linux_key(u32::MAX), None);
     }
 }
