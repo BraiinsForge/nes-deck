@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use retro_deck_platform::{
-    audio::PcmStreamWorker,
+    audio::ApplicationPcm,
     input::KeyboardState,
     wayland::{PresentOutcome, WaylandPresentation},
 };
@@ -46,7 +46,7 @@ struct CallbackState {
     player_one: JoypadState,
     player_two: JoypadState,
     keyboard: KeyboardState,
-    audio: Option<PcmStreamWorker>,
+    audio: Option<ApplicationPcm>,
     audio_batch_error: Option<AudioBatchError>,
     presentation: Option<WaylandPresentation>,
     video_error: Option<VideoCallbackError>,
@@ -158,28 +158,25 @@ impl CallbackBinding {
         video_refresh_callback
     }
 
-    /// Attach the sole PCM worker, returning it unchanged if one is present.
+    /// Attach the sole application PCM sender, returning it if one is present.
     #[must_use]
-    pub(super) fn attach_audio_worker(
-        &mut self,
-        worker: PcmStreamWorker,
-    ) -> Option<PcmStreamWorker> {
+    pub(super) fn attach_audio(&mut self, audio: ApplicationPcm) -> Option<ApplicationPcm> {
         if self.state.audio.is_some() {
-            Some(worker)
+            Some(audio)
         } else {
-            self.state.audio = Some(worker);
+            self.state.audio = Some(audio);
             None
         }
     }
 
-    /// Detach the worker so its diagnostics and shutdown remain explicit.
+    /// Detach the application PCM sender for explicit release.
     #[must_use]
-    pub(super) fn take_audio_worker(&mut self) -> Option<PcmStreamWorker> {
+    pub(super) fn take_audio(&mut self) -> Option<ApplicationPcm> {
         self.state.audio.take()
     }
 
-    /// Borrow the worker for gate, volume, and asynchronous diagnostics.
-    pub(super) const fn audio_worker(&self) -> Option<&PcmStreamWorker> {
+    /// Borrow the application PCM sender for gate, volume, and diagnostics.
+    pub(super) const fn audio(&self) -> Option<&ApplicationPcm> {
         self.state.audio.as_ref()
     }
 
@@ -353,8 +350,8 @@ unsafe extern "C" fn audio_sample_callback(left: i16, right: i16) {
         let Some(state) = (unsafe { slot.get().as_ref() }) else {
             return;
         };
-        if let Some(worker) = &state.audio {
-            let _submission = worker.try_push_stereo(&[[left, right]]);
+        if let Some(audio) = &state.audio {
+            audio.submit_stereo(&[[left, right]]);
         }
     });
 }
@@ -370,8 +367,8 @@ unsafe extern "C" fn audio_sample_batch_callback(data: *const i16, frames: usize
         // rejects null, unaligned, and unreasonably large batches before use.
         match unsafe { stereo_frames(data, frames) } {
             Ok(samples) => {
-                if let Some(worker) = &state.audio {
-                    let _submission = worker.try_push_stereo(samples);
+                if let Some(audio) = &state.audio {
+                    audio.submit_stereo(samples);
                 }
             }
             Err(error) => {
@@ -630,13 +627,13 @@ mod tests {
     }
 
     #[test]
-    fn audio_callbacks_submit_to_an_inactive_worker_without_device_io() {
+    fn audio_callbacks_submit_to_an_inactive_client_without_device_io() {
         let _test_session = serialize_test_sessions();
         let mut binding = CallbackBinding::install(LibretroCore::Fceumm, Path::new("/roms/nes"))
             .expect("callback binding");
         let rate = SampleRate::new(48_000).expect("valid sample rate");
-        let worker = PcmStreamWorker::spawn(rate, Volume::MUTED).expect("PCM worker");
-        assert!(binding.attach_audio_worker(worker).is_none());
+        let audio = ApplicationPcm::silent(rate, Volume::MUTED);
+        assert!(binding.attach_audio(audio).is_none());
 
         let single = binding.audio_sample_callback();
         // SAFETY: The single-frame callback has no pointer parameters.
@@ -648,9 +645,8 @@ mod tests {
             2
         );
 
-        let worker = binding.take_audio_worker().expect("attached PCM worker");
-        assert_eq!(worker.stats().inactive_frames, 3);
-        assert!(!worker.shutdown().panicked);
+        let audio = binding.take_audio().expect("attached PCM sender");
+        assert_eq!(audio.stats().inactive_dropped_samples, 3);
     }
 
     #[test]

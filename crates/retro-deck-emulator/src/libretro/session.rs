@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use retro_deck_audio::SampleRate;
 use retro_deck_platform::{
-    audio::PcmStreamWorker, display::Dimensions, input::KeyboardState, wayland::WaylandPresentation,
+    audio::ApplicationPcm, display::Dimensions, input::KeyboardState, wayland::WaylandPresentation,
 };
 
 use super::abi;
@@ -274,24 +274,24 @@ impl CoreSession {
         self.persistence.save(self.core(), &self.lifecycle)
     }
 
-    /// Attach the sole nonblocking PCM worker.
+    /// Attach the sole nonblocking application PCM sender.
     ///
-    /// Returns `worker` unchanged when one is already attached.
+    /// Returns `audio` unchanged when one is already attached.
     #[must_use]
-    pub fn attach_audio_worker(&mut self, worker: PcmStreamWorker) -> Option<PcmStreamWorker> {
-        self.callbacks.attach_audio_worker(worker)
+    pub fn attach_audio(&mut self, audio: ApplicationPcm) -> Option<ApplicationPcm> {
+        self.callbacks.attach_audio(audio)
     }
 
-    /// Borrow the PCM worker for gate, volume, and device diagnostics.
+    /// Borrow the application PCM sender for gate, volume, and diagnostics.
     #[must_use]
-    pub const fn audio_worker(&self) -> Option<&PcmStreamWorker> {
-        self.callbacks.audio_worker()
+    pub const fn audio(&self) -> Option<&ApplicationPcm> {
+        self.callbacks.audio()
     }
 
-    /// Detach the PCM worker for explicit release and shutdown reporting.
+    /// Detach the application PCM sender for explicit release.
     #[must_use]
-    pub fn take_audio_worker(&mut self) -> Option<PcmStreamWorker> {
-        self.callbacks.take_audio_worker()
+    pub fn take_audio(&mut self) -> Option<ApplicationPcm> {
+        self.callbacks.take_audio()
     }
 
     /// Attach the sole Wayland presentation.
@@ -1242,28 +1242,28 @@ mod tests {
     }
 
     #[test]
-    fn session_exclusively_owns_and_explicitly_releases_audio() {
+    fn session_exclusively_owns_and_recovers_application_audio() {
         let _session = serialize_test_sessions();
         reset_fake();
         let (_directory, content) = content_fixture(LibretroCore::Fceumm);
         let mut session = CoreSession::open_with_api(LibretroCore::Fceumm, content, test_api())
             .expect("valid session");
         let rate = session.av_info().sample_rate();
-        let worker = PcmStreamWorker::spawn(rate, Volume::MUTED).expect("first PCM worker");
-        assert!(session.attach_audio_worker(worker).is_none());
-        assert!(session.audio_worker().is_some());
+        let audio = ApplicationPcm::silent(rate, Volume::MUTED);
+        assert!(session.attach_audio(audio).is_none());
+        assert!(session.audio().is_some());
 
-        let duplicate = PcmStreamWorker::spawn(rate, Volume::MUTED).expect("second PCM worker");
+        let duplicate = ApplicationPcm::silent(rate, Volume::MUTED);
         let duplicate = session
-            .attach_audio_worker(duplicate)
+            .attach_audio(duplicate)
             .expect("duplicate is returned unchanged");
-        assert!(!duplicate.shutdown().panicked);
+        drop(duplicate);
 
-        let worker = session
-            .take_audio_worker()
-            .expect("attached worker is recoverable");
-        assert!(session.audio_worker().is_none());
-        assert!(!worker.shutdown().panicked);
+        let audio = session
+            .take_audio()
+            .expect("attached sender is recoverable");
+        assert!(session.audio().is_none());
+        drop(audio);
     }
 
     unsafe extern "C" fn fake_set_environment(_: abi::EnvironmentCallback) {

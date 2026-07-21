@@ -14,7 +14,7 @@ use retro_deck_emulator::libretro::{
     AudioBatchError, Content, ContentError, CoreSession, CoreSessionError, JoypadState,
     LibretroCore, PersistenceIssue, VideoCallbackError,
 };
-use retro_deck_platform::audio::{AudioGate, PcmStreamWorker, PcmWorkerReport};
+use retro_deck_platform::audio::{ApplicationPcm, AudioGate};
 use retro_deck_platform::input::{KeyboardState, MediumRawKeyboard, Player};
 use retro_deck_platform::shutdown::ShutdownFlag;
 use retro_deck_platform::time::FrameClock;
@@ -97,15 +97,15 @@ impl Runtime {
         }
 
         let volume = configured_volume(application);
-        match PcmStreamWorker::spawn(av_info.sample_rate(), volume) {
-            Ok(worker) => {
-                if let Some(worker) = session.attach_audio_worker(worker) {
-                    let _report = worker.shutdown();
-                    return Err(RuntimeError::ResourceAlreadyAttached("audio worker"));
+        match ApplicationPcm::from_inherited(av_info.sample_rate(), volume) {
+            Ok(audio) => {
+                if let Some(audio) = session.attach_audio(audio) {
+                    drop(audio);
+                    return Err(RuntimeError::ResourceAlreadyAttached("audio sender"));
                 }
             }
             Err(error) => {
-                eprintln!("{application}: cannot start audio worker: {error}; sound disabled");
+                eprintln!("{application}: cannot attach BMC audio: {error}; sound disabled");
             }
         }
 
@@ -241,8 +241,8 @@ impl Runtime {
             return;
         }
         self.audio_gate = gate;
-        if let Some(worker) = self.session.audio_worker() {
-            worker.set_gate(gate);
+        if let Some(audio) = self.session.audio() {
+            audio.set_gate(gate);
         }
     }
 
@@ -274,21 +274,21 @@ impl Runtime {
     }
 
     fn report_audio_errors(&self) {
-        let Some(worker) = self.session.audio_worker() else {
+        let Some(audio) = self.session.audio() else {
             return;
         };
-        for error in worker.take_errors() {
+        if let Some(error) = audio.take_error() {
             eprintln!("{}: sound unavailable for now: {error}", self.application);
         }
     }
 
     fn finish_audio(&mut self) {
         self.report_audio_errors();
-        let Some(worker) = self.session.take_audio_worker() else {
+        let Some(audio) = self.session.take_audio() else {
             return;
         };
-        worker.set_gate(AudioGate::Hidden);
-        report_audio_shutdown(self.application, worker.shutdown());
+        audio.set_gate(AudioGate::Hidden);
+        audio.release();
     }
 
     fn finish_keyboard(&mut self) {
@@ -358,18 +358,6 @@ const fn desired_audio_gate(visible: bool, muted: bool) -> AudioGate {
         AudioGate::Muted
     } else {
         AudioGate::Active
-    }
-}
-
-fn report_audio_shutdown(application: &str, report: PcmWorkerReport) {
-    if report.panicked {
-        eprintln!("{application}: audio worker panicked during shutdown");
-    }
-    if report.errors != 0 || report.dropped_errors != 0 {
-        eprintln!(
-            "{application}: audio worker stopped with {} error(s), including {} unreported",
-            report.errors, report.dropped_errors
-        );
     }
 }
 

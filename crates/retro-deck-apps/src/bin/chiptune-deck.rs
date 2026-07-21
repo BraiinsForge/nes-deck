@@ -15,7 +15,7 @@ use retro_deck_apps::chiptune::{
     PlayerModel, RenderError, TrackView, controller_control, touch_control,
 };
 use retro_deck_audio::{SampleRate, Volume};
-use retro_deck_platform::audio::{AudioGate, PcmStreamWorker, PcmWorkerReport};
+use retro_deck_platform::audio::{ApplicationPcm, AudioGate};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame, rgb565_to_xrgb8888};
 use retro_deck_platform::file::write_private_atomic;
 use retro_deck_platform::input::InputEvent;
@@ -117,7 +117,7 @@ struct PlayerRuntime {
     player: Option<ChiptunePlayer>,
     status: String,
     frame: ChiptuneFrame,
-    audio: Option<PcmStreamWorker>,
+    audio: Option<ApplicationPcm>,
     audio_gate: AudioGate,
     volume_state: Option<PathBuf>,
     dirty: bool,
@@ -285,7 +285,7 @@ impl PlayerRuntime {
             }
         };
         if let Some(audio) = &self.audio {
-            let _submission = audio.try_push_stereo(player.waveform());
+            audio.submit_stereo(player.waveform());
         }
         self.dirty = true;
         if tick.ended() {
@@ -351,7 +351,7 @@ impl PlayerRuntime {
 
     fn report_audio_errors(&self) {
         if let Some(audio) = &self.audio {
-            for error in audio.take_errors() {
+            if let Some(error) = audio.take_error() {
                 eprintln!("{APPLICATION}: {error}");
             }
         }
@@ -362,7 +362,7 @@ impl PlayerRuntime {
         let Some(audio) = self.audio.take() else {
             return;
         };
-        report_audio_shutdown(audio.shutdown());
+        audio.release();
     }
 }
 
@@ -461,15 +461,15 @@ fn configured_volume_state() -> Option<PathBuf> {
     Some(path)
 }
 
-fn start_audio(volume: Volume) -> Option<PcmStreamWorker> {
+fn start_audio(volume: Volume) -> Option<ApplicationPcm> {
     let Some(rate) = SampleRate::new(SAMPLE_RATE_HERTZ) else {
         eprintln!("{APPLICATION}: internal sample rate is invalid; continuing muted");
         return None;
     };
-    match PcmStreamWorker::spawn(rate, volume) {
+    match ApplicationPcm::from_inherited(rate, volume) {
         Ok(audio) => Some(audio),
         Err(error) => {
-            eprintln!("{APPLICATION}: cannot start audio worker: {error}; continuing muted");
+            eprintln!("{APPLICATION}: cannot attach BMC audio: {error}; continuing muted");
             None
         }
     }
@@ -489,18 +489,6 @@ const fn desired_audio_gate(
         AudioGate::Muted
     } else {
         AudioGate::Active
-    }
-}
-
-fn report_audio_shutdown(report: PcmWorkerReport) {
-    if report.panicked {
-        eprintln!("{APPLICATION}: audio worker panicked during shutdown");
-    }
-    if report.errors != 0 || report.dropped_errors != 0 {
-        eprintln!(
-            "{APPLICATION}: audio worker stopped with {} error(s), including {} unreported",
-            report.errors, report.dropped_errors
-        );
     }
 }
 
