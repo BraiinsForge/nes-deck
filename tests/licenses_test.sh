@@ -21,8 +21,7 @@ require_notice() {
 
 for name in \
   Go-LICENSE Nixpkgs-COPYING Wayland-COPYING \
-  glibc-COPYING.LIB libffi-LICENSE libpng-LICENSE \
-  wlr-layer-shell-LICENSE zlib-LICENSE; do
+  glibc-COPYING.LIB wlr-layer-shell-LICENSE zlib-LICENSE; do
   require_notice "$runtime/share/licenses/runtime/$name"
 done
 
@@ -33,13 +32,6 @@ for name in \
   require_notice "$ecl/share/licenses/ecl-deck/$name"
 done
 
-grep -Fqx $'ECL\tCommon Lisp REPL\tLGPL-2.1-or-later' \
-  deploy/menu/credits.tsv
-grep -Fqx \
-  $'GNU MP\tECL arithmetic\tLGPL-3.0-or-later OR GPL-2.0-or-later' \
-  deploy/menu/credits.tsv
-grep -Fqx $'Go\twireguard-go runtime\tBSD-3-Clause' \
-  deploy/menu/credits.tsv
 grep -Fq 'either version 3 of the License' \
   "$ecl/share/licenses/ecl-deck/GMP-README"
 grep -Fq 'version 2.1 of the License' \

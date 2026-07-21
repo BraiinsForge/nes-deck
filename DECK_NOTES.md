@@ -73,12 +73,6 @@ details when they are needed for archaeology.
   valid generated palette, the checked-in palette, and built-in defaults.
 - The dashboard ships only the approved CC0 `gear-knekko-09` settings cog and
   its matching built-in fallback. There is no cog picker.
-- The bottom-left `(c)` control opens an animated FOSS credits crawl from
-  `deploy/menu/credits.tsv`. Its fixed-size source text is projected onto one
-  continuously receding plane instead of changing between discrete font
-  scales. B or its top-right close control returns to the dashboard. Installed
-  license texts live under
-  `/mnt/data/nes-deck/licenses`.
 
 ## Emulators and media
 
@@ -211,10 +205,9 @@ pidof bmc-wasm-host
 tail -n 100 /var/log/bmc/bmc.log
 tail -n 100 /var/log/bmc/widgets.log
 
-# Generated catalog and credits
+# Generated catalog
 cmp /mnt/data/nes-deck/menu/games.tsv \
   /mnt/data/nes-deck/state/games.tsv
-test -s /mnt/data/nes-deck/menu/credits.tsv
 
 # Network status without credentials
 cat /var/run/deck-wifi/status

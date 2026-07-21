@@ -7,9 +7,7 @@
 
 let
   wayland = staticCross.wayland;
-  libpng = staticCross.libpng;
   zlib = staticCross.zlib;
-  libffi = staticCross.libffi;
   glibc = pkgsCross.glibc;
   go = pkgs.go;
 in
@@ -30,12 +28,8 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
     > "$licenses/Wayland-COPYING"
   install -m444 ${../protocol/wlr-layer-shell-LICENSE} \
     "$licenses/wlr-layer-shell-LICENSE"
-  tar -xOf ${libpng.src} libpng-${libpng.version}/LICENSE \
-    > "$licenses/libpng-LICENSE"
   tar -xOf ${zlib.src} zlib-${zlib.version}/LICENSE \
     > "$licenses/zlib-LICENSE"
-  tar -xOf ${libffi.src} libffi-${libffi.version}/LICENSE \
-    > "$licenses/libffi-LICENSE"
   tar -xOf ${glibc.src} glibc-${glibc.version}/COPYING \
     > "$licenses/glibc-COPYING"
   tar -xOf ${glibc.src} glibc-${glibc.version}/COPYING.LIB \

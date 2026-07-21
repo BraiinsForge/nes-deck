@@ -17,7 +17,6 @@ lifecycle and starts `retro-deck` from its generation-managed profile.
 | --- | --- |
 | `games.sexp` | Reviewed source catalog |
 | `games.tsv` | Validated runtime catalog |
-| `credits.tsv` | Runtime dependency credits |
 | `palette.tsv` | Validated default dashboard colors |
 | `compile-catalog.lisp` | Deterministic catalog compiler |
 | `fetch-covers` | Persistent cover-cache updater |
