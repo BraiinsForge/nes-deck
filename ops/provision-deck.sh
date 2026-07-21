@@ -82,6 +82,13 @@ wireguard_address=$DECK_WIREGUARD_ADDRESS
 wireguard_route=$DECK_WIREGUARD_ROUTE
 wireguard_health_address=$DECK_WIREGUARD_HEALTH_ADDRESS
 recovery_wifi_ssid=$DECK_RECOVERY_WIFI_SSID
+case $target in
+  root@*) deck_device=${target#root@} ;;
+  *)
+    echo "BMC provisioning requires a root@HOST SSH target: $target" >&2
+    exit 1
+    ;;
+esac
 
 private_file_valid() {
   local path=$1
@@ -128,6 +135,12 @@ for command in awk find grep install mktemp seq sha256sum sort ssh stat tar tr w
     exit 1
   }
 done
+if [[ $network_only -eq 0 ]]; then
+  command -v nix >/dev/null 2>&1 || {
+    echo "Missing required command: nix" >&2
+    exit 1
+  }
+fi
 
 wireguard_dir=$repo_root/ops/deck-wireguard
 (cd "$wireguard_dir" && sha256sum -c SHA256SUMS >/dev/null)
@@ -244,8 +257,8 @@ if [[ $check_only -eq 1 ]]; then
   exit 0
 fi
 
-echo "Checking the live Deck network before installation..."
-readarray -t network_before < <(ssh -o BatchMode=yes "$target" '
+network_snapshot() {
+  ssh -o BatchMode=yes "$target" '
   set -eu
   grep -q "[[:space:]]/mnt/data[[:space:]]" /proc/mounts
   [ "$(uname -r)" = 5.10.176 ]
@@ -253,9 +266,16 @@ readarray -t network_before < <(ssh -o BatchMode=yes "$target" '
   sha256sum /etc/config/wireless | awk "{print \$1}"
   ip -4 -o address show dev wlan0 | awk "NR == 1 {print \$4}"
   ip -4 route show default | awk "NR == 1 {print \$0}"
-')
-[[ ${#network_before[@]} -eq 3 && -n ${network_before[0]} &&
-   -n ${network_before[1]} && ${network_before[2]} == *" dev wlan0 "* ]] || {
+'
+}
+
+echo "Checking the live Deck network before installation..."
+network_before=$(network_snapshot)
+network_hash=$(sed -n '1p' <<<"$network_before")
+network_wlan=$(sed -n '2p' <<<"$network_before")
+network_default=$(sed -n '3p' <<<"$network_before")
+[[ -n $network_hash && -n $network_wlan &&
+   $network_default == *" dev wlan0 "* ]] || {
   echo "Deck has no safe live Wi-Fi address/default-route snapshot" >&2
   exit 1
 }
@@ -383,16 +403,8 @@ for attempt in $(seq 1 45); do
   sleep 2
 done
 
-readarray -t network_after < <(ssh -o BatchMode=yes "$target" '
-  set -eu
-  sha256sum /etc/config/wireless | awk "{print \$1}"
-  ip -4 -o address show dev wlan0 | awk "NR == 1 {print \$4}"
-  ip -4 route show default | awk "NR == 1 {print \$0}"
-')
-[[ ${#network_after[@]} -eq 3 &&
-   ${network_after[0]} == "${network_before[0]}" &&
-   ${network_after[1]} == "${network_before[1]}" &&
-   ${network_after[2]} == "${network_before[2]}" ]] || {
+network_after=$(network_snapshot)
+[[ $network_after == "$network_before" ]] || {
   echo "Live Wi-Fi changed during network provisioning; stopping before application deployment" >&2
   exit 1
 }
@@ -402,6 +414,24 @@ if [[ $network_only -eq 1 ]]; then
   echo "Network-only provisioning complete."
   exit 0
 fi
+
+echo "Checking the BMC package store..."
+if ssh -o BatchMode=yes "$target" '
+  grep -q " /nix " /proc/mounts &&
+  test -x /run/current-profile/bin/nix-store &&
+  test -x /nix/var/nix/gcroots/profiles/bmc/current/bin/bmc-nix-cli
+'; then
+  echo "BMC package store is already initialized."
+else
+  echo "Initializing the BMC package store..."
+  (cd "$repo_root" && nix run .#deck -- init --device "$deck_device")
+fi
+
+network_after_init=$(network_snapshot)
+[[ $network_after_init == "$network_before" ]] || {
+  echo "Live Wi-Fi changed during BMC store initialization; stopping before application deployment" >&2
+  exit 1
+}
 
 "$repo_root/ops/deploy.sh" --config "$config"
 
@@ -420,4 +450,10 @@ ssh -o BatchMode=yes "$target" "
   ip route get '$wireguard_health_address' |
     grep -q 'dev wg0.*src $wireguard_address'
 "
+
+network_final=$(network_snapshot)
+[[ $network_final == "$network_before" ]] || {
+  echo "Live Wi-Fi changed during application deployment" >&2
+  exit 1
+}
 echo "Fresh Deck provisioning and application deployment complete."

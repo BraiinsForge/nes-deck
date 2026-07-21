@@ -292,10 +292,12 @@ if [ -x /etc/init.d/nes-deck ]; then
 fi
 rm -f /etc/rc.d/S??nes-deck /etc/rc.d/K??nes-deck
 
-# Restart only the watcher process. Its profiles and live wireless state are
-# preserved, as are the current WLAN address and default route.
+# Keep a healthy watcher running. Replacing its files atomically lets the
+# current process retain its old inode until reboot, so deployment does not
+# provoke a wireless scan or selection attempt.
 /etc/init.d/deck-wifi enable
-/etc/init.d/deck-wifi restart
+/etc/init.d/deck-wifi status >/dev/null 2>&1 || \
+  /etc/init.d/deck-wifi start
 rm -f /etc/rc.d/S??nes-deck-swap /etc/rc.d/K??nes-deck-swap
 /etc/init.d/nes-deck-swap enable
 /etc/init.d/nes-deck-swap start

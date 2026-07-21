@@ -83,6 +83,22 @@ output=$("$root/ops/provision-deck.sh" --config "$config" \
   --wifi-profiles "$profiles" --check)
 grep -qx 'WireGuard peer registration: preconfigured externally' <<<"$output"
 
+grep -Fq 'nix run .#deck -- init --device "$deck_device"' \
+  "$root/ops/provision-deck.sh" || {
+  echo "provisioner does not initialize the BMC package store" >&2
+  exit 1
+}
+grep -Fq 'test -x /run/current-profile/bin/nix-store' \
+  "$root/ops/provision-deck.sh" || {
+  echo "provisioner does not probe the active BMC package store" >&2
+  exit 1
+}
+grep -Fq 'Live Wi-Fi changed during BMC store initialization' \
+  "$root/ops/provision-deck.sh" || {
+  echo "provisioner does not guard live Wi-Fi across BMC initialization" >&2
+  exit 1
+}
+
 ln -s home.psk "$profiles/unsafe.psk"
 if "$root/ops/provision-deck.sh" --config "$config" \
   --wireguard-config "$wireguard_config" \
