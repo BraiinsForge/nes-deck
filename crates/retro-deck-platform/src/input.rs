@@ -1,10 +1,8 @@
 //! Device-independent input state and Linux evdev integration.
 
-mod keyboard;
 mod linux;
 mod tty;
 
-pub use keyboard::{KeyboardDevices, KeyboardDrainStats, KeyboardScanStats};
 pub use linux::{
     ControllerDevices, ControllerScanStats, DrainStats, InputDevices, InputError, TouchscreenDevice,
 };
@@ -47,27 +45,6 @@ pub enum Button {
     L,
     /// Right shoulder.
     R,
-}
-
-/// Navigation key normalized from one dashboard keyboard report.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum KeyboardKey {
-    /// Main or keypad Enter.
-    Enter,
-    /// Escape.
-    Escape,
-    /// Direction up.
-    Up,
-    /// Direction down.
-    Down,
-    /// Direction left.
-    Left,
-    /// Direction right.
-    Right,
-    /// Tab without Shift.
-    Tab,
-    /// Tab while either Shift key is held.
-    BackTab,
 }
 
 impl Button {
