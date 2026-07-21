@@ -42,6 +42,9 @@
         dontDisableStatic = true;
         doCheck = false;
       });
+      rlwrapStaticCross = staticCross.rlwrap.override {
+        libptytty = null;
+      };
       cargoLock = {
         lockFile = ./Cargo.lock;
         allowBuiltinFetchGit = true;
@@ -720,8 +723,9 @@
           };
         };
 
-        rlwrap-deck = staticCross.rlwrap.overrideAttrs (old: {
+        rlwrap-deck = rlwrapStaticCross.overrideAttrs (old: {
           pname = "rlwrap-deck";
+          configureFlags = (old.configureFlags or [ ]) ++ [ "--without-libptytty" ];
           nativeBuildInputs = (old.nativeBuildInputs or []) ++
             [ pkgs.nukeReferences ];
           allowedReferences = [ ];
