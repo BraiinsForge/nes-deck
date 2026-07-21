@@ -21,9 +21,9 @@ use bmc_widget::surface::{
 use glow::HasContext as _;
 use retro_deck_dashboard::{
     ApplicationRequest, BMC_APPLICATION_ID, BmcNavigation, BmcScreen, BmcUiAction, DashboardModel,
-    GamepadInput, Intent, Keymap, LaunchTarget, MenuCue, VolumeState, bmc_action_for_navigation,
-    bmc_action_for_touch, build_bmc_tree, dashboard_startup_from_policy, load_native_catalog,
-    load_native_palette,
+    GamepadInput, Intent, Keymap, LaunchTarget, MenuCue, NATIVE_COVER_SIZE, VolumeState,
+    bmc_action_for_navigation, bmc_action_for_touch, build_bmc_tree, dashboard_startup_from_policy,
+    load_native_catalog, load_native_cover, load_native_palette,
 };
 use retro_deck_policy::{
     PolicyClient, PolicyEvent, PolicyEventPoll, PolicyResponse, PolicySubmit, Value, WorkerCommand,
@@ -34,6 +34,7 @@ const MANIFEST_ENV: &str = "RETRO_DECK_MANIFEST";
 const DEFAULT_MANIFEST_PATH: &str = "/mnt/data/nes-deck/menu/games.tsv";
 const DEFAULT_PALETTE_PATH: &str = "/mnt/data/nes-deck/menu/palette.tsv";
 const PALETTE_OVERRIDE_PATH: &str = "/mnt/data/nes-deck/state/dashboard-palette.sexp";
+const COVER_DIRECTORY: &str = "/mnt/data/nes-deck/covers";
 const ECL_PROGRAM: &str = "/mnt/data/nes-deck/ecl/bin/ecl.bin";
 const ECL_DIRECTORY: &str = "/mnt/data/nes-deck/ecl/lib/ecl/";
 const LISP_DIRECTORY: &str = "/mnt/data/nes-deck/lisp";
@@ -42,6 +43,7 @@ const LISP_SITE_DIRECTORY: &str = "/mnt/data/nes-deck/lisp/site.d";
 const DASHBOARD_POLICY_HOOK: &str = "dashboard/startup";
 const POLICY_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SETTINGS_COG_PATH: &str = "assets/gear-knekko-09.png";
+const COVER_BITMAP_TAG: &str = "retro-deck-cover";
 const KEY_ESCAPE: u32 = 1;
 const KEY_ENTER: u32 = 28;
 const KEY_SPACE: u32 = 57;
@@ -326,11 +328,20 @@ impl NativeRuntime {
         let delta_ms = self.last_frame_at.replace(now).map_or(0, |previous| {
             u32::try_from(now.duration_since(previous).as_millis()).unwrap_or(u32::MAX)
         });
+        let selected_identifier = (self.screen == BmcScreen::Carousel)
+            .then(|| self.model.selected_entry())
+            .flatten()
+            .map(|(_, entry)| entry.identifier().to_owned());
+        let selected_cover = match selected_identifier.as_deref() {
+            Some(identifier) => graphics.select_cover(identifier)?,
+            None => None,
+        };
         let tree = build_bmc_tree(
             &self.model,
             self.screen,
             self.size,
             &self.palette,
+            selected_cover,
             graphics.settings_cog,
         );
         let result = graphics.render(
@@ -510,6 +521,8 @@ struct Graphics {
     scratch: Option<SharedRenderScratch>,
     renderer: Option<FemtoVgRenderer>,
     settings_cog: Option<BitmapId>,
+    cover_identifier: Option<Box<str>>,
+    cover_bitmap: Option<BitmapId>,
     buffers: DoubleBufferState,
     release: SlotReleaseState,
     gpu_lock: GpuRenderLock,
@@ -551,6 +564,8 @@ impl Graphics {
             scratch: Some(scratch),
             renderer: Some(renderer),
             settings_cog,
+            cover_identifier: None,
+            cover_bitmap: None,
             buffers: DoubleBufferState::new(size.0, size.1, Depth::Disabled),
             release: SlotReleaseState::new(),
             gpu_lock,
@@ -559,6 +574,35 @@ impl Graphics {
 
     fn current_buffer_available(&self) -> bool {
         self.release.is_available(self.buffers.current_slot())
+    }
+
+    fn select_cover(&mut self, identifier: &str) -> Result<Option<BitmapId>> {
+        if self.cover_identifier.as_deref() == Some(identifier) {
+            return Ok(self.cover_bitmap);
+        }
+        let cover = match load_native_cover(Path::new(COVER_DIRECTORY), identifier) {
+            Ok(cover) => cover,
+            Err(error) => {
+                tracing::warn!(?error, identifier, "cannot load cached dashboard cover");
+                None
+            }
+        };
+        let _lock = self.gpu_lock.lock("retro_deck_cover")?;
+        let Some(renderer) = self.renderer.as_mut() else {
+            anyhow::bail!("renderer was destroyed before cover selection");
+        };
+        renderer.evict_prefix(COVER_BITMAP_TAG);
+        let bitmap = cover.and_then(|cover| {
+            renderer.register_bitmap_rgba(
+                COVER_BITMAP_TAG,
+                cover.rgba(),
+                NATIVE_COVER_SIZE,
+                NATIVE_COVER_SIZE,
+            )
+        });
+        self.cover_identifier = Some(identifier.into());
+        self.cover_bitmap = bitmap;
+        Ok(bitmap)
     }
 
     fn render(

@@ -99,11 +99,12 @@ pub fn build_bmc_tree(
     screen: BmcScreen,
     size: (u32, u32),
     palette: &Palette,
+    selected_cover: Option<BitmapId>,
     settings_cog: Option<BitmapId>,
 ) -> TreeNode {
     let children = match screen {
         BmcScreen::Categories => category_nodes(model, size, palette),
-        BmcScreen::Carousel => carousel_nodes(model, size, palette, settings_cog),
+        BmcScreen::Carousel => carousel_nodes(model, size, palette, selected_cover, settings_cog),
     };
     TreeNode::Column(
         PropsData {
@@ -168,18 +169,21 @@ fn carousel_nodes(
     model: &DashboardModel,
     size: (u32, u32),
     palette: &Palette,
+    selected_cover: Option<BitmapId>,
     settings_cog: Option<BitmapId>,
 ) -> Vec<TreeNode> {
     let width = size.0 as f32;
     let height = size.1 as f32;
-    let card_w = (width * 0.36).clamp(380.0, 500.0);
-    let card_h = (height * 0.58).clamp(240.0, 300.0);
+    let card_w = (width * 0.28).clamp(320.0, 380.0);
+    let card_h = (height * 0.73).clamp(320.0, 350.0);
     let card_x = (width - card_w) / 2.0;
-    let card_y = 72.0;
+    let card_y = 38.0;
     let arrow_size = 80.0;
-    let title = model
+    let (title, tile_color) = model
         .selected_entry()
-        .map_or("NO ENTRY", |(_, entry)| entry.title());
+        .map_or(("NO ENTRY", [48, 48, 48]), |(_, entry)| {
+            (entry.title(), entry.color().components())
+        });
     let count = model.active_category().map_or(0, Category::len);
 
     vec![
@@ -200,13 +204,13 @@ fn carousel_nodes(
             Arrow::Left,
             palette,
         ),
-        text_button(
+        carousel_card(
             OPEN_ENTRY,
             (card_x, card_y, card_w, card_h),
             title,
-            color(palette.color(PaletteRole::Selected)),
-            color(palette.color(PaletteRole::TextDark)),
-            30,
+            tile_color,
+            selected_cover,
+            palette,
         ),
         arrow_button(
             ENTRY_NEXT,
@@ -227,6 +231,63 @@ fn carousel_nodes(
         ),
         settings_button(settings_cog, (width - 72.0, height - 64.0, 48.0, 48.0)),
     ]
+}
+
+fn carousel_card(
+    key: &str,
+    bounds: (f32, f32, f32, f32),
+    title: &str,
+    tile_color: [u8; 3],
+    cover: Option<BitmapId>,
+    palette: &Palette,
+) -> TreeNode {
+    let (x, y, width, height) = bounds;
+    let art_size = 248.0;
+    let art_x = (width - art_size) / 2.0;
+    let art_y = 12.0;
+    let title_y = art_y + art_size + 12.0;
+    let title_height = (height - title_y - 10.0).max(42.0);
+    let art = cover.map_or_else(
+        || DrawCommand::Rect {
+            x: art_x,
+            y: art_y,
+            w: art_size,
+            h: art_size,
+            fill: Fill::Solid(rgb_color(tile_color)),
+        },
+        |bitmap_id| DrawCommand::Bitmap {
+            x: art_x,
+            y: art_y,
+            w: art_size,
+            h: art_size,
+            bitmap_id: Some(bitmap_id),
+        },
+    );
+    TreeNode::Canvas {
+        props: absolute_props(x, y, width, height),
+        touch_key: Some(key.to_owned()),
+        draws: vec![
+            DrawCommand::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: width,
+                h: height,
+                fill: Fill::Solid(color(palette.color(PaletteRole::Selected))),
+            },
+            art,
+            DrawCommand::AutofitText {
+                x: 14.0,
+                y: title_y,
+                box_width: width - 28.0,
+                box_height: title_height,
+                mode: AutoFit::Shrink,
+                min_size: 16,
+                max_size: 25,
+                text: title.to_owned(),
+                style: centered_text(25, color(palette.color(PaletteRole::TextDark))),
+            },
+        ],
+    }
 }
 
 fn settings_button(bitmap_id: Option<BitmapId>, bounds: (f32, f32, f32, f32)) -> TreeNode {
@@ -401,6 +462,10 @@ const fn color(rgb: Rgb) -> Color {
     Color::from_rgba(red, green, blue, 255)
 }
 
+const fn rgb_color([red, green, blue]: [u8; 3]) -> Color {
+    Color::from_rgba(red, green, blue, 255)
+}
+
 fn absolute_props(x: f32, y: f32, width: f32, height: f32) -> PropsData {
     PropsData {
         width,
@@ -518,6 +583,7 @@ mod tests {
                 (1280, 480),
                 &palette,
                 None,
+                None,
             ),
             TreeNode::Column(_, children) if children.len() == 3
         ));
@@ -527,6 +593,7 @@ mod tests {
                 BmcScreen::Carousel,
                 (1280, 480),
                 &palette,
+                None,
                 None,
             ),
             TreeNode::Column(_, children) if children.len() == 6
