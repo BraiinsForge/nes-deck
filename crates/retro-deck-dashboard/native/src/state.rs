@@ -15,6 +15,8 @@ pub enum Action {
     CategoryPrevious,
     /// Select the next nonempty console category.
     CategoryNext,
+    /// Select one nonempty console category by its visible tab index.
+    CategorySelect(usize),
     /// Activate the currently selected catalog entry.
     Confirm,
 }
@@ -98,6 +100,7 @@ impl DashboardModel {
             Action::Next => self.move_selection(Direction::Next),
             Action::CategoryPrevious => self.move_category(Direction::Previous),
             Action::CategoryNext => self.move_category(Direction::Next),
+            Action::CategorySelect(index) => self.select_category(index),
             Action::Confirm => self.confirm(),
         }
     }
@@ -175,6 +178,14 @@ impl DashboardModel {
         }
         self.active_category = adjacent_index(self.active_category, count, direction);
         Transition::redraw(direction.cue())
+    }
+
+    fn select_category(&mut self, index: usize) -> Transition {
+        if index >= self.catalog.categories().len() || index == self.active_category {
+            return Transition::NONE;
+        }
+        self.active_category = index;
+        Transition::redraw(MenuCue::Next)
     }
 
     fn confirm(&self) -> Transition {
@@ -292,6 +303,26 @@ mod tests {
                 cue: Some(MenuCue::Confirm),
                 intent: Some(Intent::Launch(selected)),
             }
+        );
+    }
+
+    #[test]
+    fn tabs_select_only_existing_categories() {
+        let Some(mut model) = model() else {
+            return;
+        };
+        assert_eq!(model.apply(Action::CategorySelect(0)), Transition::NONE);
+        assert_eq!(
+            model.apply(Action::CategorySelect(1)),
+            Transition::redraw(MenuCue::Next)
+        );
+        assert_eq!(
+            model.active_category().map(crate::Category::label),
+            Some("GAME BOY")
+        );
+        assert_eq!(
+            model.apply(Action::CategorySelect(usize::MAX)),
+            Transition::NONE
         );
     }
 
