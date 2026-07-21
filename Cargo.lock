@@ -227,7 +227,7 @@ dependencies = [
 [[package]]
 name = "deck-audio-v1"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=2484d1fd84259a29e5aaf574034110dedb6ea4b7#2484d1fd84259a29e5aaf574034110dedb6ea4b7"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=a5d0e7ddde0d9753cd81094fa8ff5753161f685d#a5d0e7ddde0d9753cd81094fa8ff5753161f685d"
 dependencies = [
  "libc",
  "nix",
@@ -236,7 +236,7 @@ dependencies = [
 [[package]]
 name = "deck-gamepad-v1"
 version = "0.1.0"
-source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=2484d1fd84259a29e5aaf574034110dedb6ea4b7#2484d1fd84259a29e5aaf574034110dedb6ea4b7"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=a5d0e7ddde0d9753cd81094fa8ff5753161f685d#a5d0e7ddde0d9753cd81094fa8ff5753161f685d"
 dependencies = [
  "wayland-backend",
  "wayland-client",
