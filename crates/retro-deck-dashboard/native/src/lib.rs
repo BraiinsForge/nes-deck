@@ -11,6 +11,8 @@ mod launch;
 mod launch_options;
 #[cfg(feature = "bmc-native")]
 mod native_catalog;
+#[cfg(feature = "bmc-native")]
+mod native_theme;
 mod state;
 
 #[cfg(feature = "application-wire")]
@@ -36,4 +38,6 @@ pub use launch::{
 pub use launch_options::{DEFAULT_VOLUME_PERCENT, Keymap, VolumeError, VolumeState};
 #[cfg(feature = "bmc-native")]
 pub use native_catalog::{NativeCatalogError, load_native_catalog};
+#[cfg(feature = "bmc-native")]
+pub use native_theme::load_native_palette;
 pub use state::{Action, DashboardModel, Intent, MenuCue, Transition};

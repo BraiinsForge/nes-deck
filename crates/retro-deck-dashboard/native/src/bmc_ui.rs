@@ -5,14 +5,9 @@ use bmc_render::tree::{
     AutoFit, Color, DrawCommand, Fill, FontFamily, FontWeight, PathPaint, PropsData, TextAlign,
     TextStyle, TreeNode, VerticalAlign,
 };
+use retro_deck_config::{Palette, PaletteRole, Rgb};
 
 use crate::{Action, Category, DashboardModel};
-
-const BACKGROUND: Color = Color::from_rgba(0, 0, 0, 255);
-const ORANGE: Color = Color::from_rgba(255, 95, 0, 255);
-const WHITE: Color = Color::from_rgba(238, 238, 238, 255);
-const DIM: Color = Color::from_rgba(112, 112, 112, 255);
-const PANEL: Color = Color::from_rgba(24, 24, 24, 255);
 
 const CATEGORY_PREVIOUS: &str = "category-previous";
 const CATEGORY_NEXT: &str = "category-next";
@@ -103,15 +98,16 @@ pub fn build_bmc_tree(
     model: &DashboardModel,
     screen: BmcScreen,
     size: (u32, u32),
+    palette: &Palette,
     settings_cog: Option<BitmapId>,
 ) -> TreeNode {
     let children = match screen {
-        BmcScreen::Categories => category_nodes(model, size),
-        BmcScreen::Carousel => carousel_nodes(model, size, settings_cog),
+        BmcScreen::Categories => category_nodes(model, size, palette),
+        BmcScreen::Carousel => carousel_nodes(model, size, palette, settings_cog),
     };
     TreeNode::Column(
         PropsData {
-            background: BACKGROUND,
+            background: color(palette.color(PaletteRole::Background)),
             ..PropsData::default()
         },
         children,
@@ -122,7 +118,7 @@ pub fn build_bmc_tree(
     clippy::cast_precision_loss,
     reason = "surface dimensions are small integers represented by the renderer as f32"
 )]
-fn category_nodes(model: &DashboardModel, size: (u32, u32)) -> Vec<TreeNode> {
+fn category_nodes(model: &DashboardModel, size: (u32, u32), palette: &Palette) -> Vec<TreeNode> {
     let width = size.0 as f32;
     let height = size.1 as f32;
     let button_w = (width * 0.38).clamp(360.0, 520.0);
@@ -140,14 +136,15 @@ fn category_nodes(model: &DashboardModel, size: (u32, u32)) -> Vec<TreeNode> {
             OPEN_CATEGORY,
             (button_x, button_y, button_w, button_h),
             label,
-            ORANGE,
-            BACKGROUND,
+            color(palette.color(PaletteRole::Accent)),
+            color(palette.color(PaletteRole::TextDark)),
             42,
         ),
         arrow_button(
             CATEGORY_PREVIOUS,
             (arrow_x, button_y, arrow_size, arrow_size),
             Arrow::Up,
+            palette,
         ),
         arrow_button(
             CATEGORY_NEXT,
@@ -158,6 +155,7 @@ fn category_nodes(model: &DashboardModel, size: (u32, u32)) -> Vec<TreeNode> {
                 arrow_size,
             ),
             Arrow::Down,
+            palette,
         ),
     ]
 }
@@ -169,6 +167,7 @@ fn category_nodes(model: &DashboardModel, size: (u32, u32)) -> Vec<TreeNode> {
 fn carousel_nodes(
     model: &DashboardModel,
     size: (u32, u32),
+    palette: &Palette,
     settings_cog: Option<BitmapId>,
 ) -> Vec<TreeNode> {
     let width = size.0 as f32;
@@ -184,7 +183,12 @@ fn carousel_nodes(
     let count = model.active_category().map_or(0, Category::len);
 
     vec![
-        arrow_button(CLOSE_CAROUSEL, (24.0, 18.0, 56.0, 56.0), Arrow::Close),
+        arrow_button(
+            CLOSE_CAROUSEL,
+            (24.0, 18.0, 56.0, 56.0),
+            Arrow::Close,
+            palette,
+        ),
         arrow_button(
             ENTRY_PREVIOUS,
             (
@@ -194,13 +198,14 @@ fn carousel_nodes(
                 arrow_size,
             ),
             Arrow::Left,
+            palette,
         ),
         text_button(
             OPEN_ENTRY,
             (card_x, card_y, card_w, card_h),
             title,
-            PANEL,
-            WHITE,
+            color(palette.color(PaletteRole::Selected)),
+            color(palette.color(PaletteRole::TextDark)),
             30,
         ),
         arrow_button(
@@ -212,11 +217,13 @@ fn carousel_nodes(
                 arrow_size,
             ),
             Arrow::Right,
+            palette,
         ),
         position_indicator(
             model.selected_position(),
             count,
             (width / 2.0, height - 42.0),
+            palette,
         ),
         settings_button(settings_cog, (width - 72.0, height - 64.0, 48.0, 48.0)),
     ]
@@ -282,7 +289,12 @@ enum Arrow {
     Close,
 }
 
-fn arrow_button(key: &str, bounds: (f32, f32, f32, f32), arrow: Arrow) -> TreeNode {
+fn arrow_button(
+    key: &str,
+    bounds: (f32, f32, f32, f32),
+    arrow: Arrow,
+    palette: &Palette,
+) -> TreeNode {
     let (x, y, width, height) = bounds;
     let inset = width.min(height) * 0.2;
     let points = match arrow {
@@ -306,21 +318,21 @@ fn arrow_button(key: &str, bounds: (f32, f32, f32, f32), arrow: Arrow) -> TreeNo
             (width - inset, height / 2.0),
             (inset, height - inset),
         ],
-        Arrow::Close => return close_button(key, bounds),
+        Arrow::Close => return close_button(key, bounds, palette),
     };
     TreeNode::Canvas {
         props: absolute_props(x, y, width, height),
         touch_key: Some(key.to_owned()),
         draws: vec![DrawCommand::Path {
             points,
-            paint: PathPaint::Fill(Fill::Solid(ORANGE)),
+            paint: PathPaint::Fill(Fill::Solid(color(palette.color(PaletteRole::Accent)))),
             closed: true,
             smooth: false,
         }],
     }
 }
 
-fn close_button(key: &str, bounds: (f32, f32, f32, f32)) -> TreeNode {
+fn close_button(key: &str, bounds: (f32, f32, f32, f32), palette: &Palette) -> TreeNode {
     let (x, y, width, height) = bounds;
     let inset = 16.0;
     TreeNode::Canvas {
@@ -330,7 +342,7 @@ fn close_button(key: &str, bounds: (f32, f32, f32, f32)) -> TreeNode {
             DrawCommand::Path {
                 points: vec![(inset, inset), (width - inset, height - inset)],
                 paint: PathPaint::Stroke {
-                    color: WHITE,
+                    color: color(palette.color(PaletteRole::White)),
                     width: 4.0,
                 },
                 closed: false,
@@ -339,7 +351,7 @@ fn close_button(key: &str, bounds: (f32, f32, f32, f32)) -> TreeNode {
             DrawCommand::Path {
                 points: vec![(width - inset, inset), (inset, height - inset)],
                 paint: PathPaint::Stroke {
-                    color: WHITE,
+                    color: color(palette.color(PaletteRole::White)),
                     width: 4.0,
                 },
                 closed: false,
@@ -353,7 +365,12 @@ fn close_button(key: &str, bounds: (f32, f32, f32, f32)) -> TreeNode {
     clippy::cast_precision_loss,
     reason = "the indicator caps indices and counts at 24"
 )]
-fn position_indicator(selected: usize, count: usize, center: (f32, f32)) -> TreeNode {
+fn position_indicator(
+    selected: usize,
+    count: usize,
+    center: (f32, f32),
+    palette: &Palette,
+) -> TreeNode {
     let visible = count.min(24);
     let cell_w = 12.0;
     let gap = 5.0;
@@ -365,7 +382,11 @@ fn position_indicator(selected: usize, count: usize, center: (f32, f32)) -> Tree
             y: 0.0,
             w: cell_w,
             h: 5.0,
-            fill: Fill::Solid(if index == selected { ORANGE } else { DIM }),
+            fill: Fill::Solid(color(palette.color(if index == selected {
+                PaletteRole::Accent
+            } else {
+                PaletteRole::Footer
+            }))),
         });
     }
     TreeNode::Canvas {
@@ -373,6 +394,11 @@ fn position_indicator(selected: usize, count: usize, center: (f32, f32)) -> Tree
         touch_key: None,
         draws,
     }
+}
+
+const fn color(rgb: Rgb) -> Color {
+    let [red, green, blue] = rgb.components();
+    Color::from_rgba(red, green, blue, 255)
 }
 
 fn absolute_props(x: f32, y: f32, width: f32, height: f32) -> PropsData {
@@ -484,12 +510,25 @@ mod tests {
         let Some(model) = model() else {
             return;
         };
+        let palette = Palette::default();
         assert!(matches!(
-            build_bmc_tree(&model, BmcScreen::Categories, (1280, 480), None),
+            build_bmc_tree(
+                &model,
+                BmcScreen::Categories,
+                (1280, 480),
+                &palette,
+                None,
+            ),
             TreeNode::Column(_, children) if children.len() == 3
         ));
         assert!(matches!(
-            build_bmc_tree(&model, BmcScreen::Carousel, (1280, 480), None),
+            build_bmc_tree(
+                &model,
+                BmcScreen::Carousel,
+                (1280, 480),
+                &palette,
+                None,
+            ),
             TreeNode::Column(_, children) if children.len() == 6
         ));
     }

@@ -1,7 +1,7 @@
 //! Native Retro Deck scene for the BMC Wayland compositor.
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,7 @@ use retro_deck_dashboard::{
     ApplicationRequest, BMC_APPLICATION_ID, BmcNavigation, BmcScreen, BmcUiAction, DashboardModel,
     GamepadInput, Intent, Keymap, LaunchTarget, MenuCue, VolumeState, bmc_action_for_navigation,
     bmc_action_for_touch, build_bmc_tree, dashboard_startup_from_policy, load_native_catalog,
+    load_native_palette,
 };
 use retro_deck_policy::{
     PolicyClient, PolicyEvent, PolicyEventPoll, PolicyResponse, PolicySubmit, Value, WorkerCommand,
@@ -31,6 +32,8 @@ use retro_deck_policy::{
 
 const MANIFEST_ENV: &str = "RETRO_DECK_MANIFEST";
 const DEFAULT_MANIFEST_PATH: &str = "/mnt/data/nes-deck/menu/games.tsv";
+const DEFAULT_PALETTE_PATH: &str = "/mnt/data/nes-deck/menu/palette.tsv";
+const PALETTE_OVERRIDE_PATH: &str = "/mnt/data/nes-deck/state/dashboard-palette.sexp";
 const ECL_PROGRAM: &str = "/mnt/data/nes-deck/ecl/bin/ecl.bin";
 const ECL_DIRECTORY: &str = "/mnt/data/nes-deck/ecl/lib/ecl/";
 const LISP_DIRECTORY: &str = "/mnt/data/nes-deck/lisp";
@@ -62,11 +65,21 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let catalog = load_native_catalog(configured_path(MANIFEST_ENV, DEFAULT_MANIFEST_PATH))
         .context("load Retro Deck catalog")?;
+    let palette = load_native_palette(
+        Path::new(DEFAULT_PALETTE_PATH),
+        Path::new(PALETTE_OVERRIDE_PATH),
+    );
     let model = DashboardModel::new(catalog, VolumeState::DEFAULT, Keymap::default());
     let (surface, initial) =
         DeckWidgetSurfaceClient::connect().context("connect Retro Deck scene")?;
     let policy = spawn_dashboard_policy();
-    let runtime = NativeRuntime::new(surface, model, (initial.width, initial.height), policy);
+    let runtime = NativeRuntime::new(
+        surface,
+        model,
+        palette,
+        (initial.width, initial.height),
+        policy,
+    );
     runtime.run()
 }
 
@@ -79,6 +92,7 @@ struct NativeRuntime {
     surface: DeckWidgetSurfaceClient,
     tree_ui: TreeUi,
     model: DashboardModel,
+    palette: retro_deck_config::Palette,
     screen: BmcScreen,
     size: (u32, u32),
     lifecycle: Option<LifecycleState>,
@@ -93,6 +107,7 @@ impl NativeRuntime {
     fn new(
         surface: DeckWidgetSurfaceClient,
         model: DashboardModel,
+        palette: retro_deck_config::Palette,
         size: (u32, u32),
         policy: Option<PolicyClient>,
     ) -> Self {
@@ -101,6 +116,7 @@ impl NativeRuntime {
             surface,
             tree_ui: TreeUi::new(),
             model,
+            palette,
             screen: BmcScreen::Categories,
             size,
             lifecycle: None,
@@ -310,7 +326,13 @@ impl NativeRuntime {
         let delta_ms = self.last_frame_at.replace(now).map_or(0, |previous| {
             u32::try_from(now.duration_since(previous).as_millis()).unwrap_or(u32::MAX)
         });
-        let tree = build_bmc_tree(&self.model, self.screen, self.size, graphics.settings_cog);
+        let tree = build_bmc_tree(
+            &self.model,
+            self.screen,
+            self.size,
+            &self.palette,
+            graphics.settings_cog,
+        );
         let result = graphics.render(
             &mut self.surface,
             &mut self.tree_ui,
