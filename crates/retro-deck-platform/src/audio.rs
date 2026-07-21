@@ -7,13 +7,13 @@
 
 mod application_pcm;
 mod cue_worker;
-mod stream_worker;
+mod square_pcm;
 
 pub use application_pcm::{
     ApplicationPcm, ApplicationPcmError, ApplicationPcmStartError, ApplicationPcmStats,
 };
 pub use cue_worker::{ToneCueEnqueue, ToneCueWorker, ToneWorkerError, ToneWorkerReport};
-pub use stream_worker::{SquareStream, SquareStreamWorker, StreamWorkerError, StreamWorkerReport};
+pub use square_pcm::{SquarePcm, SquareStream};
 
 use std::error::Error;
 use std::fmt;

@@ -14,7 +14,7 @@ use retro_deck_emulator::chip8::{
     Controller, ControllerButton, ControllerState, Core, CoreError, FrameError,
     NORMALIZED_FRAME_HEIGHT, NORMALIZED_FRAME_WIDTH, NormalizedFrame, Program, ProgramError,
 };
-use retro_deck_platform::audio::{SquareStream, SquareStreamWorker, StreamWorkerReport};
+use retro_deck_platform::audio::{AudioGate, SquarePcm, SquareStream};
 use retro_deck_platform::display::{Dimensions, DisplayError, Frame};
 use retro_deck_platform::input::{Button, ButtonSet, Player};
 use retro_deck_platform::shutdown::ShutdownFlag;
@@ -74,7 +74,7 @@ struct Chip8Runtime {
     core: Core,
     input_profile: retro_deck_emulator::chip8::InputProfile,
     normalized_frame: NormalizedFrame,
-    audio: Option<SquareStreamWorker>,
+    audio: Option<SquarePcm>,
     clock: FrameClock,
     diagnostics: Option<RuntimeDiagnostics>,
 }
@@ -139,6 +139,7 @@ impl Chip8Runtime {
             if self.shutdown.requested() || self.presentation.shutdown_requested() {
                 break;
             }
+            self.sync_audio_gate();
             self.sync_controller_input();
             if !self.clock.wait_duration().is_zero() {
                 continue;
@@ -166,8 +167,8 @@ impl Chip8Runtime {
         self.core
             .set_keypad(self.controller_state.keypad(self.input_profile));
         let outcome = self.core.run_frame();
-        if let Some(audio) = &self.audio {
-            audio.set_source_active(outcome.sound_active());
+        if let Some(audio) = &mut self.audio {
+            audio.render_frame(outcome.sound_active());
         }
 
         let core_frame = self.core.frame().map_err(RuntimeError::CoreFrame)?;
@@ -192,19 +193,29 @@ impl Chip8Runtime {
 
     fn report_audio_errors(&self) {
         if let Some(audio) = &self.audio {
-            for error in audio.take_errors() {
+            if let Some(error) = audio.take_error() {
                 eprintln!("{APPLICATION}: sound disabled for now: {error}");
             }
         }
     }
 
+    fn sync_audio_gate(&self) {
+        if let Some(audio) = &self.audio {
+            audio.set_gate(if self.presentation.visible() {
+                AudioGate::Active
+            } else {
+                AudioGate::Hidden
+            });
+        }
+    }
+
     fn finish_audio(&mut self) {
         self.report_audio_errors();
-        let Some(audio) = self.audio.take() else {
+        let Some(mut audio) = self.audio.take() else {
             return;
         };
-        audio.set_source_active(false);
-        report_audio_shutdown(audio.shutdown());
+        audio.render_frame(false);
+        audio.release();
     }
 }
 
@@ -275,27 +286,15 @@ fn configured_background(value: Option<&OsStr>) -> GameplayBackground {
     }
 }
 
-fn start_audio(volume: Volume) -> Option<SquareStreamWorker> {
+fn start_audio(volume: Volume) -> Option<SquarePcm> {
     let rate = SampleRate::new(AUDIO_SAMPLE_RATE)?;
     let stream = SquareStream::new(rate, AUDIO_FREQUENCY_HZ)?;
-    match SquareStreamWorker::spawn(stream, volume) {
+    match SquarePcm::from_inherited(stream, volume) {
         Ok(worker) => Some(worker),
         Err(error) => {
-            eprintln!("{APPLICATION}: cannot start audio worker: {error}; sound disabled");
+            eprintln!("{APPLICATION}: cannot attach BMC audio: {error}; sound disabled");
             None
         }
-    }
-}
-
-fn report_audio_shutdown(report: StreamWorkerReport) {
-    if report.panicked {
-        eprintln!("{APPLICATION}: audio worker panicked during shutdown");
-    }
-    if report.errors != 0 {
-        eprintln!(
-            "{APPLICATION}: audio worker reported {} error(s), {} diagnostic(s) dropped",
-            report.errors, report.dropped_errors
-        );
     }
 }
 
