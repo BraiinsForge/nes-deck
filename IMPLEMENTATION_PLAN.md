@@ -87,9 +87,9 @@ properties, not justification for recreating a mature library.
   dashboard OSS worker beside BMC sound ownership.
 - Move brightness, reboot and Wi-Fi recovery behind BMC-owned controls. Retro
   Deck must not independently modify those resources.
-- Put ROM endpoints behind BMC authentication and Axum routing. Delete the
-  hand-written HTTP, session, CSRF, form and multipart implementation once the
-  route is integrated.
+- Put ROM endpoints behind BMC authentication. The standalone migration server
+  already uses Axum for HTTP, form, and multipart handling; delete its private
+  password, session, and CSRF boundary once the route is integrated.
 - Add keyboard/controller discovery, hotplug, focus and routing to BMC. Until
   that public capability is usable, keep the existing evdev path only as an
   unselected rollback implementation; do not add evdev access to the native
@@ -186,6 +186,9 @@ the BMC widget, run:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo fmt --manifest-path crates/retro-deck-dashboard/Cargo.toml --all --check
+cargo clippy --manifest-path crates/retro-deck-dashboard/Cargo.toml --workspace --all-targets --no-default-features --features application-wire -- -D warnings
+cargo test --manifest-path crates/retro-deck-dashboard/Cargo.toml --workspace --all-targets --no-default-features --features application-wire
 sbcl --script lisp/tests/run.lisp
 tests/run-host-tests.sh
 tests/verify-arm-builds.sh

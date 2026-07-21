@@ -29,20 +29,14 @@
       pkgs = nixpkgs.legacyPackages.${system};
       pkgsCross = pkgs.pkgsCross.armv7l-hf-multiplatform;
       staticCross = pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsStatic;
-      # Nixpkgs vendors every Git source named by the shared lock, even when a
-      # package does not enable bmc-native. All BMC crates use this one revision,
-      # so one source hash covers the complete Git workspace.
       cargoLock = {
         lockFile = ./Cargo.lock;
-        outputHashes = {
-          "bmc-render-0.1.0" = "sha256-9ouWZND/DOod9ZTHivlXCq2n3Az90Tp0B3yZ6pVui+E=";
-          "smithay-0.7.0" = "sha256-7oa5N61giQTl9cWSrY+Ap8rlHP4zeNJyN83w8swTqSo=";
-        };
       };
       nativeDashboardWidget = bmc-main.bmc.${system}.lib.mkExternalNativeWidgetPackage {
         name = "retro-deck";
         src = ./.;
-        cratePath = "crates/retro-deck-dashboard";
+        workspacePath = "crates/retro-deck-dashboard";
+        cratePath = "native";
         packageName = "retro-deck-dashboard";
         binName = "retro-deck";
         features = [ "bmc-native" ];
@@ -110,10 +104,13 @@
         inherit pkgs pkgsCross staticCross;
         nixpkgsSource = nixpkgs.outPath;
       };
+      rootRustCrates = pkgs.lib.fileset.difference
+        ./crates
+        ./crates/retro-deck-dashboard;
       rustWorkspaceSources = extraFiles: pkgs.lib.fileset.toSource {
         root = ./.;
         fileset = pkgs.lib.fileset.unions (
-          [ ./Cargo.lock ./Cargo.toml ./crates ] ++ extraFiles
+          [ ./Cargo.lock ./Cargo.toml rootRustCrates ] ++ extraFiles
         );
       };
       uploaderSources = rustWorkspaceSources [

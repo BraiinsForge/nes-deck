@@ -119,9 +119,10 @@ PCM queuing and resampling, dashboard geometry and behavior, ROM catalog,
 cover cache, Wi-Fi profile helper, rlwrap-backed terminal lifecycle, Rust
 display/audio runtime, timer and chiptune behavior, and the CHIP-8 core.
 
-The suite runs the strict Rust formatter, lints, and tests. Uploader coverage
-includes authentication, bounded HTTP and form parsing, ROM validation,
-atomic storage, process control, and the Paper UI contract.
+The suite runs the strict Rust formatter, lints, and tests for both the root
+runtime workspace and the isolated BMC-native dashboard workspace. Uploader
+coverage includes authentication, Axum request limits and multipart extraction,
+ROM validation, atomic storage, process control, and the Paper UI contract.
 
 Run shell checks on deployment code with:
 

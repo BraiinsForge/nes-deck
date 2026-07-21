@@ -25,6 +25,13 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 
+dashboard_manifest=crates/retro-deck-dashboard/Cargo.toml
+cargo fmt --manifest-path "$dashboard_manifest" --all --check
+cargo clippy --manifest-path "$dashboard_manifest" --workspace --all-targets \
+  --no-default-features --features application-wire -- -D warnings
+cargo test --manifest-path "$dashboard_manifest" --workspace --all-targets \
+  --no-default-features --features application-wire
+
 work=$(mktemp -d "${TMPDIR:-/tmp}/nes-deck-tests.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM HUP
 

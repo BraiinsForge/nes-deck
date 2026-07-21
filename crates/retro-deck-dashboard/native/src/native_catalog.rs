@@ -160,7 +160,7 @@ mod tests {
 
     use super::*;
 
-    const CATALOG: &[u8] = include_bytes!("../../../deploy/menu/games.tsv");
+    const CATALOG: &[u8] = include_bytes!("../../../../deploy/menu/games.tsv");
     static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
     fn fixture_path(name: &str) -> PathBuf {

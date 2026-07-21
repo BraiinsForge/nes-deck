@@ -6,7 +6,8 @@ active Wi-Fi or WireGuard IPv4 address on port 8080. Deployment writes
 accepts connections on every IPv4 interface. Requests must use an IPv4 literal
 host on port 8080, and form origins must match that exact address.
 
-The service uses a PBKDF2-HMAC-SHA256 password record, bounded login attempts,
+The service uses Axum and Hyper for HTTP and multipart handling. Its product
+boundary retains a PBKDF2-HMAC-SHA256 password record, bounded login attempts,
 eight-hour same-site sessions, CSRF tokens, strict origin and host checks, and
 a 12 MiB request ceiling. It validates raw ROMs or a ZIP containing exactly
 one matching ROM. Existing files are never replaced. Successful files go to

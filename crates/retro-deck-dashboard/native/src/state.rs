@@ -902,7 +902,7 @@ mod tests {
     use crate::DashboardCatalog;
     use retro_deck_config::Catalog;
 
-    const DEPLOYED_CATALOG: &[u8] = include_bytes!("../../../deploy/menu/games.tsv");
+    const DEPLOYED_CATALOG: &[u8] = include_bytes!("../../../../deploy/menu/games.tsv");
 
     fn model() -> Option<DashboardModel> {
         let catalog = Catalog::parse(DEPLOYED_CATALOG).ok()?;

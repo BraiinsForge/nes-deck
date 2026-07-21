@@ -1,29 +1,58 @@
-//! Authenticated uploader routes over the bounded HTTP primitives.
+//! Authenticated uploader routes built on Axum's bounded HTTP primitives.
 
 use std::{
+    collections::HashSet,
     fmt, io,
-    net::{IpAddr, SocketAddrV4},
+    net::{SocketAddr, SocketAddrV4},
+    str::{self, FromStr as _},
+    sync::Arc,
     time::{Duration, Instant},
+};
+
+use axum::{
+    Router,
+    body::Bytes,
+    extract::{ConnectInfo, DefaultBodyLimit, Form, Multipart, Request, State},
+    http::{
+        HeaderMap, HeaderName, HeaderValue, StatusCode,
+        header::{
+            CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, ORIGIN, REFERRER_POLICY,
+            RETRY_AFTER, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
+        },
+    },
+    middleware::{self, Next},
+    response::{Html, IntoResponse, Redirect, Response},
+    routing::{get, post},
+};
+use axum_extra::extract::{
+    CookieJar,
+    cookie::{Cookie, SameSite},
 };
 
 use crate::{
     auth::{AuthError, AuthManager, LoginOutcome, Session, SessionCookie},
-    form::{MAXIMUM_UPLOAD_REQUEST_BYTES, RomUploadForm, UrlEncodedForm, UrlEncodedLimits},
-    http::{
-        BAD_REQUEST, FORBIDDEN, METHOD_NOT_ALLOWED, MISDIRECTED_REQUEST, Method, NOT_FOUND, OK,
-        Request, RequestHead, Response, ResponseError, SEE_OTHER, Status, TOO_MANY_REQUESTS,
-        UNAUTHORIZED, UNPROCESSABLE_CONTENT, UNSUPPORTED_MEDIA_TYPE,
-    },
     palette::{Palette, PaletteField, PaletteStore},
+    rom::{GameTitle, System},
     store::RomStore,
     web::{PALETTE_JS, PAPER_CSS, Page},
 };
 
 const SERVICE_PORT: u16 = 8_080;
 const SESSION_COOKIE_NAME: &str = "deck_rom_session";
-const LOGIN_FORM_LIMITS: UrlEncodedLimits = UrlEncodedLimits::new(512, 1, 16, 128);
-const ACTION_FORM_LIMITS: UrlEncodedLimits = UrlEncodedLimits::new(512, 1, 16, 128);
-const PALETTE_FORM_LIMITS: UrlEncodedLimits = UrlEncodedLimits::new(4_096, 23, 32, 128);
+const LOGIN_FORM_BYTES: usize = 512;
+const ACTION_FORM_BYTES: usize = 512;
+const PALETTE_FORM_BYTES: usize = 4_096;
+const MAXIMUM_UPLOAD_REQUEST_BYTES: usize = 12 * 1_024 * 1_024;
+const MAXIMUM_UPLOAD_PARTS: usize = 4;
+const MAXIMUM_FILENAME_BYTES: usize = 255;
+const MAXIMUM_TEXT_FIELD_BYTES: usize = 256;
+const CROSS_ORIGIN_OPENER_POLICY: HeaderName =
+    HeaderName::from_static("cross-origin-opener-policy");
+const CROSS_ORIGIN_RESOURCE_POLICY: HeaderName =
+    HeaderName::from_static("cross-origin-resource-policy");
+const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-policy");
+
+type FormFields = Vec<(String, String)>;
 
 /// Process-control boundary kept separate from durable stores.
 pub trait DashboardRestarter: Send + Sync {
@@ -36,7 +65,7 @@ pub trait DashboardRestarter: Send + Sync {
     fn restart(&self) -> io::Result<()>;
 }
 
-/// Shared, authenticated HTTP application state.
+/// Shared, authenticated uploader state.
 pub struct Application {
     auth: AuthManager,
     roms: RomStore,
@@ -61,282 +90,43 @@ impl Application {
         }
     }
 
-    /// Return the body limit for a parsed request before its body is read.
-    ///
-    /// Unknown routes and wrong methods receive a zero-byte allowance.
-    #[must_use]
-    pub fn maximum_body_bytes(&self, head: &RequestHead) -> usize {
-        if head.method() != Method::Post {
-            return 0;
-        }
-        match head.path() {
-            "/login" | "/logout" => 512,
-            "/palette" => 4_096,
-            "/upload" => MAXIMUM_UPLOAD_REQUEST_BYTES,
-            _ => 0,
-        }
-    }
-
-    /// Dispatch one complete request and add the fixed browser security policy.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ApplicationError`] only for authentication-state corruption,
-    /// entropy failure, or an internally invalid response header. Expected
-    /// form, authorization, storage, and restart failures become responses.
-    pub fn handle(
-        &self,
-        request: Request,
-        source: IpAddr,
-        now: Instant,
-    ) -> Result<Response, ApplicationError> {
-        if !valid_host(request.head()) {
-            return Ok(Response::text(
-                MISDIRECTED_REQUEST,
-                "Use one of this Deck's IPv4 addresses on port 8080.",
+    /// Build the complete HTTP router around this application's shared state.
+    pub fn router(self: Arc<Self>) -> Router {
+        let mutations = Router::new()
+            .route(
+                "/login",
+                post(login).layer(DefaultBodyLimit::max(LOGIN_FORM_BYTES)),
             )
-            .hardened());
-        }
-        self.dispatch(request, source, now).map(Response::hardened)
-    }
-
-    fn dispatch(
-        &self,
-        request: Request,
-        source: IpAddr,
-        now: Instant,
-    ) -> Result<Response, ApplicationError> {
-        let method = request.head().method();
-        let path = request.head().path().to_owned();
-        match path.as_str() {
-            "/" => match method {
-                Method::Get => self.index(&request, now),
-                Method::Post | Method::Other => method_not_allowed("GET"),
-            },
-            "/login" => match method {
-                Method::Post => self.login(&request, source, now),
-                Method::Get | Method::Other => method_not_allowed("POST"),
-            },
-            "/logout" => match method {
-                Method::Post => self.logout(&request, now),
-                Method::Get | Method::Other => method_not_allowed("POST"),
-            },
-            "/upload" => match method {
-                Method::Post => self.upload(request, now),
-                Method::Get | Method::Other => method_not_allowed("POST"),
-            },
-            "/palette" => match method {
-                Method::Post => self.save_palette(&request, now),
-                Method::Get | Method::Other => method_not_allowed("POST"),
-            },
-            "/assets/paper.css" => {
-                static_asset(method, "text/css; charset=utf-8", PAPER_CSS.as_bytes())
-            }
-            "/assets/palette.js" => static_asset(
-                method,
-                "text/javascript; charset=utf-8",
-                PALETTE_JS.as_bytes(),
-            ),
-            _ => Ok(Response::text(NOT_FOUND, "Not found")),
-        }
-    }
-
-    fn index(&self, request: &Request, now: Instant) -> Result<Response, ApplicationError> {
-        match self.current_session(request.head(), now)? {
-            Some(session) => Ok(self.dashboard(&session, OK, None, None)),
-            None => Ok(Response::html(OK, Page::login(None).render())),
-        }
-    }
-
-    fn login(
-        &self,
-        request: &Request,
-        source: IpAddr,
-        now: Instant,
-    ) -> Result<Response, ApplicationError> {
-        if !same_origin(request.head()) {
-            return Ok(Response::text(FORBIDDEN, "Cross-origin request rejected"));
-        }
-        if !urlencoded_content_type(request.head()) {
-            return Ok(Response::text(
-                UNSUPPORTED_MEDIA_TYPE,
-                "Unsupported form encoding",
-            ));
-        }
-        let form = match UrlEncodedForm::parse(request.body(), LOGIN_FORM_LIMITS) {
-            Ok(form) if form.len() == 1 && form.get("password").is_some() => form,
-            Ok(_) | Err(_) => {
-                return Ok(Response::html(
-                    BAD_REQUEST,
-                    Page::login(Some("The login form was malformed.")).render(),
-                ));
-            }
-        };
-        let password = form.get("password").unwrap_or_default();
-        match self.auth.login(source, password, now)? {
-            LoginOutcome::Accepted(cookie) => redirect_with_session(&cookie),
-            LoginOutcome::Rejected => Ok(Response::html(
-                UNAUTHORIZED,
-                Page::login(Some("That password was not accepted.")).render(),
-            )),
-            LoginOutcome::Blocked(remaining) => {
-                let mut response = Response::html(
-                    TOO_MANY_REQUESTS,
-                    Page::login(Some(
-                        "Too many attempts. Wait five minutes before trying again.",
-                    ))
-                    .render(),
-                );
-                response.add_header("Retry-After", retry_after(remaining).to_string())?;
-                Ok(response)
-            }
-            LoginOutcome::Busy => {
-                let mut response = Response::html(
-                    TOO_MANY_REQUESTS,
-                    Page::login(Some(
-                        "Another sign-in is being checked. Try again in a moment.",
-                    ))
-                    .render(),
-                );
-                response.add_header("Retry-After", "3")?;
-                Ok(response)
-            }
-        }
-    }
-
-    fn logout(&self, request: &Request, now: Instant) -> Result<Response, ApplicationError> {
-        if !same_origin(request.head()) {
-            return Ok(Response::text(FORBIDDEN, "Request rejected"));
-        }
-        if !urlencoded_content_type(request.head()) {
-            return Ok(Response::text(
-                UNSUPPORTED_MEDIA_TYPE,
-                "Unsupported form encoding",
-            ));
-        }
-        let Some(session) = self.current_session(request.head(), now)? else {
-            return Ok(Response::text(UNAUTHORIZED, "Authentication required"));
-        };
-        let form = UrlEncodedForm::parse(request.body(), ACTION_FORM_LIMITS);
-        let csrf = form
-            .as_ref()
-            .ok()
-            .and_then(|form| (form.len() == 1).then(|| form.get("csrf")).flatten());
-        let Some(csrf) = csrf else {
-            return Ok(Response::text(FORBIDDEN, "Request rejected"));
-        };
-        if !self.auth.logout(&session, csrf, now)? {
-            return Ok(Response::text(FORBIDDEN, "Request rejected"));
-        }
-        redirect_without_session()
-    }
-
-    fn upload(&self, request: Request, now: Instant) -> Result<Response, ApplicationError> {
-        if !same_origin(request.head()) {
-            return Ok(Response::text(FORBIDDEN, "Request rejected"));
-        }
-        let Some(session) = self.current_session(request.head(), now)? else {
-            return Ok(Response::text(UNAUTHORIZED, "Authentication required"));
-        };
-        let Some(content_type) = request
-            .head()
-            .text_header("content-type")
-            .map(str::to_owned)
-        else {
-            return Ok(Response::text(
-                UNSUPPORTED_MEDIA_TYPE,
-                "Unsupported form encoding",
-            ));
-        };
-        let Ok(form) = RomUploadForm::parse(&content_type, request.into_body()) else {
-            return Ok(self.dashboard(
-                &session,
-                BAD_REQUEST,
-                Some("The upload form was malformed or too large."),
-                None,
-            ));
-        };
-        if !session.csrf_matches(form.csrf()) {
-            return Ok(Response::text(FORBIDDEN, "Request rejected"));
-        }
-        let entry = match self.roms.add(
-            form.system(),
-            form.title(),
-            form.filename(),
-            form.contents(),
-        ) {
-            Ok(entry) => entry,
-            Err(error) => {
-                let message = error.to_string();
-                return Ok(self.dashboard(&session, UNPROCESSABLE_CONTENT, Some(&message), None));
-            }
-        };
-        let notice = if self.restarter.restart().is_ok() {
-            format!(
-                "{} was validated, filed, and added to the dashboard.",
-                entry.title()
+            .route(
+                "/logout",
+                post(logout).layer(DefaultBodyLimit::max(ACTION_FORM_BYTES)),
             )
-        } else {
-            format!(
-                "{} was saved. The dashboard will pick it up after its next restart.",
-                entry.title()
+            .route(
+                "/upload",
+                post(upload).layer(DefaultBodyLimit::max(MAXIMUM_UPLOAD_REQUEST_BYTES)),
             )
-        };
-        Ok(self.dashboard(&session, OK, None, Some(&notice)))
-    }
+            .route(
+                "/palette",
+                post(save_palette).layer(DefaultBodyLimit::max(PALETTE_FORM_BYTES)),
+            )
+            .route_layer(middleware::from_fn(require_same_origin));
 
-    fn save_palette(&self, request: &Request, now: Instant) -> Result<Response, ApplicationError> {
-        if !same_origin(request.head()) {
-            return Ok(Response::text(FORBIDDEN, "Request rejected"));
-        }
-        if !urlencoded_content_type(request.head()) {
-            return Ok(Response::text(
-                UNSUPPORTED_MEDIA_TYPE,
-                "Unsupported form encoding",
-            ));
-        }
-        let Some(session) = self.current_session(request.head(), now)? else {
-            return Ok(Response::text(UNAUTHORIZED, "Authentication required"));
-        };
-        let Ok(form) = UrlEncodedForm::parse(request.body(), PALETTE_FORM_LIMITS) else {
-            return Ok(self.dashboard(
-                &session,
-                BAD_REQUEST,
-                Some("The appearance form was malformed."),
-                None,
-            ));
-        };
-        let Some(csrf) = form.get("csrf") else {
-            return Ok(Response::text(FORBIDDEN, "Request rejected"));
-        };
-        if !session.csrf_matches(csrf) {
-            return Ok(Response::text(FORBIDDEN, "Request rejected"));
-        }
-        let palette = match Palette::from_pairs(form.iter().filter(|(name, _)| *name != "csrf")) {
-            Ok(palette) => palette,
-            Err(error) => {
-                let message = error.to_string();
-                return Ok(self.dashboard(&session, BAD_REQUEST, Some(&message), None));
-            }
-        };
-        if let Err(error) = self.palette.save(&palette) {
-            let message = error.to_string();
-            return Ok(self.dashboard(&session, UNPROCESSABLE_CONTENT, Some(&message), None));
-        }
-        let notice = if self.restarter.restart().is_ok() {
-            "Dashboard appearance was saved and applied."
-        } else {
-            "Dashboard appearance was saved and will apply after the next restart."
-        };
-        Ok(self.dashboard(&session, OK, None, Some(notice)))
+        Router::new()
+            .route("/", get(index))
+            .route("/assets/paper.css", get(paper_css))
+            .route("/assets/palette.js", get(palette_js))
+            .merge(mutations)
+            .fallback(not_found)
+            .layer(middleware::from_fn(secure_request))
+            .with_state(self)
     }
 
     fn current_session(
         &self,
-        head: &RequestHead,
+        cookies: &CookieJar,
         now: Instant,
     ) -> Result<Option<Session>, AuthError> {
-        let Some(token) = session_token(head) else {
+        let Some(token) = cookies.get(SESSION_COOKIE_NAME).map(Cookie::value) else {
             return Ok(None);
         };
         self.auth.session(token, now)
@@ -345,7 +135,7 @@ impl Application {
     fn dashboard(
         &self,
         session: &Session,
-        status: Status,
+        status: StatusCode,
         error: Option<&str>,
         notice: Option<&str>,
     ) -> Response {
@@ -358,10 +148,11 @@ impl Application {
             }
             Vec::<PaletteField>::new()
         };
-        Response::html(
+        (
             status,
-            Page::dashboard(session.csrf(), &palette, message.as_deref(), notice).render(),
+            Html(Page::dashboard(session.csrf(), &palette, message.as_deref(), notice).render()),
         )
+            .into_response()
     }
 }
 
@@ -376,15 +167,258 @@ impl fmt::Debug for Application {
     }
 }
 
-fn valid_host(head: &RequestHead) -> bool {
-    head.text_header("host")
+async fn index(State(application): State<Arc<Application>>, cookies: CookieJar) -> Response {
+    match application.current_session(&cookies, Instant::now()) {
+        Ok(Some(session)) => application.dashboard(&session, StatusCode::OK, None, None),
+        Ok(None) => Html(Page::login(None).render()).into_response(),
+        Err(error) => internal_auth_error(&error),
+    }
+}
+
+async fn login(
+    State(application): State<Arc<Application>>,
+    ConnectInfo(source): ConnectInfo<SocketAddr>,
+    cookies: CookieJar,
+    Form(fields): Form<FormFields>,
+) -> Response {
+    let [(name, password)] = fields.as_slice() else {
+        return malformed_login();
+    };
+    if name != "password" || password.len() > 128 {
+        return malformed_login();
+    }
+    match application
+        .auth
+        .login(source.ip(), password, Instant::now())
+    {
+        Ok(LoginOutcome::Accepted(cookie)) => redirect_with_session(cookies, &cookie),
+        Ok(LoginOutcome::Rejected) => (
+            StatusCode::UNAUTHORIZED,
+            Html(Page::login(Some("That password was not accepted.")).render()),
+        )
+            .into_response(),
+        Ok(LoginOutcome::Blocked(remaining)) => login_throttled(
+            "Too many attempts. Wait five minutes before trying again.",
+            retry_after(remaining),
+        ),
+        Ok(LoginOutcome::Busy) => login_throttled(
+            "Another sign-in is being checked. Try again in a moment.",
+            3,
+        ),
+        Err(error) => internal_auth_error(&error),
+    }
+}
+
+async fn logout(
+    State(application): State<Arc<Application>>,
+    cookies: CookieJar,
+    Form(fields): Form<FormFields>,
+) -> Response {
+    let now = Instant::now();
+    let session = match application.current_session(&cookies, now) {
+        Ok(Some(session)) => session,
+        Ok(None) => return unauthorized(),
+        Err(error) => return internal_auth_error(&error),
+    };
+    let [(name, csrf)] = fields.as_slice() else {
+        return rejected();
+    };
+    if name != "csrf" {
+        return rejected();
+    }
+    match application.auth.logout(&session, csrf, now) {
+        Ok(true) => {
+            let cookie = Cookie::build(SESSION_COOKIE_NAME).path("/").build();
+            (cookies.remove(cookie), Redirect::to("/")).into_response()
+        }
+        Ok(false) => rejected(),
+        Err(error) => internal_auth_error(&error),
+    }
+}
+
+async fn upload(
+    State(application): State<Arc<Application>>,
+    cookies: CookieJar,
+    multipart: Multipart,
+) -> Response {
+    let session = match application.current_session(&cookies, Instant::now()) {
+        Ok(Some(session)) => session,
+        Ok(None) => return unauthorized(),
+        Err(error) => return internal_auth_error(&error),
+    };
+    let form = match UploadForm::read(multipart).await {
+        Ok(form) => form,
+        Err(error) => {
+            eprintln!("rom-uploader: rejected multipart form: {error:?}");
+            return application.dashboard(
+                &session,
+                StatusCode::BAD_REQUEST,
+                Some("The upload form was malformed or too large."),
+                None,
+            );
+        }
+    };
+    if !session.csrf_matches(&form.csrf) {
+        return rejected();
+    }
+    let entry = match application.roms.add(
+        form.system,
+        &form.title,
+        &form.filename,
+        form.contents.as_ref(),
+    ) {
+        Ok(entry) => entry,
+        Err(error) => {
+            let message = error.to_string();
+            return application.dashboard(
+                &session,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some(&message),
+                None,
+            );
+        }
+    };
+    let notice = if application.restarter.restart().is_ok() {
+        format!(
+            "{} was validated, filed, and added to the dashboard.",
+            entry.title()
+        )
+    } else {
+        format!(
+            "{} was saved. The dashboard will pick it up after its next restart.",
+            entry.title()
+        )
+    };
+    application.dashboard(&session, StatusCode::OK, None, Some(&notice))
+}
+
+async fn save_palette(
+    State(application): State<Arc<Application>>,
+    cookies: CookieJar,
+    Form(fields): Form<FormFields>,
+) -> Response {
+    let session = match application.current_session(&cookies, Instant::now()) {
+        Ok(Some(session)) => session,
+        Ok(None) => return unauthorized(),
+        Err(error) => return internal_auth_error(&error),
+    };
+    if !valid_unique_fields(&fields, 23, 32, 128) {
+        return application.dashboard(
+            &session,
+            StatusCode::BAD_REQUEST,
+            Some("The appearance form was malformed."),
+            None,
+        );
+    }
+    let Some(csrf) = fields
+        .iter()
+        .find_map(|(name, value)| (name == "csrf").then_some(value.as_str()))
+    else {
+        return rejected();
+    };
+    if !session.csrf_matches(csrf) {
+        return rejected();
+    }
+    let palette = match Palette::from_pairs(
+        fields
+            .iter()
+            .filter(|(name, _)| name != "csrf")
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    ) {
+        Ok(palette) => palette,
+        Err(error) => {
+            let message = error.to_string();
+            return application.dashboard(&session, StatusCode::BAD_REQUEST, Some(&message), None);
+        }
+    };
+    if let Err(error) = application.palette.save(&palette) {
+        let message = error.to_string();
+        return application.dashboard(
+            &session,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some(&message),
+            None,
+        );
+    }
+    let notice = if application.restarter.restart().is_ok() {
+        "Dashboard appearance was saved and applied."
+    } else {
+        "Dashboard appearance was saved and will apply after the next restart."
+    };
+    application.dashboard(&session, StatusCode::OK, None, Some(notice))
+}
+
+async fn paper_css() -> impl IntoResponse {
+    ([(CONTENT_TYPE, "text/css; charset=utf-8")], PAPER_CSS)
+}
+
+async fn palette_js() -> impl IntoResponse {
+    (
+        [(CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        PALETTE_JS,
+    )
+}
+
+async fn not_found() -> impl IntoResponse {
+    (StatusCode::NOT_FOUND, "Not found")
+}
+
+async fn secure_request(request: Request, next: Next) -> Response {
+    let mut response = if valid_host(request.headers()) {
+        next.run(request).await
+    } else {
+        (
+            StatusCode::MISDIRECTED_REQUEST,
+            "Use one of this Deck's IPv4 addresses on port 8080.",
+        )
+            .into_response()
+    };
+    harden(&mut response);
+    response
+}
+
+async fn require_same_origin(request: Request, next: Next) -> Response {
+    if same_origin(request.headers()) {
+        next.run(request).await
+    } else {
+        (StatusCode::FORBIDDEN, "Cross-origin request rejected").into_response()
+    }
+}
+
+fn harden(response: &mut Response) {
+    for (name, value) in [
+        (CACHE_CONTROL, "no-store"),
+        (
+            CONTENT_SECURITY_POLICY,
+            "default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+        ),
+        (CROSS_ORIGIN_OPENER_POLICY, "same-origin"),
+        (CROSS_ORIGIN_RESOURCE_POLICY, "same-origin"),
+        (
+            PERMISSIONS_POLICY,
+            "camera=(), geolocation=(), microphone=()",
+        ),
+        (REFERRER_POLICY, "no-referrer"),
+        (X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (X_FRAME_OPTIONS, "DENY"),
+    ] {
+        response
+            .headers_mut()
+            .insert(name, HeaderValue::from_static(value));
+    }
+}
+
+fn valid_host(headers: &HeaderMap) -> bool {
+    headers
+        .get(HOST)
+        .and_then(|host| host.to_str().ok())
         .and_then(|host| host.parse::<SocketAddrV4>().ok())
         .is_some_and(|address| address.port() == SERVICE_PORT)
 }
 
-fn same_origin(head: &RequestHead) -> bool {
-    if let Some(site) = head.header("sec-fetch-site") {
-        let Ok(site) = std::str::from_utf8(site) else {
+fn same_origin(headers: &HeaderMap) -> bool {
+    if let Some(site) = headers.get("sec-fetch-site") {
+        let Ok(site) = site.to_str() else {
             return false;
         };
         if !["same-origin", "same-site", "none"]
@@ -394,111 +428,72 @@ fn same_origin(head: &RequestHead) -> bool {
             return false;
         }
     }
-    let Some(host) = head.text_header("host") else {
+    let Some(host) = headers.get(HOST).and_then(|host| host.to_str().ok()) else {
         return false;
     };
-    match head.header("origin") {
+    match headers.get(ORIGIN) {
         None => true,
-        Some(origin) => {
-            let Ok(origin) = std::str::from_utf8(origin) else {
-                return false;
-            };
-            origin == "null" || origin == format!("http://{host}")
-        }
+        Some(origin) => origin
+            .to_str()
+            .is_ok_and(|origin| origin == "null" || origin == format!("http://{host}")),
     }
 }
 
-fn urlencoded_content_type(head: &RequestHead) -> bool {
-    let Some(content_type) = head.text_header("content-type") else {
-        return false;
-    };
-    let mut parts = content_type.split(';').map(str::trim);
-    if !parts.next().is_some_and(|media_type| {
-        media_type.eq_ignore_ascii_case("application/x-www-form-urlencoded")
-    }) {
+fn valid_unique_fields(
+    fields: &FormFields,
+    maximum_fields: usize,
+    maximum_name_bytes: usize,
+    maximum_value_bytes: usize,
+) -> bool {
+    if fields.len() > maximum_fields {
         return false;
     }
-    let mut saw_charset = false;
-    for parameter in parts {
-        let Some((name, value)) = parameter.split_once('=') else {
-            return false;
-        };
-        if saw_charset || !name.trim().eq_ignore_ascii_case("charset") {
-            return false;
-        }
-        let value = value.trim();
-        let value = if let Some(quoted) = value.strip_prefix('"') {
-            let Some(quoted) = quoted.strip_suffix('"') else {
-                return false;
-            };
-            quoted
-        } else if value.contains('"') {
-            return false;
-        } else {
-            value
-        };
-        if !value.eq_ignore_ascii_case("utf-8") {
-            return false;
-        }
-        saw_charset = true;
-    }
-    true
+    let mut names = HashSet::with_capacity(fields.len());
+    fields.iter().all(|(name, value)| {
+        !name.is_empty()
+            && name.len() <= maximum_name_bytes
+            && value.len() <= maximum_value_bytes
+            && name
+                .bytes()
+                .next()
+                .is_some_and(|byte| byte.is_ascii_lowercase())
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+            && names.insert(name.as_str())
+    })
 }
 
-fn session_token(head: &RequestHead) -> Option<&str> {
-    let cookie = head.text_header("cookie")?;
-    let mut found = None;
-    for pair in cookie.split(';') {
-        let (name, value) = pair.trim().split_once('=')?;
-        if name.trim() == SESSION_COOKIE_NAME {
-            if found.is_some() {
-                return None;
-            }
-            found = Some(value.trim());
-        }
-    }
-    found
+fn redirect_with_session(cookies: CookieJar, session: &SessionCookie) -> Response {
+    let cookie = Cookie::build((SESSION_COOKIE_NAME, session.token().to_owned()))
+        .path("/")
+        .max_age(time::Duration::seconds(i64::from(
+            session.max_age_seconds(),
+        )))
+        .http_only(true)
+        .same_site(SameSite::Strict)
+        .build();
+    (cookies.add(cookie), Redirect::to("/")).into_response()
 }
 
-fn redirect_with_session(cookie: &SessionCookie) -> Result<Response, ApplicationError> {
-    let mut response = Response::text(SEE_OTHER, "");
-    response.add_header("Location", "/")?;
-    response.add_header(
-        "Set-Cookie",
-        format!(
-            "{SESSION_COOKIE_NAME}={}; Path=/; Max-Age={}; HttpOnly; SameSite=Strict",
-            cookie.token(),
-            cookie.max_age_seconds()
-        ),
-    )?;
-    Ok(response)
+fn malformed_login() -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Html(Page::login(Some("The login form was malformed.")).render()),
+    )
+        .into_response()
 }
 
-fn redirect_without_session() -> Result<Response, ApplicationError> {
-    let mut response = Response::text(SEE_OTHER, "");
-    response.add_header("Location", "/")?;
-    response.add_header(
-        "Set-Cookie",
-        format!("{SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"),
-    )?;
-    Ok(response)
-}
-
-fn method_not_allowed(allow: &'static str) -> Result<Response, ApplicationError> {
-    let mut response = Response::text(METHOD_NOT_ALLOWED, "Method not allowed");
-    response.add_header("Allow", allow)?;
-    Ok(response)
-}
-
-fn static_asset(
-    method: Method,
-    content_type: &'static str,
-    body: &'static [u8],
-) -> Result<Response, ApplicationError> {
-    match method {
-        Method::Get => Response::asset(OK, content_type, body).map_err(Into::into),
-        Method::Post | Method::Other => method_not_allowed("GET"),
-    }
+fn login_throttled(message: &str, seconds: u64) -> Response {
+    let mut response = (
+        StatusCode::TOO_MANY_REQUESTS,
+        Html(Page::login(Some(message)).render()),
+    )
+        .into_response();
+    let value = HeaderValue::from_str(&seconds.to_string())
+        .unwrap_or_else(|_| HeaderValue::from_static("1"));
+    response.headers_mut().insert(RETRY_AFTER, value);
+    response
 }
 
 fn retry_after(duration: Duration) -> u64 {
@@ -508,51 +503,180 @@ fn retry_after(duration: Duration) -> u64 {
         .max(1)
 }
 
-/// Authentication or response-construction failure during dispatch.
-#[derive(Debug)]
-pub enum ApplicationError {
-    /// Authentication entropy, time, or synchronization failed.
-    Auth(AuthError),
-    /// An internally constructed response header violated its invariant.
-    Response(ResponseError),
+fn unauthorized() -> Response {
+    (StatusCode::UNAUTHORIZED, "Authentication required").into_response()
 }
 
-impl fmt::Display for ApplicationError {
+fn rejected() -> Response {
+    (StatusCode::FORBIDDEN, "Request rejected").into_response()
+}
+
+fn internal_auth_error(error: &AuthError) -> Response {
+    eprintln!("rom-uploader: authentication state failed: {error}");
+    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
+}
+
+struct UploadForm {
+    csrf: String,
+    system: System,
+    title: String,
+    filename: String,
+    contents: Bytes,
+}
+
+impl fmt::Debug for UploadForm {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Auth(error) => write!(formatter, "authentication failed: {error}"),
-            Self::Response(error) => write!(formatter, "response construction failed: {error}"),
+        formatter
+            .debug_struct("UploadForm")
+            .field("csrf", &"[redacted]")
+            .field("system", &self.system)
+            .field("title", &self.title)
+            .field("filename", &self.filename)
+            .field("rom_bytes", &self.contents.len())
+            .finish()
+    }
+}
+
+impl UploadForm {
+    async fn read(mut multipart: Multipart) -> Result<Self, UploadFormError> {
+        let mut builder = UploadBuilder::default();
+        let mut parts = 0_usize;
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .map_err(|_| UploadFormError::Malformed)?
+        {
+            parts = parts.saturating_add(1);
+            if parts > MAXIMUM_UPLOAD_PARTS {
+                return Err(UploadFormError::Malformed);
+            }
+            let name = field
+                .name()
+                .map(str::to_owned)
+                .ok_or(UploadFormError::Malformed)?;
+            let filename = field.file_name().map(str::to_owned);
+            let has_content_type = field.content_type().is_some();
+            let contents = field
+                .bytes()
+                .await
+                .map_err(|_| UploadFormError::Malformed)?;
+            builder.insert(&name, filename, has_content_type, contents)?;
+        }
+        builder.finish()
+    }
+}
+
+#[derive(Debug, Default)]
+struct UploadBuilder {
+    csrf: Option<String>,
+    system: Option<System>,
+    title: Option<String>,
+    filename: Option<String>,
+    contents: Option<Bytes>,
+}
+
+impl UploadBuilder {
+    fn insert(
+        &mut self,
+        name: &str,
+        filename: Option<String>,
+        has_content_type: bool,
+        contents: Bytes,
+    ) -> Result<(), UploadFormError> {
+        match name {
+            "csrf" if filename.is_none() && !has_content_type => {
+                insert_once(&mut self.csrf, parse_csrf(contents.as_ref())?)
+            }
+            "system" if filename.is_none() && !has_content_type => {
+                let value = parse_text(contents.as_ref())?;
+                let system = System::from_str(value).map_err(|_| UploadFormError::InvalidField)?;
+                insert_once(&mut self.system, system)
+            }
+            "title" if filename.is_none() && !has_content_type => {
+                let value = parse_text(contents.as_ref())?;
+                GameTitle::new(value).map_err(|_| UploadFormError::InvalidField)?;
+                insert_once(&mut self.title, value.to_owned())
+            }
+            "rom" if filename.is_some() => {
+                let filename = filename.ok_or(UploadFormError::InvalidFilename)?;
+                validate_filename(&filename)?;
+                if self.filename.is_some() || self.contents.is_some() {
+                    return Err(UploadFormError::RepeatedField);
+                }
+                self.filename = Some(filename);
+                self.contents = Some(contents);
+                Ok(())
+            }
+            "csrf" | "system" | "title" | "rom" => Err(UploadFormError::Malformed),
+            _ => Err(UploadFormError::UnexpectedField),
         }
     }
-}
 
-impl std::error::Error for ApplicationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Auth(error) => Some(error),
-            Self::Response(error) => Some(error),
-        }
+    fn finish(self) -> Result<UploadForm, UploadFormError> {
+        Ok(UploadForm {
+            csrf: self.csrf.ok_or(UploadFormError::MissingField)?,
+            system: self.system.ok_or(UploadFormError::MissingField)?,
+            title: self.title.ok_or(UploadFormError::MissingField)?,
+            filename: self.filename.ok_or(UploadFormError::MissingField)?,
+            contents: self.contents.ok_or(UploadFormError::MissingField)?,
+        })
     }
 }
 
-impl From<AuthError> for ApplicationError {
-    fn from(error: AuthError) -> Self {
-        Self::Auth(error)
+fn insert_once<T>(destination: &mut Option<T>, value: T) -> Result<(), UploadFormError> {
+    if destination.replace(value).is_some() {
+        Err(UploadFormError::RepeatedField)
+    } else {
+        Ok(())
     }
 }
 
-impl From<ResponseError> for ApplicationError {
-    fn from(error: ResponseError) -> Self {
-        Self::Response(error)
+fn parse_text(contents: &[u8]) -> Result<&str, UploadFormError> {
+    if contents.is_empty() || contents.len() > MAXIMUM_TEXT_FIELD_BYTES {
+        return Err(UploadFormError::InvalidField);
     }
+    str::from_utf8(contents).map_err(|_| UploadFormError::InvalidField)
+}
+
+fn parse_csrf(contents: &[u8]) -> Result<String, UploadFormError> {
+    let csrf = parse_text(contents)?;
+    if csrf.len() != 43
+        || !csrf
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(UploadFormError::InvalidField);
+    }
+    Ok(csrf.to_owned())
+}
+
+fn validate_filename(filename: &str) -> Result<(), UploadFormError> {
+    if filename.is_empty()
+        || filename.len() > MAXIMUM_FILENAME_BYTES
+        || filename.contains(['/', '\\', '\0'])
+        || filename.chars().any(char::is_control)
+    {
+        Err(UploadFormError::InvalidFilename)
+    } else {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum UploadFormError {
+    Malformed,
+    UnexpectedField,
+    RepeatedField,
+    MissingField,
+    InvalidField,
+    InvalidFilename,
 }
 
 #[cfg(test)]
 mod tests {
     use std::{
-        fs,
-        io::{self, BufReader, Cursor},
-        net::IpAddr,
+        fs, io,
+        net::{IpAddr, SocketAddr},
         str::FromStr as _,
         sync::{
             Arc,
@@ -561,20 +685,19 @@ mod tests {
         time::Instant,
     };
 
-    use crate::{
-        auth::LoginOutcome,
-        catalog::load,
-        http::{
-            FORBIDDEN, METHOD_NOT_ALLOWED, MISDIRECTED_REQUEST, OK, SEE_OTHER, UNAUTHORIZED,
-            UNPROCESSABLE_CONTENT, read_request_body, read_request_head,
-        },
-        password::PasswordConfig,
+    use axum::{
+        body::{Body, to_bytes},
+        extract::ConnectInfo,
+        http::{Method, Request, Response, header},
     };
+    use tower::ServiceExt as _;
+
+    use crate::{auth::LoginOutcome, catalog::load, password::PasswordConfig};
 
     use super::*;
 
-    const HOST: &str = "192.0.2.10:8080";
-    const SOURCE: &str = "192.0.2.40";
+    const HOST_NAME: &str = "192.0.2.10:8080";
+    const SOURCE: &str = "192.0.2.40:49152";
     const PASSWORD: &str = "configured-password";
 
     struct FakeRestarter {
@@ -594,7 +717,7 @@ mod tests {
     }
 
     struct Fixture {
-        application: Application,
+        application: Arc<Application>,
         directory: tempfile::TempDir,
         restarts: Arc<AtomicUsize>,
     }
@@ -629,19 +752,19 @@ mod tests {
                 fail: restart_fails,
             };
             Some(Self {
-                application: Application::new(
+                application: Arc::new(Application::new(
                     AuthManager::new(password),
                     roms,
                     palette,
                     Box::new(restarter),
-                ),
+                )),
                 directory,
                 restarts,
             })
         }
 
         fn session(&self, now: Instant) -> Option<(String, String)> {
-            let source = IpAddr::from_str(SOURCE).ok()?;
+            let source = IpAddr::from_str("192.0.2.40").ok()?;
             let LoginOutcome::Accepted(cookie) =
                 self.application.auth.login(source, PASSWORD, now).ok()?
             else {
@@ -656,41 +779,40 @@ mod tests {
         }
     }
 
-    fn source() -> Option<IpAddr> {
-        IpAddr::from_str(SOURCE).ok()
-    }
-
     fn request(
-        method: &str,
+        method: Method,
         path: &str,
         host: &str,
         headers: &[(&str, &str)],
-        body: &[u8],
-    ) -> Option<Request> {
-        let mut bytes = format!(
-            "{method} {path} HTTP/1.1\r\nHost: {host}\r\nContent-Length: {}\r\n",
-            body.len()
-        )
-        .into_bytes();
+        body: impl Into<Body>,
+    ) -> Option<Request<Body>> {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(HOST, host);
         for (name, value) in headers {
-            bytes.extend_from_slice(name.as_bytes());
-            bytes.extend_from_slice(b": ");
-            bytes.extend_from_slice(value.as_bytes());
-            bytes.extend_from_slice(b"\r\n");
+            builder = builder.header(*name, *value);
         }
-        bytes.extend_from_slice(b"\r\n");
-        bytes.extend_from_slice(body);
-        let mut reader = BufReader::new(Cursor::new(bytes));
-        let head = read_request_head(&mut reader).ok()?;
-        read_request_body(&mut reader, head, MAXIMUM_UPLOAD_REQUEST_BYTES).ok()
+        let mut request = builder.body(body.into()).ok()?;
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from_str(SOURCE).ok()?));
+        Some(request)
     }
 
-    fn handle(fixture: &Fixture, request: Request, now: Instant) -> Option<Response> {
-        fixture.application.handle(request, source()?, now).ok()
+    async fn send(fixture: &Fixture, request: Request<Body>) -> Option<Response<Body>> {
+        Arc::clone(&fixture.application)
+            .router()
+            .oneshot(request)
+            .await
+            .ok()
     }
 
-    fn text(response: &Response) -> &str {
-        std::str::from_utf8(response.body()).unwrap_or_default()
+    async fn response_text(response: Response<Body>) -> Option<String> {
+        let bytes = to_bytes(response.into_body(), 32 * 1_024 * 1_024)
+            .await
+            .ok()?;
+        String::from_utf8(bytes.to_vec()).ok()
     }
 
     fn cookie_header(token: &str) -> String {
@@ -699,9 +821,9 @@ mod tests {
 
     fn origin_headers<'a>(content_type: &'a str, cookie: &'a str) -> [(&'a str, &'a str); 3] {
         [
-            ("Content-Type", content_type),
-            ("Cookie", cookie),
-            ("Origin", "http://192.0.2.10:8080"),
+            ("content-type", content_type),
+            ("cookie", cookie),
+            ("origin", "http://192.0.2.10:8080"),
         ]
     }
 
@@ -726,150 +848,226 @@ mod tests {
         body
     }
 
-    #[test]
-    fn public_routes_validate_host_method_limits_and_headers() {
-        let Some(fixture) = Fixture::new(false) else {
-            return;
-        };
-        let now = Instant::now();
-        let Some(index) =
-            request("GET", "/", HOST, &[], b"").and_then(|request| handle(&fixture, request, now))
-        else {
-            return;
-        };
-        assert_eq!(index.status(), OK);
-        assert!(text(&index).contains("name=\"password\""));
-        assert_eq!(index.header("Cache-Control"), Some("no-store"));
-        assert_eq!(index.header("X-Frame-Options"), Some("DENY"));
-        assert!(index.header("Content-Security-Policy").is_some());
-
-        let Some(asset) = request("GET", "/assets/paper.css", HOST, &[], b"")
-            .and_then(|request| handle(&fixture, request, now))
-        else {
-            return;
-        };
-        assert_eq!(asset.status(), OK);
-        assert_eq!(
-            asset.header("Content-Type"),
-            Some("text/css; charset=utf-8")
-        );
-
-        let Some(wrong_method) = request("GET", "/login", HOST, &[], b"")
-            .and_then(|request| handle(&fixture, request, now))
-        else {
-            return;
-        };
-        assert_eq!(wrong_method.status(), METHOD_NOT_ALLOWED);
-        assert_eq!(wrong_method.header("Allow"), Some("POST"));
-
-        let Some(wrong_host) = request("GET", "/", "retrodeck.local:8080", &[], b"")
-            .and_then(|request| handle(&fixture, request, now))
-        else {
-            return;
-        };
-        assert_eq!(wrong_host.status(), MISDIRECTED_REQUEST);
-
-        let raw = b"POST /upload HTTP/1.1\r\nHost: 192.0.2.10:8080\r\nContent-Length: 0\r\n\r\n";
-        let mut reader = BufReader::new(Cursor::new(raw));
-        let head = read_request_head(&mut reader);
-        assert!(head.is_ok());
-        let Some(head) = head.ok() else {
-            return;
-        };
-        assert_eq!(
-            fixture.application.maximum_body_bytes(&head),
-            MAXIMUM_UPLOAD_REQUEST_BYTES
-        );
-    }
-
-    #[test]
-    fn login_dashboard_and_logout_round_trip() {
-        let Some(fixture) = Fixture::new(false) else {
-            return;
-        };
-        let Some(source) = source() else {
-            return;
-        };
-        let now = Instant::now();
+    async fn login_token(fixture: &Fixture) -> Option<String> {
         let body = format!("password={PASSWORD}");
-        let cross_origin = [
-            ("Content-Type", "application/x-www-form-urlencoded"),
-            ("Origin", "http://198.51.100.7:8080"),
-        ];
-        let Some(rejected) = request("POST", "/login", HOST, &cross_origin, body.as_bytes())
-            .and_then(|request| fixture.application.handle(request, source, now).ok())
-        else {
-            return;
-        };
-        assert_eq!(rejected.status(), FORBIDDEN);
-
-        let headers = [
-            (
-                "Content-Type",
-                "application/x-www-form-urlencoded; charset=UTF-8",
-            ),
-            ("Origin", "http://192.0.2.10:8080"),
-        ];
-        let Some(login) = request("POST", "/login", HOST, &headers, body.as_bytes())
-            .and_then(|request| fixture.application.handle(request, source, now).ok())
-        else {
-            return;
-        };
-        assert_eq!(login.status(), SEE_OTHER);
-        assert_eq!(login.header("Location"), Some("/"));
-        let Some(set_cookie) = login.header("Set-Cookie") else {
-            return;
-        };
-        let Some(token) = set_cookie
+        let login_request = request(
+            Method::POST,
+            "/login",
+            HOST_NAME,
+            &[
+                (
+                    "content-type",
+                    "application/x-www-form-urlencoded; charset=UTF-8",
+                ),
+                ("origin", "http://192.0.2.10:8080"),
+            ],
+            body,
+        )?;
+        let login = send(fixture, login_request).await?;
+        assert_eq!(login.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            login.headers().get(header::LOCATION),
+            Some(&HeaderValue::from_static("/"))
+        );
+        login
+            .headers()
+            .get(header::SET_COOKIE)
+            .and_then(|value| value.to_str().ok())?
             .split(';')
             .next()
             .and_then(|pair| pair.strip_prefix(&format!("{SESSION_COOKIE_NAME}=")))
+            .map(str::to_owned)
+    }
+
+    #[tokio::test]
+    async fn public_routes_use_axum_limits_and_harden_every_response() {
+        let Some(fixture) = Fixture::new(false) else {
+            return;
+        };
+        let Some(index_request) = request(Method::GET, "/", HOST_NAME, &[], Body::empty()) else {
+            return;
+        };
+        let Some(index) = send(&fixture, index_request).await else {
+            return;
+        };
+        assert_eq!(index.status(), StatusCode::OK);
+        assert_eq!(
+            index.headers().get(CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+        assert_eq!(
+            index.headers().get(X_FRAME_OPTIONS),
+            Some(&HeaderValue::from_static("DENY"))
+        );
+        assert!(index.headers().contains_key(CONTENT_SECURITY_POLICY));
+        let Some(index_text) = response_text(index).await else {
+            return;
+        };
+        assert!(index_text.contains("name=\"password\""));
+
+        let Some(asset_request) = request(
+            Method::GET,
+            "/assets/paper.css",
+            HOST_NAME,
+            &[],
+            Body::empty(),
+        ) else {
+            return;
+        };
+        let Some(asset) = send(&fixture, asset_request).await else {
+            return;
+        };
+        assert_eq!(asset.status(), StatusCode::OK);
+        assert_eq!(
+            asset.headers().get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static("text/css; charset=utf-8"))
+        );
+
+        let Some(method_request) = request(Method::GET, "/login", HOST_NAME, &[], Body::empty())
         else {
             return;
         };
-        let cookie = cookie_header(token);
-        let Some(dashboard) = request("GET", "/", HOST, &[("Cookie", &cookie)], b"")
-            .and_then(|request| fixture.application.handle(request, source, now).ok())
+        let Some(wrong_method) = send(&fixture, method_request).await else {
+            return;
+        };
+        assert_eq!(wrong_method.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(
+            wrong_method.headers().get(header::ALLOW),
+            Some(&HeaderValue::from_static("POST"))
+        );
+
+        let Some(host_request) =
+            request(Method::GET, "/", "retrodeck.local:8080", &[], Body::empty())
         else {
             return;
         };
-        assert_eq!(dashboard.status(), OK);
-        assert!(text(&dashboard).contains("action=\"/upload\""));
-        let session = fixture.application.auth.session(token, now);
+        let Some(wrong_host) = send(&fixture, host_request).await else {
+            return;
+        };
+        assert_eq!(wrong_host.status(), StatusCode::MISDIRECTED_REQUEST);
+
+        let oversized = format!("password={}", "x".repeat(LOGIN_FORM_BYTES));
+        let Some(limit_request) = request(
+            Method::POST,
+            "/login",
+            HOST_NAME,
+            &[
+                ("content-type", "application/x-www-form-urlencoded"),
+                ("origin", "http://192.0.2.10:8080"),
+            ],
+            oversized,
+        ) else {
+            return;
+        };
+        let Some(limited) = send(&fixture, limit_request).await else {
+            return;
+        };
+        assert_eq!(limited.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            limited.headers().get(CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store"))
+        );
+    }
+
+    #[tokio::test]
+    async fn cross_origin_login_is_rejected() {
+        let Some(fixture) = Fixture::new(false) else {
+            return;
+        };
+        let body = format!("password={PASSWORD}");
+        let Some(cross_origin_request) = request(
+            Method::POST,
+            "/login",
+            HOST_NAME,
+            &[
+                ("content-type", "application/x-www-form-urlencoded"),
+                ("origin", "http://198.51.100.7:8080"),
+            ],
+            body.clone(),
+        ) else {
+            return;
+        };
+        let Some(rejected) = send(&fixture, cross_origin_request).await else {
+            return;
+        };
+        assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn login_dashboard_and_logout_round_trip() {
+        let Some(fixture) = Fixture::new(false) else {
+            return;
+        };
+        let Some(token) = login_token(&fixture).await else {
+            return;
+        };
+        let cookie = cookie_header(&token);
+        let Some(dashboard_request) = request(
+            Method::GET,
+            "/",
+            HOST_NAME,
+            &[("cookie", &cookie)],
+            Body::empty(),
+        ) else {
+            return;
+        };
+        let Some(dashboard) = send(&fixture, dashboard_request).await else {
+            return;
+        };
+        assert_eq!(dashboard.status(), StatusCode::OK);
+        let Some(dashboard_text) = response_text(dashboard).await else {
+            return;
+        };
+        assert!(dashboard_text.contains("action=\"/upload\""));
+
+        let session = fixture.application.auth.session(&token, Instant::now());
         let Ok(Some(session)) = session else {
             return;
         };
         let logout_body = format!("csrf={}", session.csrf());
         let logout_headers = origin_headers("application/x-www-form-urlencoded", &cookie);
-        let Some(logout) = request(
-            "POST",
+        let Some(logout_request) = request(
+            Method::POST,
             "/logout",
-            HOST,
+            HOST_NAME,
             &logout_headers,
-            logout_body.as_bytes(),
-        )
-        .and_then(|request| fixture.application.handle(request, source, now).ok()) else {
+            logout_body,
+        ) else {
             return;
         };
-        assert_eq!(logout.status(), SEE_OTHER);
+        let Some(logout) = send(&fixture, logout_request).await else {
+            return;
+        };
+        assert_eq!(logout.status(), StatusCode::SEE_OTHER);
         assert!(
             logout
-                .header("Set-Cookie")
+                .headers()
+                .get(header::SET_COOKIE)
+                .and_then(|value| value.to_str().ok())
                 .is_some_and(|value| value.contains("Max-Age=0"))
         );
 
-        let Some(after) = request("GET", "/", HOST, &[("Cookie", &cookie)], b"")
-            .and_then(|request| fixture.application.handle(request, source, now).ok())
-        else {
+        let Some(after_request) = request(
+            Method::GET,
+            "/",
+            HOST_NAME,
+            &[("cookie", &cookie)],
+            Body::empty(),
+        ) else {
             return;
         };
-        assert_eq!(after.status(), OK);
-        assert!(text(&after).contains("name=\"password\""));
-        assert!(!text(&after).contains("action=\"/upload\""));
+        let Some(after) = send(&fixture, after_request).await else {
+            return;
+        };
+        let Some(after_text) = response_text(after).await else {
+            return;
+        };
+        assert!(after_text.contains("name=\"password\""));
+        assert!(!after_text.contains("action=\"/upload\""));
     }
 
-    #[test]
-    fn upload_is_csrf_checked_filed_once_and_restarted() {
+    #[tokio::test]
+    async fn upload_is_csrf_checked_filed_once_and_restarted() {
         let Some(fixture) = Fixture::new(false) else {
             return;
         };
@@ -880,13 +1078,19 @@ mod tests {
         let cookie = cookie_header(&token);
         let headers = origin_headers("multipart/form-data; boundary=test-boundary", &cookie);
         let body = multipart(&csrf, "Space Racer", b"\x00\xe0");
-        let Some(uploaded) = request("POST", "/upload", HOST, &headers, &body)
-            .and_then(|request| handle(&fixture, request, now))
+        let Some(upload_request) =
+            request(Method::POST, "/upload", HOST_NAME, &headers, body.clone())
         else {
             return;
         };
-        assert_eq!(uploaded.status(), OK);
-        assert!(text(&uploaded).contains("validated, filed, and added"));
+        let Some(uploaded) = send(&fixture, upload_request).await else {
+            return;
+        };
+        assert_eq!(uploaded.status(), StatusCode::OK);
+        let Some(uploaded_text) = response_text(uploaded).await else {
+            return;
+        };
+        assert!(uploaded_text.contains("validated, filed, and added"));
         assert_eq!(fixture.restart_count(), 1);
         assert_eq!(
             fs::read(fixture.directory.path().join("roms/chip8/space-racer.ch8")).ok(),
@@ -895,9 +1099,14 @@ mod tests {
         let catalog = load(&fixture.directory.path().join("uploads.tsv"));
         assert!(matches!(catalog, Ok(catalog) if catalog.len() == 1));
 
-        let duplicate = request("POST", "/upload", HOST, &headers, &body)
-            .and_then(|request| handle(&fixture, request, now));
-        assert!(matches!(duplicate, Some(response) if response.status() == UNPROCESSABLE_CONTENT));
+        let Some(duplicate_request) = request(Method::POST, "/upload", HOST_NAME, &headers, body)
+        else {
+            return;
+        };
+        let Some(duplicate) = send(&fixture, duplicate_request).await else {
+            return;
+        };
+        assert_eq!(duplicate.status(), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(fixture.restart_count(), 1);
 
         let bad_csrf = multipart(
@@ -905,9 +1114,15 @@ mod tests {
             "Another Game",
             b"\x01",
         );
-        let rejected = request("POST", "/upload", HOST, &headers, &bad_csrf)
-            .and_then(|request| handle(&fixture, request, now));
-        assert!(matches!(rejected, Some(response) if response.status() == FORBIDDEN));
+        let Some(rejected_request) =
+            request(Method::POST, "/upload", HOST_NAME, &headers, bad_csrf)
+        else {
+            return;
+        };
+        let Some(rejected) = send(&fixture, rejected_request).await else {
+            return;
+        };
+        assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
         assert!(
             !fixture
                 .directory
@@ -917,8 +1132,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn palette_save_survives_restart_failure() {
+    #[tokio::test]
+    async fn palette_save_survives_restart_failure() {
         let Some(fixture) = Fixture::new(true) else {
             return;
         };
@@ -943,13 +1158,18 @@ mod tests {
             }
         }
         let headers = origin_headers("application/x-www-form-urlencoded", &cookie);
-        let Some(response) = request("POST", "/palette", HOST, &headers, body.as_bytes())
-            .and_then(|request| handle(&fixture, request, now))
+        let Some(palette_request) = request(Method::POST, "/palette", HOST_NAME, &headers, body)
         else {
             return;
         };
-        assert_eq!(response.status(), OK);
-        assert!(text(&response).contains("will apply after the next restart"));
+        let Some(response) = send(&fixture, palette_request).await else {
+            return;
+        };
+        assert_eq!(response.status(), StatusCode::OK);
+        let Some(response_text) = response_text(response).await else {
+            return;
+        };
+        assert!(response_text.contains("will apply after the next restart"));
         assert_eq!(fixture.restart_count(), 1);
         let current = fixture.application.palette.current();
         assert!(matches!(
@@ -959,18 +1179,26 @@ mod tests {
         assert!(fixture.directory.path().join("override.sexp").exists());
     }
 
-    #[test]
-    fn unauthenticated_mutations_are_rejected() {
+    #[tokio::test]
+    async fn unauthenticated_mutations_are_rejected() {
         let Some(fixture) = Fixture::new(false) else {
             return;
         };
-        let now = Instant::now();
-        let headers = [
-            ("Content-Type", "application/x-www-form-urlencoded"),
-            ("Origin", "http://192.0.2.10:8080"),
-        ];
-        let palette = request("POST", "/palette", HOST, &headers, b"csrf=none")
-            .and_then(|request| handle(&fixture, request, now));
-        assert!(matches!(palette, Some(response) if response.status() == UNAUTHORIZED));
+        let Some(palette_request) = request(
+            Method::POST,
+            "/palette",
+            HOST_NAME,
+            &[
+                ("content-type", "application/x-www-form-urlencoded"),
+                ("origin", "http://192.0.2.10:8080"),
+            ],
+            "csrf=none",
+        ) else {
+            return;
+        };
+        let Some(palette) = send(&fixture, palette_request).await else {
+            return;
+        };
+        assert_eq!(palette.status(), StatusCode::UNAUTHORIZED);
     }
 }

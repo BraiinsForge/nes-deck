@@ -1,54 +1,31 @@
-[package]
-name = "retro-deck-dashboard"
-description = "BMC-native dashboard model and renderer for Retro Deck"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
+[workspace]
+members = ["native"]
+resolver = "2"
 
-[features]
-default = []
-application-wire = ["dep:serde", "dep:serde_json", "retro-deck-config/serde"]
-application-launcher = ["application-wire", "dep:anyhow"]
-bmc-native = [
-    "application-wire",
-    "dep:anyhow",
-    "dep:bmc-gpu-render-lock",
-    "dep:bmc-log",
-    "dep:bmc-render",
-    "dep:bmc-widget",
-    "dep:glow",
-    "dep:retro-deck-policy",
-    "dep:rustix",
-    "dep:tracing",
-]
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+license = "GPL-3.0-only"
 
-[dependencies]
-anyhow = { version = "1.0.98", optional = true }
-bmc-gpu-render-lock = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "bf4004e3c2fdcb4224c060ab7657ba1338e098cb", optional = true }
-bmc-log = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "bf4004e3c2fdcb4224c060ab7657ba1338e098cb", optional = true }
-bmc-render = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "bf4004e3c2fdcb4224c060ab7657ba1338e098cb", optional = true }
-bmc-widget = { git = "ssh://git@gitlab.ii.zone/bos/bmc-main.git", rev = "bf4004e3c2fdcb4224c060ab7657ba1338e098cb", features = ["gpu"], optional = true }
-glow = { version = "0.16.0", optional = true }
-retro-deck-config = { path = "../retro-deck-config" }
-retro-deck-policy = { path = "../retro-deck-policy", optional = true }
-rustix = { version = "1.1.4", features = ["fs"], optional = true }
-serde = { version = "1.0.219", features = ["derive"], optional = true }
-serde_json = { version = "1.0.140", optional = true }
-tracing = { version = "0.1.41", optional = true }
+[workspace.lints.rust]
+missing_debug_implementations = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "deny"
 
-[lib]
-path = "src/lib.rs"
-
-[[bin]]
-name = "retro-deck"
-path = "src/bin/retro-deck.rs"
-required-features = ["bmc-native"]
-
-[[bin]]
-name = "retro-deck-launcher"
-path = "src/bin/retro-deck-launcher.rs"
-required-features = ["application-launcher"]
-
-[lints]
-workspace = true
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+allow_attributes_without_reason = "deny"
+clone_on_ref_ptr = "deny"
+dbg_macro = "deny"
+exit = "deny"
+float_cmp_const = "deny"
+indexing_slicing = "deny"
+large_include_file = "deny"
+missing_const_for_fn = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"

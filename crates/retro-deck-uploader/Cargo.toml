@@ -7,20 +7,23 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+axum = { version = "=0.8.4", features = ["form", "http1", "multipart", "tokio"] }
+axum-extra = { version = "=0.10.1", features = ["cookie"] }
 base64 = "0.22.1"
 getrandom = "0.2.16"
-httparse = "1.10.1"
 pbkdf2 = "0.12.2"
 retro-deck-config = { path = "../retro-deck-config" }
-retro-deck-policy = { path = "../retro-deck-policy" }
 rustix = { version = "1.0.8", features = ["fs", "process"] }
 serde_json = "1.0.140"
 sha2 = "0.10.9"
 subtle = "2.6.1"
+time = { version = "=0.3.41", default-features = false }
+tokio = { version = "=1.47.0", features = ["macros", "net", "rt-multi-thread"] }
 zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tempfile = "3.20.0"
+tower = { version = "=0.5.2", features = ["util"] }
 
 [lib]
 path = "src/lib.rs"

@@ -338,7 +338,7 @@ mod tests {
     use super::{DashboardCatalog, DashboardCatalogError};
     use retro_deck_config::{Catalog, CatalogEntry, CatalogSystem};
 
-    const DEPLOYED_CATALOG: &[u8] = include_bytes!("../../../deploy/menu/games.tsv");
+    const DEPLOYED_CATALOG: &[u8] = include_bytes!("../../../../deploy/menu/games.tsv");
 
     fn deployed() -> Option<Catalog> {
         Catalog::parse(DEPLOYED_CATALOG).ok()

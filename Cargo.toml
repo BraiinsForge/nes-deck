@@ -3,13 +3,13 @@ members = [
   "crates/retro-deck-apps",
   "crates/retro-deck-audio",
   "crates/retro-deck-config",
-  "crates/retro-deck-dashboard",
   "crates/retro-deck-emulator",
   "crates/retro-deck-platform",
   "crates/retro-deck-policy",
   "crates/retro-deck-ui",
   "crates/retro-deck-uploader",
 ]
+exclude = ["crates/retro-deck-dashboard"]
 resolver = "2"
 
 [workspace.package]
