@@ -43,8 +43,9 @@ media libraries.
 Common Lisp becomes a trusted behavior runtime rather than a device driver.
 A supervised ECL worker loads tracked behavior and then root-owned local
 overrides. Rust and Lisp exchange bounded, versioned S-expressions. Rust
-validates all replies and retains safe built-in behavior when Lisp is absent
-or fails.
+uses the maintained `lexpr` parser and printer behind a stricter protocol
+preflight, validates all replies, and retains safe built-in behavior when Lisp
+is absent or fails.
 
 Audio follows explicit ownership states: closed, priming, active, draining,
 and idle. Short cues acquire the device only for their duration. Paused,

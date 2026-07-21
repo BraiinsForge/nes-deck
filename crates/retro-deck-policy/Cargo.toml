@@ -10,6 +10,7 @@ license.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+lexpr = { version = "0.2.7", default-features = false }
 tokio = { version = "1.47.0", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
 
 [lints]

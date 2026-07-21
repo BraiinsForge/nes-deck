@@ -1,9 +1,9 @@
-//! Narrow, bounded data protocol between Rust runtimes and Common Lisp.
+//! Bounded Common Lisp data on top of the maintained `lexpr` codec.
 //!
-//! This is intentionally not a general Common Lisp reader. The wire format
-//! permits lists, signed integers, strings, `t`, `nil`, and keywords. It does
-//! not permit reader macros, package-qualified symbols, dotted lists,
-//! comments, ratios, floats, or character syntax.
+//! The wire vocabulary remains deliberately smaller than general Lisp:
+//! proper lists, signed integers, strings, `t`, `nil`, and colon-prefixed
+//! keywords. A small adapter enforces Retro Deck's tighter limits and rejects
+//! reader syntax before `lexpr` owns parsing and printing.
 
 mod message;
 mod supervisor;
@@ -14,7 +14,12 @@ pub use supervisor::{
     WorkerFailure,
 };
 
-use std::fmt::{self, Write as _};
+use std::fmt;
+
+use lexpr::{
+    Value as LexprValue,
+    parse::{Brackets, KeywordSyntax, NilSymbol, Options, StringSyntax, TSymbol},
+};
 
 /// Default maximum encoded message size.
 pub const DEFAULT_MAX_BYTES: usize = 64 * 1024;
@@ -43,8 +48,7 @@ impl Default for Limits {
 /// A value accepted by the Rust and Common Lisp policy boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Value {
-    /// A proper list. The empty list is distinct from [`Self::Nil`] while in
-    /// Rust, although both are false values to Common Lisp.
+    /// A proper list. The empty list is distinct from [`Self::Nil`] in Rust.
     List(Vec<Self>),
     /// A signed 64-bit integer.
     Integer(i64),
@@ -87,21 +91,17 @@ impl Value {
 /// Kind of malformed or over-budget wire input.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DecodeErrorKind {
-    /// The complete encoded line exceeds its byte budget.
+    /// The complete encoded input exceeds its byte budget.
     MessageTooLarge,
     /// No value was present.
     EmptyInput,
-    /// A list was not terminated.
-    UnterminatedList,
-    /// A string was not terminated.
-    UnterminatedString,
-    /// A backslash was the final string byte.
-    UnterminatedEscape,
+    /// The text is not one complete S-expression.
+    InvalidSyntax,
     /// A string contains a disallowed control character.
     ControlCharacter,
     /// A keyword has an invalid name.
     InvalidKeyword,
-    /// A non-keyword symbol or reader syntax was present.
+    /// A value is outside the deliberately small policy vocabulary.
     UnsupportedAtom,
     /// An integer is outside the signed 64-bit range.
     IntegerOutOfRange,
@@ -109,12 +109,6 @@ pub enum DecodeErrorKind {
     DepthLimit,
     /// The total number of values exceeds the configured limit.
     ValueLimit,
-    /// More non-whitespace input followed the first complete value.
-    TrailingInput,
-    /// The input is not valid UTF-8.
-    InvalidUtf8,
-    /// A closing parenthesis appeared outside a list.
-    UnexpectedClose,
 }
 
 /// Decode failure with the byte offset at which it was detected.
@@ -178,28 +172,11 @@ pub fn decode(input: &str) -> Result<Value, DecodeError> {
 /// Returns [`DecodeError`] when the message is malformed, unsupported, or
 /// outside `limits`.
 pub fn decode_with_limits(input: &str, limits: Limits) -> Result<Value, DecodeError> {
-    if input.len() > limits.max_bytes {
-        return Err(DecodeError {
-            kind: DecodeErrorKind::MessageTooLarge,
-            offset: limits.max_bytes,
-        });
-    }
-    let mut parser = Parser {
-        input: input.as_bytes(),
-        offset: 0,
-        values: 0,
-        limits,
-    };
-    parser.skip_whitespace();
-    if parser.finished() {
-        return Err(parser.error(DecodeErrorKind::EmptyInput));
-    }
-    let value = parser.value(0)?;
-    parser.skip_whitespace();
-    if !parser.finished() {
-        return Err(parser.error(DecodeErrorKind::TrailingInput));
-    }
-    Ok(value)
+    preflight(input, limits)?;
+    let parsed = lexpr::from_str_custom(input, parser_options())
+        .map_err(|error| syntax_error(input, &error))?;
+    let mut values = 0;
+    from_lexpr(&parsed, 0, &mut values, limits).map_err(|kind| DecodeError { kind, offset: 0 })
 }
 
 /// Encode one bounded wire value.
@@ -218,161 +195,207 @@ pub fn encode(value: &Value) -> Result<String, EncodeError> {
 ///
 /// Returns [`EncodeError`] when a value is unsupported or outside `limits`.
 pub fn encode_with_limits(value: &Value, limits: Limits) -> Result<String, EncodeError> {
-    let mut output = String::new();
     let mut values = 0;
-    encode_value(value, &mut output, 0, &mut values, limits)?;
+    let value = to_lexpr(value, 0, &mut values, limits)?;
+    let output = lexpr::to_string_custom(&value, lexpr::print::Options::elisp())
+        .map_err(|_| EncodeError::MessageTooLarge)?;
     if output.len() > limits.max_bytes {
-        return Err(EncodeError::MessageTooLarge);
+        Err(EncodeError::MessageTooLarge)
+    } else {
+        Ok(output)
     }
-    Ok(output)
 }
 
-struct Parser<'a> {
-    input: &'a [u8],
-    offset: usize,
-    values: usize,
-    limits: Limits,
+fn parser_options() -> Options {
+    Options::new()
+        .with_keyword_syntax(KeywordSyntax::ColonPrefix)
+        .with_nil_symbol(NilSymbol::Special)
+        .with_t_symbol(TSymbol::True)
+        .with_brackets(Brackets::Vector)
+        .with_string_syntax(StringSyntax::Elisp)
 }
 
-impl Parser<'_> {
-    const fn finished(&self) -> bool {
-        self.offset >= self.input.len()
+fn preflight(input: &str, limits: Limits) -> Result<(), DecodeError> {
+    if input.len() > limits.max_bytes {
+        return Err(DecodeError {
+            kind: DecodeErrorKind::MessageTooLarge,
+            offset: limits.max_bytes,
+        });
+    }
+    if input
+        .chars()
+        .all(|character| matches!(character, ' ' | '\t' | '\r' | '\n'))
+    {
+        return Err(DecodeError {
+            kind: DecodeErrorKind::EmptyInput,
+            offset: input.len(),
+        });
     }
 
-    const fn error(&self, kind: DecodeErrorKind) -> DecodeError {
-        DecodeError {
-            kind,
-            offset: self.offset,
-        }
-    }
-
-    fn current(&self) -> Option<u8> {
-        self.input.get(self.offset).copied()
-    }
-
-    fn skip_whitespace(&mut self) {
-        while matches!(self.current(), Some(b' ' | b'\t' | b'\r' | b'\n')) {
-            self.offset += 1;
-        }
-    }
-
-    const fn count_value(&mut self) -> Result<(), DecodeError> {
-        self.values = self.values.saturating_add(1);
-        if self.values > self.limits.max_values {
-            Err(self.error(DecodeErrorKind::ValueLimit))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn value(&mut self, depth: usize) -> Result<Value, DecodeError> {
-        self.count_value()?;
-        match self.current() {
-            Some(b'(') => self.list(depth),
-            Some(b')') => Err(self.error(DecodeErrorKind::UnexpectedClose)),
-            Some(b'"') => self.string(),
-            Some(_) => self.atom(),
-            None => Err(self.error(DecodeErrorKind::EmptyInput)),
-        }
-    }
-
-    fn list(&mut self, depth: usize) -> Result<Value, DecodeError> {
-        if depth >= self.limits.max_depth {
-            return Err(self.error(DecodeErrorKind::DepthLimit));
-        }
-        self.offset += 1;
-        let mut items = Vec::new();
-        loop {
-            self.skip_whitespace();
-            match self.current() {
-                Some(b')') => {
-                    self.offset += 1;
-                    return Ok(Value::List(items));
+    let mut depth = 0_usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, character) in input.char_indices() {
+        if in_string {
+            if escaped {
+                if character.is_control() {
+                    return Err(DecodeError {
+                        kind: DecodeErrorKind::ControlCharacter,
+                        offset,
+                    });
                 }
-                Some(_) => items.push(self.value(depth + 1)?),
-                None => return Err(self.error(DecodeErrorKind::UnterminatedList)),
-            }
-        }
-    }
-
-    fn string(&mut self) -> Result<Value, DecodeError> {
-        self.offset += 1;
-        let mut bytes = Vec::new();
-        loop {
-            match self.current() {
-                Some(b'"') => {
-                    self.offset += 1;
-                    let value = String::from_utf8(bytes)
-                        .map_err(|_| self.error(DecodeErrorKind::InvalidUtf8))?;
-                    return Ok(Value::String(value));
-                }
-                Some(b'\\') => {
-                    self.offset += 1;
-                    let escaped = self
-                        .current()
-                        .ok_or_else(|| self.error(DecodeErrorKind::UnterminatedEscape))?;
-                    if escaped.is_ascii_control() {
-                        return Err(self.error(DecodeErrorKind::ControlCharacter));
+                escaped = false;
+            } else {
+                match character {
+                    '\\' => escaped = true,
+                    '"' => in_string = false,
+                    character if character.is_control() => {
+                        return Err(DecodeError {
+                            kind: DecodeErrorKind::ControlCharacter,
+                            offset,
+                        });
                     }
-                    bytes.push(escaped);
-                    self.offset += 1;
+                    _ => {}
                 }
-                Some(byte) if byte.is_ascii_control() => {
-                    return Err(self.error(DecodeErrorKind::ControlCharacter));
-                }
-                Some(byte) => {
-                    bytes.push(byte);
-                    self.offset += 1;
-                }
-                None => return Err(self.error(DecodeErrorKind::UnterminatedString)),
             }
+            continue;
+        }
+
+        match character {
+            '"' => in_string = true,
+            '(' => {
+                depth = depth.saturating_add(1);
+                if depth > limits.max_depth {
+                    return Err(DecodeError {
+                        kind: DecodeErrorKind::DepthLimit,
+                        offset,
+                    });
+                }
+            }
+            ')' => depth = depth.saturating_sub(1),
+            '#' | '\'' | '`' | ',' | ';' => {
+                return Err(DecodeError {
+                    kind: DecodeErrorKind::UnsupportedAtom,
+                    offset,
+                });
+            }
+            character if character.is_control() && !matches!(character, '\t' | '\r' | '\n') => {
+                return Err(DecodeError {
+                    kind: DecodeErrorKind::InvalidSyntax,
+                    offset,
+                });
+            }
+            _ => {}
         }
     }
+    Ok(())
+}
 
-    fn atom(&mut self) -> Result<Value, DecodeError> {
-        let start = self.offset;
-        while let Some(byte) = self.current() {
-            if matches!(byte, b' ' | b'\t' | b'\r' | b'\n' | b'(' | b')') {
-                break;
-            }
-            self.offset += 1;
-        }
-        let bytes = self
-            .input
-            .get(start..self.offset)
-            .ok_or_else(|| self.error(DecodeErrorKind::UnsupportedAtom))?;
-        let atom =
-            std::str::from_utf8(bytes).map_err(|_| self.error(DecodeErrorKind::InvalidUtf8))?;
-        if atom.eq_ignore_ascii_case("t") {
-            return Ok(Value::True);
-        }
-        if atom.eq_ignore_ascii_case("nil") {
-            return Ok(Value::Nil);
-        }
-        if let Some(keyword) = atom.strip_prefix(':') {
-            return normalize_keyword(keyword)
-                .map(Value::Keyword)
-                .ok_or_else(|| self.error(DecodeErrorKind::InvalidKeyword));
-        }
-        if looks_like_integer(atom) {
-            return atom
-                .parse::<i64>()
-                .map(Value::Integer)
-                .map_err(|_| DecodeError {
-                    kind: DecodeErrorKind::IntegerOutOfRange,
-                    offset: start,
-                });
-        }
-        Err(DecodeError {
-            kind: DecodeErrorKind::UnsupportedAtom,
-            offset: start,
-        })
+fn syntax_error(input: &str, error: &lexpr::parse::Error) -> DecodeError {
+    let offset = error.location().map_or(0, |location| {
+        let line_start = if location.line() <= 1 {
+            0
+        } else {
+            input
+                .match_indices('\n')
+                .nth(location.line().saturating_sub(2))
+                .map_or(input.len(), |(offset, _)| offset.saturating_add(1))
+        };
+        line_start
+            .saturating_add(location.column().saturating_sub(1))
+            .min(input.len())
+    });
+    DecodeError {
+        kind: DecodeErrorKind::InvalidSyntax,
+        offset,
     }
 }
 
-fn looks_like_integer(atom: &str) -> bool {
-    let digits = atom.strip_prefix('-').unwrap_or(atom);
-    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+fn from_lexpr(
+    value: &LexprValue,
+    depth: usize,
+    values: &mut usize,
+    limits: Limits,
+) -> Result<Value, DecodeErrorKind> {
+    *values = values.saturating_add(1);
+    if *values > limits.max_values {
+        return Err(DecodeErrorKind::ValueLimit);
+    }
+    match value {
+        list @ (LexprValue::Null | LexprValue::Cons(_)) => {
+            if depth >= limits.max_depth {
+                return Err(DecodeErrorKind::DepthLimit);
+            }
+            let items = list.to_ref_vec().ok_or(DecodeErrorKind::UnsupportedAtom)?;
+            items
+                .into_iter()
+                .map(|item| from_lexpr(item, depth + 1, values, limits))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::List)
+        }
+        LexprValue::Nil | LexprValue::Bool(false) => Ok(Value::Nil),
+        LexprValue::Bool(true) => Ok(Value::True),
+        LexprValue::Number(number) => number.as_i64().map(Value::Integer).ok_or_else(|| {
+            if number.is_u64() {
+                DecodeErrorKind::IntegerOutOfRange
+            } else {
+                DecodeErrorKind::UnsupportedAtom
+            }
+        }),
+        LexprValue::String(string) => {
+            if string.chars().any(char::is_control) {
+                Err(DecodeErrorKind::ControlCharacter)
+            } else {
+                Ok(Value::String(string.to_string()))
+            }
+        }
+        LexprValue::Keyword(keyword) => normalize_keyword(keyword)
+            .map(Value::Keyword)
+            .ok_or(DecodeErrorKind::InvalidKeyword),
+        LexprValue::Symbol(symbol) if symbol.eq_ignore_ascii_case("t") => Ok(Value::True),
+        LexprValue::Symbol(symbol) if symbol.eq_ignore_ascii_case("nil") => Ok(Value::Nil),
+        LexprValue::Char(_)
+        | LexprValue::Symbol(_)
+        | LexprValue::Bytes(_)
+        | LexprValue::Vector(_) => Err(DecodeErrorKind::UnsupportedAtom),
+    }
+}
+
+fn to_lexpr(
+    value: &Value,
+    depth: usize,
+    values: &mut usize,
+    limits: Limits,
+) -> Result<LexprValue, EncodeError> {
+    *values = values.saturating_add(1);
+    if *values > limits.max_values {
+        return Err(EncodeError::ValueLimit);
+    }
+    match value {
+        Value::List(items) => {
+            if depth >= limits.max_depth {
+                return Err(EncodeError::DepthLimit);
+            }
+            let items = items
+                .iter()
+                .map(|item| to_lexpr(item, depth + 1, values, limits))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(LexprValue::list(items))
+        }
+        Value::Integer(integer) => Ok(LexprValue::from(*integer)),
+        Value::String(string) => {
+            if string.chars().any(char::is_control) {
+                Err(EncodeError::ControlCharacter)
+            } else {
+                Ok(LexprValue::string(string.clone()))
+            }
+        }
+        Value::Keyword(keyword) => normalize_keyword(keyword)
+            .map(LexprValue::keyword)
+            .ok_or(EncodeError::InvalidKeyword),
+        Value::True => Ok(LexprValue::Bool(true)),
+        Value::Nil => Ok(LexprValue::Nil),
+    }
 }
 
 fn normalize_keyword(name: &str) -> Option<String> {
@@ -389,68 +412,6 @@ const fn valid_keyword_byte(byte: u8) -> bool {
             byte,
             b'-' | b'/' | b'+' | b'*' | b'<' | b'>' | b'=' | b'!' | b'?' | b'_' | b'.'
         )
-}
-
-fn encode_value(
-    value: &Value,
-    output: &mut String,
-    depth: usize,
-    values: &mut usize,
-    limits: Limits,
-) -> Result<(), EncodeError> {
-    *values = values.saturating_add(1);
-    if *values > limits.max_values {
-        return Err(EncodeError::ValueLimit);
-    }
-    match value {
-        Value::List(items) => {
-            if depth >= limits.max_depth {
-                return Err(EncodeError::DepthLimit);
-            }
-            output.push('(');
-            for (position, item) in items.iter().enumerate() {
-                if position > 0 {
-                    output.push(' ');
-                }
-                encode_value(item, output, depth + 1, values, limits)?;
-                if output.len() > limits.max_bytes {
-                    return Err(EncodeError::MessageTooLarge);
-                }
-            }
-            output.push(')');
-        }
-        Value::Integer(integer) => {
-            write!(output, "{integer}").map_err(|_| EncodeError::MessageTooLarge)?;
-        }
-        Value::String(string) => encode_string(string, output)?,
-        Value::Keyword(keyword) => {
-            let normalized = normalize_keyword(keyword).ok_or(EncodeError::InvalidKeyword)?;
-            output.push(':');
-            output.push_str(&normalized);
-        }
-        Value::True => output.push('t'),
-        Value::Nil => output.push_str("nil"),
-    }
-    if output.len() > limits.max_bytes {
-        Err(EncodeError::MessageTooLarge)
-    } else {
-        Ok(())
-    }
-}
-
-fn encode_string(value: &str, output: &mut String) -> Result<(), EncodeError> {
-    output.push('"');
-    for character in value.chars() {
-        if character.is_control() {
-            return Err(EncodeError::ControlCharacter);
-        }
-        if matches!(character, '"' | '\\') {
-            output.push('\\');
-        }
-        output.push(character);
-    }
-    output.push('"');
-    Ok(())
 }
 
 #[cfg(test)]
@@ -484,14 +445,14 @@ mod tests {
         ]);
         let expected = "(:request :version 1 :id 42 :hook :ten-seconds/result \
                          :arguments (:elapsed-centiseconds 987 :input :controller-a))";
-
         let encoded = expected.replace('\n', "");
+
         assert_eq!(encode(&request), Ok(encoded.clone()));
         assert_eq!(decode(&encoded), Ok(request));
     }
 
     #[test]
-    fn reader_case_and_common_lisp_string_escapes_are_normalized() {
+    fn common_lisp_case_strings_nil_and_empty_lists_are_preserved() {
         assert_eq!(decode(":HELLO-WORLD"), Ok(keyword("hello-world")));
         assert_eq!(
             decode(r#""quote: \" slash: \\""#),
@@ -501,43 +462,70 @@ mod tests {
             encode(&Value::String("quote: \" slash: \\".to_owned())),
             Ok(r#""quote: \" slash: \\""#.to_owned())
         );
+        assert_eq!(decode("NIL"), Ok(Value::Nil));
+        assert_eq!(decode("T"), Ok(Value::True));
+        assert_eq!(decode("()"), Ok(Value::List(Vec::new())));
+        assert_eq!(encode(&Value::Nil), Ok("nil".to_owned()));
+        assert_eq!(encode(&Value::List(Vec::new())), Ok("()".to_owned()));
     }
 
     #[test]
-    fn arbitrary_symbols_and_reader_macros_are_rejected() {
+    fn symbols_reader_macros_comments_and_improper_lists_are_rejected() {
         for input in [
             "cl-user::secret",
             "symbol",
             "#.(quit)",
             "#\\a",
+            "'value",
+            "nil ; hidden",
+            "(1 . 2)",
+            "[1 2]",
             "1.5",
             "1/2",
         ] {
-            assert!(matches!(
-                decode(input),
-                Err(DecodeError {
-                    kind: DecodeErrorKind::UnsupportedAtom,
-                    ..
-                })
-            ));
+            let result = decode(input);
+            assert!(
+                matches!(
+                    result,
+                    Err(DecodeError {
+                        kind: DecodeErrorKind::UnsupportedAtom | DecodeErrorKind::InvalidSyntax,
+                        ..
+                    })
+                ),
+                "{input:?}: {result:?}"
+            );
         }
     }
 
     #[test]
     fn malformed_and_trailing_input_is_rejected() {
-        let cases = [
-            ("", DecodeErrorKind::EmptyInput),
-            ("(", DecodeErrorKind::UnterminatedList),
-            (")", DecodeErrorKind::UnexpectedClose),
-            ("\"open", DecodeErrorKind::UnterminatedString),
-            ("\"open\\", DecodeErrorKind::UnterminatedEscape),
-            (":", DecodeErrorKind::InvalidKeyword),
-            ("nil nil", DecodeErrorKind::TrailingInput),
-            ("9223372036854775808", DecodeErrorKind::IntegerOutOfRange),
-        ];
-        for (input, expected) in cases {
-            assert!(matches!(decode(input), Err(error) if error.kind == expected));
+        for input in ["", "(", ")", "\"open", "\"open\\", "nil nil"] {
+            let result = decode(input);
+            assert!(
+                matches!(
+                    result,
+                    Err(DecodeError {
+                        kind: DecodeErrorKind::EmptyInput | DecodeErrorKind::InvalidSyntax,
+                        ..
+                    })
+                ),
+                "{input:?}: {result:?}"
+            );
         }
+        assert!(matches!(
+            decode(":"),
+            Err(DecodeError {
+                kind: DecodeErrorKind::InvalidKeyword,
+                ..
+            })
+        ));
+        assert!(matches!(
+            decode("9223372036854775808"),
+            Err(DecodeError {
+                kind: DecodeErrorKind::IntegerOutOfRange,
+                ..
+            })
+        ));
     }
 
     #[test]
