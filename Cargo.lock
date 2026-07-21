@@ -215,6 +215,7 @@ dependencies = [
 [[package]]
 name = "deck-gamepad-v1"
 version = "0.1.0"
+source = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=89ca1aefe8c28a6c3f2002c7fe0990453a096a02#89ca1aefe8c28a6c3f2002c7fe0990453a096a02"
 dependencies = [
  "wayland-backend",
  "wayland-client",

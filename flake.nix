@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=a4bd82e6de294dc673a3f55ec73afde35249352d";
+    bmc-main.url = "git+ssh://git@gitlab.ii.zone/bos/bmc-main.git?rev=89ca1aefe8c28a6c3f2002c7fe0990453a096a02";
     fceumm-src = {
       url = "github:libretro/libretro-fceumm/3a84a6fd0ba20dd4877c06b1d58741172148395f";
       flake = false;
@@ -31,6 +31,7 @@
       staticCross = pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsStatic;
       cargoLock = {
         lockFile = ./Cargo.lock;
+        allowBuiltinFetchGit = true;
       };
       nativeDashboardWidget = bmc-main.bmc.${system}.lib.mkExternalNativeWidgetPackage {
         name = "retro-deck";
@@ -115,7 +116,6 @@
             ./Cargo.lock
             ./Cargo.toml
             rootRustCrates
-            ./vendor/bmc/deck-gamepad-v1
           ] ++ extraFiles
         );
       };
