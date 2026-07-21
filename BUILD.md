@@ -203,8 +203,8 @@ the rotated composition pass. Apply the tracked local patch before building a
 BMC image for Retro Deck:
 
 ```sh
-ops/bmc/apply-local-patches.sh /root/bmc-main
-nix build --no-link /root/bmc-main#deck-packages.core.pkg
+ops/bmc/apply-local-patches.sh /path/to/bmc-main
+nix build --no-link /path/to/bmc-main#deck-packages.core.pkg
 ```
 
 The patch selects nearest-neighbor filtering for both directions. The script
@@ -284,3 +284,5 @@ retrodeck/
 
 The exact on-device file contract and strict catalog schema are documented in
 [deploy/menu/README.md](deploy/menu/README.md).
+The conservative first-party rewrite baseline is recorded in
+[docs/CODE_SIZE.md](docs/CODE_SIZE.md).

@@ -268,6 +268,8 @@ geometry, hides the console cursor, and unblanks the panel on every return.
 - [docs/swipe-rendering-postmortem.org](docs/swipe-rendering-postmortem.org)
   explains the buffer-lifecycle and deployment failures behind the clock
   swipe rendering incident.
+- [docs/CODE_SIZE.md](docs/CODE_SIZE.md) records the reproducible first-party
+  rewrite size and BMC ownership boundary.
 - [deploy/menu/README.md](deploy/menu/README.md) defines the installed layout
   and strict catalog schema.
 - [DECK_NOTES.md](DECK_NOTES.md) records verified hardware, audio, display,
