@@ -2,6 +2,10 @@
   (:use)
   (:export #:abi-version
            #:audio-active-p
+           #:fbdev-close
+           #:fbdev-open
+           #:fbdev-present-solid
+           #:fbdev-size
            #:finish-audio
            #:play-tones
            #:stop-audio
@@ -18,6 +22,10 @@
   (:import-from #:retrodeck.native
                 #:abi-version
                 #:audio-active-p
+                #:fbdev-close
+                #:fbdev-open
+                #:fbdev-present-solid
+                #:fbdev-size
                 #:finish-audio
                 #:play-tones
                 #:stop-audio
@@ -43,7 +51,9 @@
            #:*dashboard-volume-step*
            #:*menu-sound-cues*
            #:*menu-sound-input-tail-ms*
+           #:close-fbdev
            #:close-wayland
+           #:current-fbdev-size
            #:current-wayland-size
            #:dashboard-application
            #:dashboard-color
@@ -58,8 +68,10 @@
            #:menu-sound-duration-ms
            #:menu-sound-notes
            #:next-wayland-touch
+           #:open-fbdev
            #:open-wayland-widget
            #:play-menu-sound
+           #:present-fbdev-solid
            #:present-wayland-solid
            #:reboot-confirmation-active-p
            #:stop-menu-sound
@@ -67,7 +79,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 3)
+(defconstant +native-abi-version+ 4)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -125,6 +137,20 @@
   (finish-audio)
   (setf *menu-sound-input-until-ms* 0)
   t)
+
+(defun open-fbdev ()
+  (= (fbdev-open) 1))
+
+(defun close-fbdev ()
+  (fbdev-close)
+  t)
+
+(defun present-fbdev-solid (color)
+  (check-type color (integer 0 16777215))
+  (= (fbdev-present-solid color) 1))
+
+(defun current-fbdev-size ()
+  (fbdev-size))
 
 (defun open-wayland-widget ()
   (= (wayland-open-widget) 1))

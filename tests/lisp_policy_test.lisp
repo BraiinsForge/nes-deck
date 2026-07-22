@@ -8,6 +8,11 @@
 (defparameter *active-status* 0)
 (defparameter *stop-count* 0)
 (defparameter *finish-count* 0)
+(defparameter *fbdev-open-status* 1)
+(defparameter *fbdev-close-count* 0)
+(defparameter *fbdev-present-status* 1)
+(defparameter *fbdev-present-color* nil)
+(defparameter *fbdev-size* nil)
 (defparameter *wayland-open-status* 1)
 (defparameter *wayland-close-count* 0)
 (defparameter *wayland-present-status* 1)
@@ -22,6 +27,10 @@
   (:use)
   (:export #:abi-version
            #:audio-active-p
+           #:fbdev-close
+           #:fbdev-open
+           #:fbdev-present-solid
+           #:fbdev-size
            #:finish-audio
            #:play-tones
            #:stop-audio
@@ -34,7 +43,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 3)
+      (lambda () 4)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -45,6 +54,16 @@
       (lambda () (incf *stop-count*) 0)
       (symbol-function (find-symbol "FINISH-AUDIO" "RETRODECK.NATIVE"))
       (lambda () (incf *finish-count*) 0)
+      (symbol-function (find-symbol "FBDEV-OPEN" "RETRODECK.NATIVE"))
+      (lambda () *fbdev-open-status*)
+      (symbol-function (find-symbol "FBDEV-CLOSE" "RETRODECK.NATIVE"))
+      (lambda () (incf *fbdev-close-count*) 0)
+      (symbol-function (find-symbol "FBDEV-PRESENT-SOLID" "RETRODECK.NATIVE"))
+      (lambda (color)
+        (setf *fbdev-present-color* color)
+        *fbdev-present-status*)
+      (symbol-function (find-symbol "FBDEV-SIZE" "RETRODECK.NATIVE"))
+      (lambda () *fbdev-size*)
       (symbol-function (find-symbol "WAYLAND-OPEN-WIDGET" "RETRODECK.NATIVE"))
       (lambda () *wayland-open-status*)
       (symbol-function (find-symbol "WAYLAND-CLOSE" "RETRODECK.NATIVE"))
@@ -125,6 +144,14 @@
 (assert (retrodeck:finish-menu-sound))
 (assert (= *finish-count* 1))
 (assert (= retrodeck::*menu-sound-input-until-ms* 0))
+
+(setf *fbdev-size* '(1280 480))
+(assert (retrodeck:open-fbdev))
+(assert (equal (retrodeck:current-fbdev-size) '(1280 480)))
+(assert (retrodeck:present-fbdev-solid #xfe6c27))
+(assert (= *fbdev-present-color* #xfe6c27))
+(assert (retrodeck:close-fbdev))
+(assert (= *fbdev-close-count* 1))
 
 (assert (retrodeck:open-wayland-widget))
 (assert (retrodeck:close-wayland))

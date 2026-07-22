@@ -1,4 +1,4 @@
-use retrodeck_native::{audio, wayland};
+use retrodeck_native::{audio, fbdev, wayland};
 use std::env;
 use std::ffi::{CString, c_char, c_int, c_void};
 use std::mem;
@@ -17,7 +17,7 @@ type EclFiveArgumentFunction =
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 3;
+const ABI_VERSION: ClFixnum = 4;
 
 const LOAD_STARTUP: &str = r#"
 (handler-case
@@ -105,6 +105,9 @@ impl Ecl {
             ("AUDIO-ACTIVE-P", native_audio_active as EclFixedFunction),
             ("STOP-AUDIO", native_stop_audio as EclFixedFunction),
             ("FINISH-AUDIO", native_finish_audio as EclFixedFunction),
+            ("FBDEV-OPEN", native_fbdev_open as EclFixedFunction),
+            ("FBDEV-CLOSE", native_fbdev_close as EclFixedFunction),
+            ("FBDEV-SIZE", native_fbdev_size as EclFixedFunction),
             (
                 "WAYLAND-OPEN-WIDGET",
                 native_wayland_open_widget as EclFixedFunction,
@@ -126,6 +129,10 @@ impl Ecl {
         }
 
         for (name, function) in [
+            (
+                "FBDEV-PRESENT-SOLID",
+                native_fbdev_present_solid as EclOneArgumentFunction,
+            ),
             (
                 "WAYLAND-PRESENT-SOLID",
                 native_wayland_present_solid as EclOneArgumentFunction,
@@ -173,6 +180,7 @@ impl Ecl {
 
 impl Drop for Ecl {
     fn drop(&mut self) {
+        fbdev::close();
         wayland::close();
         audio::stop();
         unsafe { cl_shutdown() };
@@ -222,6 +230,33 @@ unsafe extern "C" fn native_stop_audio() -> ClObject {
 unsafe extern "C" fn native_finish_audio() -> ClObject {
     audio::finish();
     unsafe { ecl_make_integer(0) }
+}
+
+unsafe extern "C" fn native_fbdev_open() -> ClObject {
+    native_status(fbdev::open())
+}
+
+unsafe extern "C" fn native_fbdev_close() -> ClObject {
+    fbdev::close();
+    unsafe { ecl_make_integer(0) }
+}
+
+unsafe extern "C" fn native_fbdev_present_solid(color: ClObject) -> ClObject {
+    let result = (|| {
+        let color = decode_u32(color, "fbdev solid color")?;
+        if color > 0x00ff_ffff {
+            return Err("fbdev solid color is out of range".to_owned());
+        }
+        fbdev::present_solid(color)
+    })();
+    native_status(result)
+}
+
+unsafe extern "C" fn native_fbdev_size() -> ClObject {
+    let Some((width, height)) = fbdev::size() else {
+        return ECL_NIL;
+    };
+    make_fixnum_list(&[width as ClFixnum, height as ClFixnum])
 }
 
 unsafe extern "C" fn native_wayland_open_widget() -> ClObject {
