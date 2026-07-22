@@ -1,8 +1,6 @@
+use crate::regular_file::read_regular;
 use png::{BitDepth, ColorType, Decoder, Transformations};
-use rustix::fs::{FileType, Mode, OFlags, fstat, open};
-use rustix::io::Errno;
-use std::fs::File;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -122,40 +120,6 @@ impl Raster {
         }
         Ok(())
     }
-}
-
-fn read_regular(
-    path: &Path,
-    minimum_bytes: u64,
-    maximum_bytes: u64,
-    label: &str,
-) -> Result<Option<Vec<u8>>, String> {
-    let descriptor = match open(
-        path,
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-        Mode::empty(),
-    ) {
-        Ok(descriptor) => descriptor,
-        Err(Errno::NOENT) => return Ok(None),
-        Err(error) => return Err(format!("cannot open {label} {}: {error}", path.display())),
-    };
-    let metadata = fstat(&descriptor)
-        .map_err(|error| format!("cannot inspect {label} {}: {error}", path.display()))?;
-    let size = u64::try_from(metadata.st_size).unwrap_or(u64::MAX);
-    if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile
-        || size < minimum_bytes
-        || size > maximum_bytes
-    {
-        return Err(format!(
-            "{label} must be a regular file between {minimum_bytes} and {maximum_bytes} bytes: {}",
-            path.display()
-        ));
-    }
-    let mut data = vec![0; size as usize];
-    File::from(descriptor)
-        .read_exact(&mut data)
-        .map_err(|error| format!("cannot read {label} {}: {error}", path.display()))?;
-    Ok(Some(data))
 }
 
 fn load_ppm_cover(path: &Path) -> Result<Option<Raster>, String> {
