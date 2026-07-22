@@ -625,4 +625,105 @@
 (assert (not (retrodeck:reboot-confirmation-active-p 5000 5000)))
 (assert (not (retrodeck:reboot-confirmation-active-p 0 0)))
 
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes :color #x5f87ff)
+                (:id "beta" :title "BETA" :system :nes :color #xafd75f)
+                (:id "gamma" :title "GAMMA" :system :nes :color #xffffaf)
+                (:id "delta" :title "DELTA" :system :nes :color #xd75f5f)
+                (:id "gb" :title "GB" :system :gb :color #x87af87)))
+       (layout (retrodeck:render-dashboard games :nes 0 "STALE"))
+       (state (retrodeck:dashboard-initial-state games)))
+  (assert (equal state
+                 '(:active-system :nes :game-position 0
+                   :pressed-target nil :status "")))
+  (assert (equal (retrodeck:dashboard-initial-state
+                  '((:id "other" :system :other)))
+                 '(:active-system :other :game-position 0
+                   :pressed-target nil :status "")))
+  (assert (equal (retrodeck:dashboard-initial-state nil)
+                 '(:active-system nil :game-position 0
+                   :pressed-target nil :status "")))
+  (assert (eq (retrodeck:dashboard-target-at layout 12 412) :credits))
+  (assert (eq (retrodeck:dashboard-target-at layout 1212 412) :settings))
+  (assert (eq (retrodeck:dashboard-target-at layout 157 233) :previous))
+  (assert (eq (retrodeck:dashboard-target-at layout 1045 233) :next))
+  (assert (equal (retrodeck:dashboard-target-at layout 56 76)
+                 '(:system :nes)))
+  (assert (equal (retrodeck:dashboard-target-at layout 934 102)
+                 '(:system :gb)))
+  (assert (equal (retrodeck:dashboard-target-at layout 388 286)
+                 '(:game 0)))
+  (assert (null (retrodeck:dashboard-target-at layout 636 100)))
+  (assert (null (retrodeck:dashboard-target-at layout 68 412)))
+
+  (setf (getf state :status) "STALE")
+  (multiple-value-bind (pressed effect)
+      (retrodeck:dashboard-touch-transition state layout
+                                            '(1084 282 t t nil))
+    (assert (eq (getf pressed :pressed-target) :next))
+    (assert (null effect))
+    (assert (null (getf state :pressed-target)))
+    (multiple-value-bind (released release-effect)
+        (retrodeck:dashboard-touch-transition pressed layout
+                                              '(1084 282 nil nil t))
+      (assert (= (getf released :game-position) 1))
+      (assert (string= (getf released :status) ""))
+      (assert (null (getf released :pressed-target)))
+      (assert (equal release-effect '(:render t :cue :next)))))
+
+  (multiple-value-bind (pressed effect)
+      (retrodeck:dashboard-touch-transition state layout
+                                            '(196 282 t t nil))
+    (assert (null effect))
+    (multiple-value-bind (released release-effect)
+        (retrodeck:dashboard-touch-transition pressed layout
+                                              '(196 282 nil nil t))
+      (assert (= (getf released :game-position) 3))
+      (assert (equal release-effect '(:render t :cue :previous)))))
+
+  (let ((positioned (copy-list state)))
+    (setf (getf positioned :game-position) 3)
+    (multiple-value-bind (pressed effect)
+        (retrodeck:dashboard-touch-transition positioned layout
+                                              '(346 102 t t nil))
+      (assert (null effect))
+      (multiple-value-bind (released release-effect)
+          (retrodeck:dashboard-touch-transition pressed layout
+                                                '(346 102 nil nil t))
+        (assert (eq (getf released :active-system) :nes))
+        (assert (zerop (getf released :game-position)))
+        (assert (equal release-effect '(:render t))))))
+
+  (multiple-value-bind (pressed effect)
+      (retrodeck:dashboard-touch-transition state layout
+                                            '(934 102 t t nil))
+    (assert (null effect))
+    (multiple-value-bind (released release-effect)
+        (retrodeck:dashboard-touch-transition pressed layout
+                                              '(934 102 nil nil t))
+      (assert (eq (getf released :active-system) :gb))
+      (assert (zerop (getf released :game-position)))
+      (assert (equal release-effect '(:render t :cue :next)))))
+
+  (multiple-value-bind (pressed effect)
+      (retrodeck:dashboard-touch-transition state layout
+                                            '(1084 282 t t nil))
+    (assert (null effect))
+    (multiple-value-bind (released release-effect)
+        (retrodeck:dashboard-touch-transition pressed layout
+                                              '(196 282 nil nil t))
+      (assert (zerop (getf released :game-position)))
+      (assert (null (getf released :pressed-target)))
+      (assert (null release-effect))))
+
+  (multiple-value-bind (pressed effect)
+      (retrodeck:dashboard-touch-transition state layout
+                                            '(1084 282 t t nil))
+    (assert (null effect))
+    (multiple-value-bind (released release-effect)
+        (retrodeck:dashboard-touch-transition pressed layout
+                                              '(-1 -1 nil nil t))
+      (assert (zerop (getf released :game-position)))
+      (assert (null (getf released :pressed-target)))
+      (assert (null release-effect)))))
+
 (format t "Lisp policy tests passed.~%")

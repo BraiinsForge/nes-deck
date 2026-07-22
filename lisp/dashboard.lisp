@@ -361,3 +361,83 @@
               :game-buttons (getf carousel :game-buttons)
               :indicators (getf carousel :indicators)
               :shown-game-index (getf carousel :shown-game-index))))))
+
+(defun dashboard-initial-system (games)
+  (or (first (dashboard-populated-systems games))
+      (getf (first games) :system)))
+
+(defun dashboard-initial-state (games)
+  (check-type games list)
+  (list :active-system (dashboard-initial-system games)
+        :game-position 0
+        :pressed-target nil
+        :status ""))
+
+(defun dashboard-bounds-contains-p (bounds x y)
+  (and bounds
+       (destructuring-bind (left top width height) bounds
+         (and (<= left x) (< x (+ left width))
+              (<= top y) (< y (+ top height))))))
+
+(defun dashboard-target-at (layout x y)
+  (check-type layout list)
+  (check-type x integer)
+  (check-type y integer)
+  (or (loop for (key target) in '((:credits :credits)
+                                  (:settings :settings)
+                                  (:previous :previous)
+                                  (:next :next))
+            when (dashboard-bounds-contains-p (getf layout key) x y)
+              return target)
+      (loop for system in (getf layout :systems)
+            for bounds in (getf layout :system-buttons)
+            when (dashboard-bounds-contains-p bounds x y)
+              return (list :system system))
+      (loop for game-index in (getf layout :visible-game-indices)
+            for bounds in (getf layout :game-buttons)
+            when (dashboard-bounds-contains-p bounds x y)
+              return (list :game game-index))))
+
+(defun dashboard-touch-transition (state layout report)
+  (check-type state list)
+  (check-type layout list)
+  (destructuring-bind (x y down pressed released) report
+    (check-type x integer)
+    (check-type y integer)
+    (check-type down boolean)
+    (check-type pressed boolean)
+    (check-type released boolean)
+    (let* ((next (copy-list state))
+           (game-position (getf next :game-position))
+           (target (dashboard-target-at layout x y))
+           (effect nil))
+      (check-type game-position (integer 0 *))
+      (when pressed
+        (setf (getf next :pressed-target) target))
+      (when released
+        (let ((pressed-target (getf next :pressed-target)))
+          (setf (getf next :pressed-target) nil)
+          (when (equal pressed-target target)
+            (cond
+              ((and (consp target) (eq (first target) :system))
+               (let* ((requested-system (second target))
+                      (moved (not (equal requested-system
+                                         (getf next :active-system)))))
+                 (setf (getf next :active-system) requested-system
+                       (getf next :game-position) 0
+                       (getf next :status) ""
+                       effect (if moved
+                                  '(:render t :cue :next)
+                                  '(:render t)))))
+              ((member target '(:previous :next))
+               (let ((count (length (getf layout :game-indices))))
+                 (when (plusp count)
+                   (setf (getf next :game-position)
+                         (if (eq target :previous)
+                             (if (zerop game-position)
+                                 (1- count)
+                                 (1- game-position))
+                             (mod (1+ game-position) count))
+                         (getf next :status) ""
+                         effect (list :render t :cue target)))))))))
+      (values next effect))))

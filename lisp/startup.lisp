@@ -79,10 +79,13 @@
            #:dashboard-application
            #:dashboard-color
            #:dashboard-executable
+           #:dashboard-initial-state
            #:dashboard-launch-plan
            #:dashboard-menu-geometry
            #:dashboard-system-label
+           #:dashboard-target-at
            #:dashboard-timing
+           #:dashboard-touch-transition
            #:dispatch-wayland
            #:display-ascii
            #:draw-canvas-glyph
