@@ -1,6 +1,6 @@
 use retrodeck_native::{audio, canvas, fbdev, wayland};
 use std::env;
-use std::ffi::{CString, c_char, c_int, c_void};
+use std::ffi::{CString, OsStr, c_char, c_int, c_void};
 use std::mem;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -11,13 +11,15 @@ type ClObject = *mut c_void;
 type ClFixnum = isize;
 type EclFixedFunction = unsafe extern "C" fn() -> ClObject;
 type EclOneArgumentFunction = unsafe extern "C" fn(ClObject) -> ClObject;
+type EclTwoArgumentFunction = unsafe extern "C" fn(ClObject, ClObject) -> ClObject;
+type EclThreeArgumentFunction = unsafe extern "C" fn(ClObject, ClObject, ClObject) -> ClObject;
 type EclFiveArgumentFunction =
     unsafe extern "C" fn(ClObject, ClObject, ClObject, ClObject, ClObject) -> ClObject;
 
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 6;
+const ABI_VERSION: ClFixnum = 7;
 
 const LOAD_STARTUP: &str = r#"
 (handler-case
@@ -48,6 +50,8 @@ unsafe extern "C" {
     fn ecl_make_integer(value: ClFixnum) -> ClObject;
     fn ecl_cons(car: ClObject, cdr: ClObject) -> ClObject;
     fn ecl_make_simple_base_string(value: *const c_char, length: ClFixnum) -> ClObject;
+    fn ecl_base_string_pointer_safe(value: ClObject) -> *mut c_char;
+    fn ecl_length(value: ClObject) -> ClFixnum;
     fn ecl_find_package(name: *const c_char) -> ClObject;
     fn ecl_make_package(
         name: ClObject,
@@ -110,6 +114,10 @@ impl Ecl {
                 "CANVAS-DRAW-GLYPH",
                 native_canvas_draw_glyph as EclFiveArgumentFunction,
             ),
+            (
+                "CANVAS-DRAW-RASTER",
+                native_canvas_draw_raster as EclFiveArgumentFunction,
+            ),
         ] {
             let name = c_string(name)?;
             let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
@@ -118,10 +126,25 @@ impl Ecl {
             unsafe { ecl_def_c_function(symbol, callback, 5) };
         }
 
+        let name = c_string("RASTER-LOAD-COVER")?;
+        let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
+        let callback = unsafe {
+            mem::transmute::<EclTwoArgumentFunction, EclFixedFunction>(native_raster_load_cover)
+        };
+        unsafe { ecl_def_c_function(symbol, callback, 2) };
+
+        let name = c_string("RASTER-LOAD-PNG")?;
+        let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
+        let callback = unsafe {
+            mem::transmute::<EclThreeArgumentFunction, EclFixedFunction>(native_raster_load_png)
+        };
+        unsafe { ecl_def_c_function(symbol, callback, 3) };
+
         for (name, function) in [
             ("AUDIO-ACTIVE-P", native_audio_active as EclFixedFunction),
             ("STOP-AUDIO", native_stop_audio as EclFixedFunction),
             ("FINISH-AUDIO", native_finish_audio as EclFixedFunction),
+            ("RASTER-CLEAR", native_raster_clear as EclFixedFunction),
             (
                 "FBDEV-PRESENT-CANVAS",
                 native_fbdev_present_canvas as EclFixedFunction,
@@ -315,6 +338,55 @@ unsafe extern "C" fn native_canvas_draw_glyph(
     native_status(result)
 }
 
+unsafe extern "C" fn native_raster_clear() -> ClObject {
+    canvas::clear_rasters();
+    unsafe { ecl_make_integer(1) }
+}
+
+unsafe extern "C" fn native_raster_load_cover(path: ClObject, background: ClObject) -> ClObject {
+    let result = (|| {
+        canvas::load_cover_raster(
+            &decode_path(path, "cover raster path")?,
+            decode_color(background, "cover raster background")?,
+        )
+    })();
+    native_handle(result)
+}
+
+unsafe extern "C" fn native_raster_load_png(
+    path: ClObject,
+    width: ClObject,
+    height: ClObject,
+) -> ClObject {
+    let result = (|| {
+        canvas::load_png_raster(
+            &decode_path(path, "PNG raster path")?,
+            decode_u32(width, "PNG raster width")?,
+            decode_u32(height, "PNG raster height")?,
+        )
+    })();
+    native_handle(result)
+}
+
+unsafe extern "C" fn native_canvas_draw_raster(
+    handle: ClObject,
+    x: ClObject,
+    y: ClObject,
+    width: ClObject,
+    height: ClObject,
+) -> ClObject {
+    let result = (|| {
+        canvas::draw_raster(
+            decode_u32(handle, "canvas raster handle")?,
+            decode_i32(x, "canvas raster x")?,
+            decode_i32(y, "canvas raster y")?,
+            decode_u32(width, "canvas raster width")?,
+            decode_u32(height, "canvas raster height")?,
+        )
+    })();
+    native_status(result)
+}
+
 unsafe extern "C" fn native_fbdev_open() -> ClObject {
     native_status(fbdev::open())
 }
@@ -414,6 +486,21 @@ fn native_status(result: Result<(), String>) -> ClObject {
     unsafe { ecl_make_integer(status) }
 }
 
+fn native_handle(result: Result<u32, String>) -> ClObject {
+    let handle = match result {
+        Ok(handle) if u64::from(handle) <= (ClFixnum::MAX as u64 >> 2) => handle as ClFixnum,
+        Ok(_) => {
+            eprintln!("retrodeck: native raster handle is out of ECL fixnum range");
+            0
+        }
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            0
+        }
+    };
+    unsafe { ecl_make_integer(handle) }
+}
+
 fn make_fixnum_list(values: &[ClFixnum]) -> ClObject {
     let mut list = ECL_NIL;
     for value in values.iter().rev() {
@@ -430,6 +517,22 @@ fn boolean_fixnum(value: bool) -> ClFixnum {
 
 fn c_string(value: &str) -> Result<CString, String> {
     CString::new(value).map_err(|_| "an internal ECL name contains NUL".to_owned())
+}
+
+fn decode_path(object: ClObject, name: &str) -> Result<PathBuf, String> {
+    let length = unsafe { ecl_length(object) };
+    if length < 0 {
+        return Err(format!("{name} has an invalid length"));
+    }
+    let pointer = unsafe { ecl_base_string_pointer_safe(object) }.cast::<u8>();
+    if pointer.is_null() {
+        return Err(format!("{name} is unavailable"));
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(pointer, length as usize) };
+    if bytes.contains(&0) {
+        return Err(format!("{name} cannot contain NUL"));
+    }
+    Ok(PathBuf::from(OsStr::from_bytes(bytes)))
 }
 
 fn decode_fixnum(object: ClObject) -> Option<ClFixnum> {

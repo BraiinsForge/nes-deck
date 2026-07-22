@@ -800,6 +800,22 @@ int main() {
              UINT64_C(0x65b48f5f3b66d535),
          "dashboard fixture keeps the complete reference frame");
 
+  CoverImage dashboard_fixture_cover;
+  error.clear();
+  expect(load_png_cover_image(settings_icon_path,
+                              dashboard_fixture_games[2].color,
+                              &dashboard_fixture_cover, &error) &&
+             load_settings_icon(settings_icon_path, &error),
+         "load deterministic dashboard raster assets");
+  dashboard_fixture_games[2].cover = dashboard_fixture_cover;
+  render_menu(dashboard_fixture_games, "nes", 2, "FIXTURE STATUS",
+              &dashboard_fixture_canvas, &dashboard_fixture_layout);
+  const uint64_t dashboard_raster_hash = canvas_hash(dashboard_fixture_canvas);
+  // Shared with the installed Lisp/native raster fixture.
+  expect(dashboard_raster_hash == UINT64_C(0x5c932dc59681241e),
+         "dashboard raster fixture keeps the complete reference frame");
+  gSettingsIconImage.clear();
+
   render_menu(tab_games, "nes", 0, std::string(), &canvas, &menu_layout);
   expect(canvas.size() == static_cast<size_t>(kLogicalWidth * kLogicalHeight),
          "menu renders a complete logical canvas");

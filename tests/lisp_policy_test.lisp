@@ -16,6 +16,16 @@
 (defparameter *canvas-fill-status* 1)
 (defparameter *canvas-fill-arguments* nil)
 (defparameter *canvas-fill-calls* nil)
+(defparameter *canvas-raster-status* 1)
+(defparameter *canvas-raster-arguments* nil)
+(defparameter *canvas-raster-calls* nil)
+(defparameter *raster-clear-count* 0)
+(defparameter *raster-cover-result* 0)
+(defparameter *raster-cover-arguments* nil)
+(defparameter *raster-cover-calls* nil)
+(defparameter *raster-png-result* 0)
+(defparameter *raster-png-arguments* nil)
+(defparameter *raster-png-calls* nil)
 (defparameter *fbdev-open-status* 1)
 (defparameter *fbdev-close-count* 0)
 (defparameter *fbdev-canvas-status* 1)
@@ -39,6 +49,7 @@
            #:audio-active-p
            #:canvas-clear
            #:canvas-draw-glyph
+           #:canvas-draw-raster
            #:canvas-fill-rect
            #:fbdev-close
            #:fbdev-open
@@ -47,6 +58,9 @@
            #:fbdev-size
            #:finish-audio
            #:play-tones
+           #:raster-clear
+           #:raster-load-cover
+           #:raster-load-png
            #:stop-audio
            #:wayland-close
            #:wayland-dispatch
@@ -58,7 +72,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 6)
+      (lambda () 7)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -83,7 +97,24 @@
         (setf *canvas-fill-arguments* arguments)
         (push arguments *canvas-fill-calls*)
         *canvas-fill-status*)
-      (symbol-function (find-symbol "FBDEV-OPEN" "RETRODECK.NATIVE"))
+      (symbol-function (find-symbol "CANVAS-DRAW-RASTER" "RETRODECK.NATIVE"))
+       (lambda (&rest arguments)
+         (setf *canvas-raster-arguments* arguments)
+         (push arguments *canvas-raster-calls*)
+         *canvas-raster-status*)
+       (symbol-function (find-symbol "RASTER-CLEAR" "RETRODECK.NATIVE"))
+       (lambda () (incf *raster-clear-count*) 1)
+       (symbol-function (find-symbol "RASTER-LOAD-COVER" "RETRODECK.NATIVE"))
+       (lambda (&rest arguments)
+         (setf *raster-cover-arguments* arguments)
+         (push arguments *raster-cover-calls*)
+         *raster-cover-result*)
+       (symbol-function (find-symbol "RASTER-LOAD-PNG" "RETRODECK.NATIVE"))
+       (lambda (&rest arguments)
+         (setf *raster-png-arguments* arguments)
+         (push arguments *raster-png-calls*)
+         *raster-png-result*)
+       (symbol-function (find-symbol "FBDEV-OPEN" "RETRODECK.NATIVE"))
       (lambda () *fbdev-open-status*)
       (symbol-function (find-symbol "FBDEV-CLOSE" "RETRODECK.NATIVE"))
       (lambda () (incf *fbdev-close-count*) 0)
@@ -209,6 +240,25 @@
          (lambda () (retrodeck:fill-canvas-rect 0 0 #x100000000 1 0))))
 (assert (null *canvas-fill-arguments*))
 
+(setf *raster-cover-result* 17)
+(assert (= (retrodeck:load-cover-raster #P"/tmp/cover.png" #x5f87ff) 17))
+(assert (equal *raster-cover-arguments* '("/tmp/cover.png" #x5f87ff)))
+(setf *raster-png-result* 18)
+(assert (= (retrodeck:load-png-raster "/tmp/icon.png" 23 23) 18))
+(assert (equal *raster-png-arguments* '("/tmp/icon.png" 23 23)))
+(assert (retrodeck:draw-canvas-raster 18 -4 8 50 50))
+(assert (equal *canvas-raster-arguments* '(18 -4 8 50 50)))
+(setf *canvas-raster-status* 0)
+(assert (not (retrodeck:draw-canvas-raster 18 0 0 1 1)))
+(setf *canvas-raster-status* 1
+      *raster-cover-result* 0
+      *raster-png-result* 0)
+(dolist (function (list (lambda () (retrodeck:load-cover-raster "/tmp/x" #x1000000))
+                        (lambda () (retrodeck:load-png-raster "/tmp/x" 0 1))
+                        (lambda () (retrodeck:load-png-raster "/tmp/x" 2049 1))
+                        (lambda () (retrodeck:draw-canvas-raster 0 0 0 1 1))))
+  (assert (signals-type-error-p function)))
+
 (assert (string= (retrodeck:display-ascii "AČz") "A?z"))
 (assert (= (retrodeck:bitmap-text-width "" 2) 0))
 (assert (= (retrodeck:bitmap-text-width "AB" 2) 22))
@@ -309,13 +359,37 @@
   (assert (equal (getf layout :previous) '(0 0 0 0)))
   (assert (equal (getf layout :next) '(0 0 0 0))))
 
+(assert (retrodeck:clear-dashboard-raster-cache))
+(assert (= *raster-clear-count* 1))
+(setf *raster-png-result* 23
+      *raster-png-calls* nil
+      *canvas-raster-calls* nil)
+(let ((retrodeck:*dashboard-settings-icon-path* "/tmp/settings.png"))
+  (retrodeck:render-dashboard nil :nes 0 "")
+  (assert (equal *raster-png-arguments* '("/tmp/settings.png" 23 23)))
+  (assert (= (length *raster-png-calls*) 1))
+  (assert (member '(23 1215 415 50 50) *canvas-raster-calls*
+                  :test #'equal)))
+
+(assert (retrodeck:clear-dashboard-raster-cache))
+(assert (= *raster-clear-count* 2))
+(setf *raster-png-result* 0
+      *raster-cover-result* 24
+      *raster-cover-calls* nil
+      *canvas-fill-calls* nil
+      *canvas-raster-calls* nil)
 (let* ((games '((:id "covered" :title "COVERED" :system :nes
                  :color #x5f87ff :cover "/tmp/fixture.png")))
-       (*canvas-fill-calls* nil)
-       (layout (retrodeck:render-dashboard games :nes 0 "COVER FALLBACK")))
+       (layout (retrodeck:render-dashboard games :nes 0 "COVERED")))
   (assert (= (getf layout :shown-game-index) 0))
-  (assert (member '(578 190 124 144 #x5f87ff) *canvas-fill-calls*
-                  :test #'equal)))
+  (assert (equal *raster-cover-arguments*
+                 '("/tmp/fixture.png" #x5f87ff)))
+  (assert (= (length *raster-cover-calls*) 1))
+  (assert (member '(24 540 162 200 200) *canvas-raster-calls*
+                  :test #'equal))
+  (assert (not (member '(578 190 124 144 #x5f87ff) *canvas-fill-calls*
+                       :test #'equal))))
+(setf *raster-cover-result* 0)
 
 (setf *fbdev-size* '(1280 480))
 (assert (retrodeck:open-fbdev))
@@ -393,6 +467,10 @@
                  (:chiptunes . "/mnt/data/nes-deck/chiptune-deck")
                  (:terminal . "/mnt/data/nes-deck/terminal/retro-terminal")
                  (:reboot . "/sbin/reboot"))))
+(assert (string= retrodeck:*dashboard-cover-directory*
+                 "/mnt/data/nes-deck/covers/"))
+(assert (string= retrodeck:*dashboard-settings-icon-path*
+                 "/mnt/data/nes-deck/menu/settings-icon.png"))
 (assert (equal retrodeck:*dashboard-timings*
                '((:child-touch-exit-ms . 2000)
                  (:child-term-grace-ms . 4000)

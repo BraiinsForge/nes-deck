@@ -42,6 +42,10 @@
     (:terminal . "/mnt/data/nes-deck/terminal/retro-terminal")
     (:reboot . "/sbin/reboot")))
 
+(defparameter *dashboard-cover-directory* "/mnt/data/nes-deck/covers/")
+(defparameter *dashboard-settings-icon-path*
+  "/mnt/data/nes-deck/menu/settings-icon.png")
+
 (defparameter *dashboard-built-in-applications*
   '((:id "lua-repl"
      :title "LUA REPL"

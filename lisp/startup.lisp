@@ -4,6 +4,7 @@
            #:audio-active-p
            #:canvas-clear
            #:canvas-draw-glyph
+           #:canvas-draw-raster
            #:canvas-fill-rect
            #:fbdev-close
            #:fbdev-open
@@ -12,6 +13,9 @@
            #:fbdev-size
            #:finish-audio
            #:play-tones
+           #:raster-clear
+           #:raster-load-cover
+           #:raster-load-png
            #:stop-audio
            #:wayland-close
            #:wayland-dispatch
@@ -29,6 +33,7 @@
                 #:audio-active-p
                 #:canvas-clear
                 #:canvas-draw-glyph
+                #:canvas-draw-raster
                 #:canvas-fill-rect
                 #:fbdev-close
                 #:fbdev-open
@@ -50,11 +55,13 @@
            #:*dashboard-brightness-step*
            #:*dashboard-built-in-applications*
            #:*dashboard-controller-burst-limit*
+           #:*dashboard-cover-directory*
            #:*dashboard-executables*
            #:*dashboard-menu-geometry*
            #:*dashboard-palette*
            #:*dashboard-reboot-confirmation-text*
            #:*dashboard-reduced-motion-environment*
+           #:*dashboard-settings-icon-path*
            #:*dashboard-systems*
            #:*dashboard-terminal-login-shell*
            #:*dashboard-timings*
@@ -64,6 +71,7 @@
            #:*menu-sound-input-tail-ms*
            #:bitmap-text-width
            #:clear-canvas
+           #:clear-dashboard-raster-cache
            #:close-fbdev
            #:close-wayland
            #:current-fbdev-size
@@ -78,6 +86,7 @@
            #:dispatch-wayland
            #:display-ascii
            #:draw-canvas-glyph
+           #:draw-canvas-raster
            #:draw-centered-text
            #:draw-pixel-panel
            #:draw-text
@@ -86,6 +95,8 @@
            #:finish-menu-sound
            #:fit-text-scale
            #:fit-text-width
+           #:load-cover-raster
+           #:load-png-raster
            #:main
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
@@ -94,6 +105,7 @@
            #:open-fbdev
            #:open-wayland-widget
            #:play-menu-sound
+           #:prepare-dashboard-rasters
            #:present-fbdev-canvas
            #:present-fbdev-solid
            #:present-wayland-canvas
@@ -106,7 +118,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 6)
+(defconstant +native-abi-version+ 7)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -184,6 +196,30 @@
   (check-type height (and fixnum (unsigned-byte 32)))
   (check-type color (integer 0 16777215))
   (= (canvas-fill-rect x y width height color) 1))
+
+(defun native-path-string (path)
+  (coerce (namestring (pathname path)) 'base-string))
+
+(defun load-cover-raster (path background)
+  (check-type background (integer 0 16777215))
+  (let ((handle (retrodeck.native:raster-load-cover
+                 (native-path-string path) background)))
+    (and (plusp handle) handle)))
+
+(defun load-png-raster (path width height)
+  (check-type width (and fixnum (integer 1 2048)))
+  (check-type height (and fixnum (integer 1 2048)))
+  (let ((handle (retrodeck.native:raster-load-png
+                 (native-path-string path) width height)))
+    (and (plusp handle) handle)))
+
+(defun draw-canvas-raster (handle x y width height)
+  (check-type handle (and fixnum (integer 1 4294967295)))
+  (check-type x (and fixnum (signed-byte 32)))
+  (check-type y (and fixnum (signed-byte 32)))
+  (check-type width (and fixnum (integer 1 4294967295)))
+  (check-type height (and fixnum (integer 1 4294967295)))
+  (= (canvas-draw-raster handle x y width height) 1))
 
 (defun open-fbdev ()
   (= (fbdev-open) 1))

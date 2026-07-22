@@ -32,6 +32,44 @@
     "...000...02220...000..." ".........02210........."
     "..........000.........."))
 
+(defparameter *dashboard-raster-cache* (make-hash-table :test #'equal))
+
+(defun clear-dashboard-raster-cache ()
+  (let ((cleared (= (retrodeck.native:raster-clear) 1)))
+    (clrhash *dashboard-raster-cache*)
+    cleared))
+
+(defun dashboard-cached-raster (key loader)
+  (multiple-value-bind (handle present-p)
+      (gethash key *dashboard-raster-cache*)
+    (if present-p
+        handle
+        (setf (gethash key *dashboard-raster-cache*) (funcall loader)))))
+
+(defun dashboard-settings-raster ()
+  (let ((path (namestring (pathname *dashboard-settings-icon-path*))))
+    (dashboard-cached-raster
+     (list :png path 23 23)
+     (lambda () (load-png-raster path 23 23)))))
+
+(defun dashboard-cover-path (game)
+  (or (getf game :cover)
+      (merge-pathnames (concatenate 'string (getf game :id) ".png")
+                       (pathname *dashboard-cover-directory*))))
+
+(defun dashboard-cover-raster (game)
+  (let* ((path (namestring (pathname (dashboard-cover-path game))))
+         (color (getf game :color)))
+    (dashboard-cached-raster
+     (list :cover path color)
+     (lambda () (load-cover-raster path color)))))
+
+(defun prepare-dashboard-rasters (games)
+  (check-type games list)
+  (dashboard-settings-raster)
+  (dolist (game games t)
+    (dashboard-cover-raster game)))
+
 (defun dashboard-menu-geometry (name)
   (let ((value (getf *dashboard-menu-geometry* name)))
     (if value
@@ -71,6 +109,15 @@
                                                 (char-code #\0)))))
             (setf target-x end)))))
     t))
+
+(defun draw-dashboard-settings-icon (x y width height)
+  (let* ((target-size (max 1 (min 50 width height)))
+         (left (+ x (floor (- width target-size) 2)))
+         (top (+ y (floor (- height target-size) 2)))
+         (raster (dashboard-settings-raster)))
+    (or (and raster
+             (draw-canvas-raster raster left top target-size target-size))
+        (draw-dashboard-settings-fallback x y width height))))
 
 (defun draw-dashboard-outline-arrow (x y width height direction color)
   (let ((center-x (+ x (floor width 2)))
@@ -173,10 +220,11 @@
     (draw-pixel-panel x y width height
                       (dashboard-color (if selected :active :background))
                       (dashboard-color :accent) stroke)
-    ;; Until the narrow raster blit arrives, covered games retain a complete
-    ;; deterministic fallback card rather than aborting the dashboard frame.
-    (unless (draw-dashboard-compact-logo art-x art-y art-size art-size game)
-      (draw-dashboard-cartridge art-x art-y art-size art-size color))
+    (let ((cover (dashboard-cover-raster game)))
+      (unless (and cover
+                   (draw-canvas-raster cover art-x art-y art-size art-size))
+        (unless (draw-dashboard-compact-logo art-x art-y art-size art-size game)
+          (draw-dashboard-cartridge art-x art-y art-size art-size color))))
     (draw-centered-text label-x label-y label-width label-height
                         (fit-text-width (getf game :title)
                                         (- label-width 12)
@@ -285,12 +333,13 @@
   (check-type games list)
   (check-type game-position (integer 0 *))
   (check-type status string)
+  (prepare-dashboard-rasters games)
   (clear-canvas (dashboard-color :background))
   (let ((credits (dashboard-menu-geometry :credits))
         (settings (dashboard-menu-geometry :settings)))
     (apply #'draw-centered-text
            (append credits (list "(c)" 2 (dashboard-color :footer))))
-    (apply #'draw-dashboard-settings-fallback settings)
+    (apply #'draw-dashboard-settings-icon settings)
     (multiple-value-bind (systems system-buttons)
         (draw-dashboard-tabs games active-system)
       (let ((carousel

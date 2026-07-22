@@ -1,5 +1,6 @@
-use crate::font;
+use crate::{font, raster::Raster};
 use std::cell::RefCell;
+use std::path::Path;
 use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
 
 pub const WIDTH: u32 = 1280;
@@ -7,13 +8,17 @@ pub const HEIGHT: u32 = 480;
 
 struct Canvas {
     pixmap: Pixmap,
+    rasters: Vec<Raster>,
 }
 
 impl Canvas {
     fn new() -> Self {
         let mut pixmap = Pixmap::new(WIDTH, HEIGHT).expect("fixed canvas dimensions are valid");
         pixmap.fill(Color::BLACK);
-        Self { pixmap }
+        Self {
+            pixmap,
+            rasters: Vec::new(),
+        }
     }
 
     fn clear(&mut self, color: u32) {
@@ -51,6 +56,35 @@ impl Canvas {
                 }
             }
         }
+    }
+
+    fn store_raster(&mut self, raster: Raster) -> Result<u32, String> {
+        let handle = u32::try_from(self.rasters.len() + 1)
+            .map_err(|_| "native raster handle space is exhausted".to_owned())?;
+        self.rasters.push(raster);
+        Ok(handle)
+    }
+
+    fn clear_rasters(&mut self) {
+        self.rasters.clear();
+    }
+
+    fn draw_raster(
+        &mut self,
+        handle: u32,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        let index = handle
+            .checked_sub(1)
+            .ok_or_else(|| "native raster handle must be positive".to_owned())?;
+        let raster = self
+            .rasters
+            .get(index as usize)
+            .ok_or_else(|| format!("native raster handle {handle} is unavailable"))?;
+        raster.draw(self.pixmap.data_mut(), (WIDTH, HEIGHT), x, y, width, height)
     }
 }
 
@@ -100,6 +134,28 @@ pub fn draw_glyph(x: i32, y: i32, character: u8, scale: u32, color: u32) {
             .borrow_mut()
             .draw_glyph(x, y, character, scale, color);
     });
+}
+
+pub fn load_cover_raster(path: &Path, background: u32) -> Result<u32, String> {
+    let Some(raster) = Raster::load_cover(path, background)? else {
+        return Ok(0);
+    };
+    CANVAS.with(|canvas| canvas.borrow_mut().store_raster(raster))
+}
+
+pub fn load_png_raster(path: &Path, width: u32, height: u32) -> Result<u32, String> {
+    let Some(raster) = Raster::load_png(path, width, height)? else {
+        return Ok(0);
+    };
+    CANVAS.with(|canvas| canvas.borrow_mut().store_raster(raster))
+}
+
+pub fn clear_rasters() {
+    CANVAS.with(|canvas| canvas.borrow_mut().clear_rasters());
+}
+
+pub fn draw_raster(handle: u32, x: i32, y: i32, width: u32, height: u32) -> Result<(), String> {
+    CANVAS.with(|canvas| canvas.borrow_mut().draw_raster(handle, x, y, width, height))
 }
 
 pub fn with_pixels<T>(callback: impl FnOnce(&[u8]) -> T) -> T {
