@@ -13,6 +13,8 @@ type EclFixedFunction = unsafe extern "C" fn() -> ClObject;
 type EclOneArgumentFunction = unsafe extern "C" fn(ClObject) -> ClObject;
 type EclTwoArgumentFunction = unsafe extern "C" fn(ClObject, ClObject) -> ClObject;
 type EclThreeArgumentFunction = unsafe extern "C" fn(ClObject, ClObject, ClObject) -> ClObject;
+type EclFourArgumentFunction =
+    unsafe extern "C" fn(ClObject, ClObject, ClObject, ClObject) -> ClObject;
 type EclFiveArgumentFunction =
     unsafe extern "C" fn(ClObject, ClObject, ClObject, ClObject, ClObject) -> ClObject;
 type EclTwelveArgumentFunction = unsafe extern "C" fn(
@@ -33,7 +35,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 10;
+const ABI_VERSION: ClFixnum = 11;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -119,6 +121,14 @@ impl Ecl {
             mem::transmute::<EclFiveArgumentFunction, EclFixedFunction>(native_play_tones)
         };
         unsafe { ecl_def_c_function(play, callback, 5) };
+
+        let run_terminal_name = c_string("RUN-TERMINAL")?;
+        let run_terminal =
+            unsafe { ecl_make_symbol(run_terminal_name.as_ptr(), package_name.as_ptr()) };
+        let callback = unsafe {
+            mem::transmute::<EclFourArgumentFunction, EclFixedFunction>(native_run_terminal)
+        };
+        unsafe { ecl_def_c_function(run_terminal, callback, 4) };
 
         for (name, function) in [
             (
@@ -314,6 +324,41 @@ impl Drop for Ecl {
 
 unsafe extern "C" fn native_abi_version() -> ClObject {
     unsafe { ecl_make_integer(ABI_VERSION) }
+}
+
+unsafe extern "C" fn native_run_terminal(
+    executable: ClObject,
+    keymap: ClObject,
+    mode: ClObject,
+    label: ClObject,
+) -> ClObject {
+    let result = (|| {
+        let executable = decode_path(executable, "terminal executable")?;
+        let keymap = decode_base_string(keymap, "terminal keymap")?;
+        let mode = decode_base_string(mode, "terminal mode")?;
+        let label = String::from_utf8(decode_base_string(label, "terminal label")?)
+            .map_err(|_| "terminal label is not UTF-8".to_owned())?;
+        Ok(process::run_terminal(
+            &executable,
+            OsStr::from_bytes(&keymap),
+            OsStr::from_bytes(&mode),
+            &label,
+        ))
+    })();
+    let result = result.unwrap_or_else(|error| process::ChildResult {
+        error: Some(error),
+        ..process::ChildResult::default()
+    });
+    let error = result.error.as_deref().map_or(ECL_NIL, |error| {
+        make_base_string(error.as_bytes(), "terminal error")
+    });
+    make_object_list(&[
+        unsafe { ecl_make_integer(boolean_fixnum(result.started)) },
+        unsafe { ecl_make_integer(boolean_fixnum(result.exited_for_touch)) },
+        unsafe { ecl_make_integer(result.exit_code.map_or(-1, |value| value as ClFixnum)) },
+        unsafe { ecl_make_integer(result.signal.map_or(-1, |value| value as ClFixnum)) },
+        error,
+    ])
 }
 
 unsafe extern "C" fn native_play_tones(
@@ -703,19 +748,31 @@ fn native_handle(result: Result<u32, String>) -> ClObject {
 
 fn native_optional_string(result: Result<Option<Vec<u8>>, String>) -> ClObject {
     match result {
-        Ok(Some(value)) => {
-            let Ok(length) = ClFixnum::try_from(value.len()) else {
-                eprintln!("retrodeck: regular file is too large for ECL");
-                return ECL_NIL;
-            };
-            unsafe { ecl_make_simple_base_string(value.as_ptr().cast(), length) }
-        }
+        Ok(Some(value)) => make_base_string(&value, "regular file"),
         Ok(None) => ECL_NIL,
         Err(error) => {
             eprintln!("retrodeck: {error}");
             ECL_NIL
         }
     }
+}
+
+fn make_base_string(value: &[u8], name: &str) -> ClObject {
+    let Ok(length) = ClFixnum::try_from(value.len()) else {
+        eprintln!("retrodeck: {name} is too large for ECL");
+        return ECL_NIL;
+    };
+    unsafe { ecl_make_simple_base_string(value.as_ptr().cast(), length) }
+}
+
+fn make_object_list(values: &[ClObject]) -> ClObject {
+    let mut list = ECL_NIL;
+    for value in values.iter().rev() {
+        unsafe {
+            list = ecl_cons(*value, list);
+        }
+    }
+    list
 }
 
 fn make_fixnum_list(values: &[ClFixnum]) -> ClObject {

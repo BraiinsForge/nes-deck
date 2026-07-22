@@ -122,8 +122,8 @@ cp "$chip8/bin/chip8-deck" "$payload/nes-deck/chip8-deck"
 cp "$timer/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
 cp "$menu/bin/deck-menu" "$payload/nes-deck/menu/deck-menu"
 cp "$native/bin/retrodeck-native" "$payload/nes-deck/retrodeck-native"
-cp lisp/startup.lisp lisp/ui.lisp lisp/policy.lisp lisp/settings.lisp \
-  lisp/wifi.lisp lisp/credits.lisp lisp/dashboard.lisp \
+cp lisp/startup.lisp lisp/ui.lisp lisp/policy.lisp lisp/process.lisp \
+  lisp/settings.lisp lisp/wifi.lisp lisp/credits.lisp lisp/dashboard.lisp \
   "$payload/nes-deck/lisp/"
 cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
 cp "$uploader/bin/rom-uploader" \
@@ -217,6 +217,7 @@ chmod 0700 "$payload/nes-deck/uploader/rom-uploader"
 chmod 0600 "$payload/nes-deck/lisp/startup.lisp" \
   "$payload/nes-deck/lisp/ui.lisp" \
   "$payload/nes-deck/lisp/policy.lisp" \
+  "$payload/nes-deck/lisp/process.lisp" \
   "$payload/nes-deck/lisp/settings.lisp" \
   "$payload/nes-deck/lisp/wifi.lisp" \
   "$payload/nes-deck/lisp/credits.lisp" \

@@ -61,6 +61,8 @@
 (defparameter *wayland-touch* nil)
 (defparameter *wayland-size* nil)
 (defparameter *wayland-shutdown-status* 0)
+(defparameter *terminal-result* '(1 0 0 -1 nil))
+(defparameter *terminal-arguments* nil)
 
 (defpackage #:retrodeck.native
   (:use)
@@ -88,6 +90,7 @@
            #:raster-load-cover
            #:raster-load-png
            #:read-regular-file
+           #:run-terminal
            #:stop-audio
            #:text-mask-clear
            #:text-mask-load
@@ -101,7 +104,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 10)
+      (lambda () 11)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -165,6 +168,10 @@
         (lambda (&rest arguments)
           (setf *regular-file-arguments* arguments)
           *regular-file-result*)
+        (symbol-function (find-symbol "RUN-TERMINAL" "RETRODECK.NATIVE"))
+        (lambda (&rest arguments)
+          (setf *terminal-arguments* arguments)
+          *terminal-result*)
         (symbol-function (find-symbol "TEXT-MASK-CLEAR" "RETRODECK.NATIVE"))
         (lambda () (incf *text-mask-clear-count*) 1)
         (symbol-function (find-symbol "TEXT-MASK-LOAD" "RETRODECK.NATIVE"))
@@ -1271,6 +1278,59 @@ secret!9
                    :label "lisp REPL"
                    :touch-supervision t
                    :mirror-console t))))
+
+(let* ((plan (retrodeck:dashboard-launch-plan
+              (retrodeck:dashboard-application "terminal") 42 :keymap "cz"))
+       (fixtures '(((0 0 -1 -1 "exec failed")
+                    "TERMINAL ERROR - CHECK LOG")
+                   ((0 0 -1 -1 nil) "TERMINAL DID NOT START")
+                   ((1 1 -1 15 nil) "RETURNED FROM TERMINAL")
+                   ((1 0 0 -1 nil) "TERMINAL EXITED")
+                   ((1 0 7 -1 nil) "TERMINAL EXITED (STATUS 7)")
+                   ((1 0 -1 15 nil) "TERMINAL STOPPED (SIGNAL 15)")
+                   ((1 0 -1 -1 nil) "TERMINAL STOPPED"))))
+  (assert (string= (retrodeck:dashboard-terminal-title plan) "TERMINAL"))
+  (assert (string= (retrodeck:dashboard-terminal-starting-status plan)
+                   "STARTING TERMINAL"))
+  (dolist (fixture fixtures)
+    (destructuring-bind (native-result expected) fixture
+      (assert
+       (string=
+        (retrodeck:dashboard-terminal-result-status
+         plan (retrodeck::decode-native-terminal-result native-result))
+        expected))))
+  (let ((repl-plan (retrodeck:dashboard-launch-plan
+                    (retrodeck:dashboard-application "lisp-repl")
+                    42 :keymap "cz")))
+    (assert (string= (retrodeck:dashboard-terminal-title repl-plan)
+                     "LISP REPL"))
+    (assert (string= (retrodeck:dashboard-terminal-starting-status repl-plan)
+                     "STARTING LISP REPL"))))
+
+(dolist (result '((2 0 -1 -1 nil)
+                  (1 -1 -1 -1 nil)
+                  (1 0 -2 -1 nil)
+                  (1 0 -1 0 nil)
+                  (0 1 -1 -1 nil)
+                  (0 0 0 -1 nil)
+                  (1 0 0 15 nil)))
+  (assert (signals-error-p
+           (lambda () (retrodeck::decode-native-terminal-result result)))))
+
+(let* ((plan (retrodeck:dashboard-launch-plan
+              (retrodeck:dashboard-application "terminal") 42 :keymap "cz"))
+       (before *finish-count*))
+  (setf *terminal-result* '(1 0 0 -1 nil)
+        *terminal-arguments* nil
+        retrodeck::*menu-sound-input-until-ms* 100)
+  (assert (equal (retrodeck:run-dashboard-terminal plan)
+                 '(:started t :exited-for-touch nil
+                   :exit-code 0 :signal nil :error nil)))
+  (assert (= *finish-count* (1+ before)))
+  (assert (= retrodeck::*menu-sound-input-until-ms* 0))
+  (assert (equal *terminal-arguments*
+                 '("/mnt/data/nes-deck/terminal/retro-terminal"
+                   "cz" "shell" "terminal"))))
 
 (let ((plan
         (retrodeck:dashboard-launch-plan

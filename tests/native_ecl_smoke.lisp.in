@@ -3,7 +3,7 @@
 (in-package #:retrodeck)
 
 (defun main ()
-  (unless (= (retrodeck.native:abi-version) 10)
+  (unless (= (retrodeck.native:abi-version) 11)
     (error "Native ABI mismatch"))
   (unless (= (retrodeck.native:canvas-clear #x121212) 1)
     (error "Canvas clear callback did not accept one argument"))
@@ -128,6 +128,51 @@
             (error "Wi-Fi frame mismatch for ~S/~S"
                    field (if symbols :symbols
                              (if uppercase :uppercase :lowercase)))))))
+    (let ((plan '(:executable "@terminal_fixture@"
+                  :arguments ("shell")
+                  :environment (("RETRO_DECK_KEYMAP" . "cz"))
+                  :label "terminal"
+                  :touch-supervision t
+                  :mirror-console t)))
+      (unless (string= (dashboard-terminal-starting-status plan)
+                       "STARTING TERMINAL")
+        (error "Terminal starting status changed"))
+      (let ((result (run-dashboard-terminal plan)))
+        (unless (equal result
+                       '(:started t :exited-for-touch nil
+                         :exit-code 0 :signal nil :error nil))
+          (error "Terminal process callback result changed: ~S" result))
+        (unless (string= (dashboard-terminal-result-status plan result)
+                         "TERMINAL EXITED")
+          (error "Terminal return status changed"))))
+    (dolist (fixture '(("failure" :exit-code 7
+                         "TERMINAL EXITED (STATUS 7)")
+                       ("signal" :signal 15
+                         "TERMINAL STOPPED (SIGNAL 15)")))
+      (destructuring-bind (mode field expected-value expected-status) fixture
+        (let* ((plan (list :executable "@terminal_fixture@"
+                           :arguments (list mode)
+                           :environment '(("RETRO_DECK_KEYMAP" . "cz"))
+                           :label "terminal"
+                           :touch-supervision t
+                           :mirror-console t))
+               (result (run-dashboard-terminal plan)))
+          (unless (and (eql (getf result field) expected-value)
+                       (string= (dashboard-terminal-result-status plan result)
+                                expected-status))
+            (error "Terminal ~A result changed: ~S" mode result)))))
+    (let* ((plan '(:executable "/no/such/retrodeck-terminal"
+                   :arguments ("shell")
+                   :environment (("RETRO_DECK_KEYMAP" . "cz"))
+                   :label "terminal"
+                   :touch-supervision t
+                   :mirror-console t))
+           (result (run-dashboard-terminal plan)))
+      (unless (and (not (getf result :started))
+                   (stringp (getf result :error))
+                   (string= (dashboard-terminal-result-status plan result)
+                            "TERMINAL ERROR - CHECK LOG"))
+        (error "Terminal exec failure result changed: ~S" result)))
     (let ((icon (load-png-raster "@settings_icon@" 23 23)))
       (unless icon
         (error "PNG raster callback did not load the settings asset"))

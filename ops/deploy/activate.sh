@@ -117,6 +117,7 @@ done
 [ -s "$stage/nes-deck/lisp/startup.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/ui.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/policy.lisp" ] && \
+  [ -s "$stage/nes-deck/lisp/process.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/settings.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/wifi.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/credits.lisp" ] && \
@@ -203,14 +204,16 @@ mkdir -p "$base/lisp"
 cp -p "$stage/nes-deck/lisp/startup.lisp" "$base/lisp/startup.lisp"
 cp -p "$stage/nes-deck/lisp/ui.lisp" "$base/lisp/ui.lisp"
 cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"
+cp -p "$stage/nes-deck/lisp/process.lisp" "$base/lisp/process.lisp"
 cp -p "$stage/nes-deck/lisp/settings.lisp" "$base/lisp/settings.lisp"
 cp -p "$stage/nes-deck/lisp/wifi.lisp" "$base/lisp/wifi.lisp"
 cp -p "$stage/nes-deck/lisp/credits.lisp" "$base/lisp/credits.lisp"
 cp -p "$stage/nes-deck/lisp/dashboard.lisp" "$base/lisp/dashboard.lisp"
 chmod 0700 "$base/retrodeck-native" "$base/lisp"
 chmod 0600 "$base/lisp/startup.lisp" "$base/lisp/ui.lisp" \
-  "$base/lisp/policy.lisp" "$base/lisp/settings.lisp" \
-  "$base/lisp/wifi.lisp" "$base/lisp/credits.lisp" \
+  "$base/lisp/policy.lisp" "$base/lisp/process.lisp" \
+  "$base/lisp/settings.lisp" "$base/lisp/wifi.lisp" \
+  "$base/lisp/credits.lisp" \
   "$base/lisp/dashboard.lisp"
 cp -p "$stage/nes-deck/uploader/rom-uploader" \
   "$base/uploader/rom-uploader"

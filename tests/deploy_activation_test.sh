@@ -34,14 +34,17 @@ grep -Fq "ssh \"\$target\" sh -s -- \"\$remote_stage\" <\"\$activate_script\"" \
   "$deployer" || fail 'deployer does not stream the activation script'
 grep -Fq "[[ -f \$activate_script && ! -L \$activate_script ]]" "$deployer" ||
   fail 'deployer does not validate the activation script'
-grep -Fq 'cp lisp/startup.lisp lisp/ui.lisp lisp/policy.lisp lisp/settings.lisp' \
-  "$deployer" || fail 'deployer does not stage the editable Lisp settings'
-grep -Fq 'lisp/wifi.lisp lisp/credits.lisp lisp/dashboard.lisp' "$deployer" ||
+grep -Fq 'cp lisp/startup.lisp lisp/ui.lisp lisp/policy.lisp lisp/process.lisp' \
+  "$deployer" || fail 'deployer does not stage the editable Lisp process policy'
+grep -Fq 'lisp/settings.lisp lisp/wifi.lisp lisp/credits.lisp lisp/dashboard.lisp' \
+  "$deployer" ||
   fail 'deployer does not stage the editable Lisp Wi-Fi editor'
 grep -Fq '[ -s "$stage/nes-deck/lisp/ui.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp UI'
 grep -Fq '[ -s "$stage/nes-deck/lisp/policy.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp policy'
+grep -Fq '[ -s "$stage/nes-deck/lisp/process.lisp" ]' "$activation" ||
+  fail 'activation does not validate the staged editable Lisp process policy'
 grep -Fq '[ -s "$stage/nes-deck/lisp/settings.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp settings'
 grep -Fq '[ -s "$stage/nes-deck/lisp/wifi.lisp" ]' "$activation" ||
@@ -54,6 +57,8 @@ grep -Fq 'cp -p "$stage/nes-deck/lisp/ui.lisp" "$base/lisp/ui.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp UI'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp policy'
+grep -Fq 'cp -p "$stage/nes-deck/lisp/process.lisp" "$base/lisp/process.lisp"' \
+  "$activation" || fail 'activation does not install the editable Lisp process policy'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/settings.lisp" "$base/lisp/settings.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp settings'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/wifi.lisp" "$base/lisp/wifi.lisp"' \

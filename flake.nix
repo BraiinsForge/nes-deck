@@ -893,14 +893,28 @@
           cp ${./lisp/startup.lisp} startup.lisp
           cp ${./lisp/ui.lisp} ui.lisp
           cp ${./lisp/policy.lisp} policy.lisp
+          cp ${./lisp/process.lisp} process.lisp
           cp ${./lisp/settings.lisp} settings.lisp
           cp ${./lisp/wifi.lisp} wifi.lisp
           cp ${./lisp/credits.lisp} credits.lisp
           cp ${./lisp/dashboard.lisp} dashboard.lisp
           cp ${./assets/settings-cog/gear-knekko-09.png} settings-icon.png
+          cat > terminal-fixture <<'EOF'
+          #!${pkgs.runtimeShell}
+          [ "$#" -eq 1 ] || exit 90
+          [ "$RETRO_DECK_KEYMAP" = cz ] || exit 92
+          case "$1" in
+            shell) exit 0 ;;
+            failure) exit 7 ;;
+            signal) kill -TERM "$$" ;;
+            *) exit 91 ;;
+          esac
+          EOF
+          chmod +x terminal-fixture
           substitute ${./tests/native_ecl_smoke.lisp.in} smoke.lisp \
             --subst-var-by startup "$PWD/startup.lisp" \
             --subst-var-by settings_icon "$PWD/settings-icon.png" \
+            --subst-var-by terminal_fixture "$PWD/terminal-fixture" \
             --subst-var-by credits ${./deploy/menu/credits.tsv}
           ECLDIR=${eclArm}/lib/ecl/ \
             ${pkgs.qemu-user}/bin/qemu-arm \

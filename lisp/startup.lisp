@@ -24,6 +24,7 @@
            #:raster-load-cover
            #:raster-load-png
            #:read-regular-file
+           #:run-terminal
            #:stop-audio
            #:text-mask-clear
            #:text-mask-load
@@ -60,6 +61,7 @@
                 #:finish-audio
                 #:play-tones
                 #:read-regular-file
+                #:run-terminal
                 #:stop-audio
                 #:text-mask-clear
                 #:text-mask-load
@@ -136,6 +138,9 @@
            #:dashboard-menu-geometry
            #:dashboard-system-label
            #:dashboard-target-at
+           #:dashboard-terminal-result-status
+           #:dashboard-terminal-starting-status
+           #:dashboard-terminal-title
            #:dashboard-timing
            #:dashboard-touch-transition
            #:dispatch-evdev-touch
@@ -175,6 +180,7 @@
            #:present-wayland-solid
            #:read-bounded-regular-file
            #:reboot-confirmation-active-p
+           #:run-dashboard-terminal
            #:render-dashboard
            #:render-dashboard-settings
            #:render-dashboard-wifi
@@ -205,7 +211,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 10)
+(defconstant +native-abi-version+ 11)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -437,6 +443,7 @@
 (let ((startup *load-truename*))
   (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
+  (load (merge-pathnames "process.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "settings.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "wifi.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "credits.lisp" startup) :verbose nil :print nil)
