@@ -3,6 +3,7 @@ pub mod canvas;
 pub mod fbdev;
 mod font;
 pub mod input;
+pub mod process;
 mod projection;
 pub mod protocol;
 mod raster;

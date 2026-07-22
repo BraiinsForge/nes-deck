@@ -1,4 +1,4 @@
-use retrodeck_native::{audio, canvas, fbdev, input, regular_file, wayland};
+use retrodeck_native::{audio, canvas, fbdev, input, process, regular_file, wayland};
 use std::env;
 use std::ffi::{CString, OsStr, c_char, c_int, c_void};
 use std::mem;
@@ -807,6 +807,7 @@ fn startup_path() -> Result<PathBuf, String> {
 fn run() -> Result<u8, String> {
     let startup = startup_path()?;
     let ecl = Ecl::boot()?;
+    process::install_signal_handlers()?;
     ecl.register_primitives()?;
     ecl.load(&startup)?;
     ecl.run()

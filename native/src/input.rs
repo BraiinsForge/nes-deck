@@ -262,6 +262,22 @@ pub fn close_touch() {
     });
 }
 
+pub fn touch_open() -> bool {
+    TOUCH.with(|current| current.borrow().is_some())
+}
+
+pub fn current_touch() -> Option<TouchReport> {
+    TOUCH.with(|current| {
+        current.borrow().as_ref().map(|touch| TouchReport {
+            x: touch.state.x,
+            y: touch.state.y,
+            down: touch.state.current_down,
+            pressed: false,
+            released: false,
+        })
+    })
+}
+
 pub fn dispatch_touch(timeout_ms: u32) -> Result<usize, String> {
     with_touch(|touch| touch.dispatch(timeout_ms))
 }

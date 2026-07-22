@@ -237,6 +237,7 @@ name = "retrodeck-native"
 version = "0.1.0"
 dependencies = [
  "evdev",
+ "libc",
  "png",
  "rustix",
  "tiny-skia",
