@@ -28,10 +28,29 @@
                 #:wayland-present-solid
                 #:wayland-shutdown-p
                 #:wayland-size)
-  (:export #:*menu-sound-cues*
+  (:export #:*dashboard-brightness-minimum*
+           #:*dashboard-brightness-step*
+           #:*dashboard-built-in-applications*
+           #:*dashboard-controller-burst-limit*
+           #:*dashboard-executables*
+           #:*dashboard-palette*
+           #:*dashboard-reboot-confirmation-text*
+           #:*dashboard-reduced-motion-environment*
+           #:*dashboard-systems*
+           #:*dashboard-terminal-login-shell*
+           #:*dashboard-timings*
+           #:*dashboard-volume-default*
+           #:*dashboard-volume-step*
+           #:*menu-sound-cues*
            #:*menu-sound-input-tail-ms*
            #:close-wayland
            #:current-wayland-size
+           #:dashboard-application
+           #:dashboard-color
+           #:dashboard-executable
+           #:dashboard-launch-plan
+           #:dashboard-system-label
+           #:dashboard-timing
            #:dispatch-wayland
            #:finish-menu-sound
            #:main
@@ -42,6 +61,7 @@
            #:open-wayland-widget
            #:play-menu-sound
            #:present-wayland-solid
+           #:reboot-confirmation-active-p
            #:stop-menu-sound
            #:wayland-shutdown-requested-p))
 
@@ -142,6 +162,8 @@
   (finish-output)
   0)
 
-(let ((local (merge-pathnames "local.lisp" *load-truename*)))
-  (when (probe-file local)
-    (load local :verbose nil :print nil)))
+(let ((startup *load-truename*))
+  (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
+  (let ((local (merge-pathnames "local.lisp" startup)))
+    (when (probe-file local)
+      (load local :verbose nil :print nil))))
