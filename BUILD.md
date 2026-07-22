@@ -101,14 +101,15 @@ loads an optional `local.lisp` beside it for device-local overrides without a
 Rust rebuild. Deployment updates `startup.lisp` and `policy.lisp` but leaves an
 existing `local.lisp` untouched.
 
-Native ABI 3 adds widget-side Wayland primitives for opening and closing the
-custom Deck surface, presenting a solid XRGB8888 frame, bounded event dispatch,
-configured size, queued touch reports, and shutdown state. Lisp wraps these as
-`OPEN-WAYLAND-WIDGET`, `CLOSE-WAYLAND`, `PRESENT-WAYLAND-SOLID`,
-`DISPATCH-WAYLAND`, `CURRENT-WAYLAND-SIZE`, `NEXT-WAYLAND-TOUCH`, and
-`WAYLAND-SHUTDOWN-REQUESTED-P`. Startup does not open the display automatically,
-so firmware without the BMC compositor continues to run the host as a harmless
-sidecar beside the working fbdev dashboard.
+Native ABI 4 retains the widget-side Wayland primitives for presentation,
+event dispatch, touch, size, and shutdown state. It also exposes direct-fbdev
+open, close, logical-size, and solid-frame presentation through `OPEN-FBDEV`,
+`CLOSE-FBDEV`, `CURRENT-FBDEV-SIZE`, and `PRESENT-FBDEV-SOLID`. The fbdev
+mechanism validates the device-reported 600x1280 RGB565 geometry and stride,
+stages the complete rotated 1280x480 canvas in ordinary RAM, and then publishes
+finished rows. Startup opens neither backend automatically, so the Rust host
+remains harmless beside the working C++ dashboard until Lisp rendering reaches
+parity.
 
 Build the host and run its focused mechanism tests with:
 

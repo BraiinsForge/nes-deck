@@ -189,6 +189,31 @@ production lines, including the existing catalog compiler, and 2,589 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Native fbdev checkpoint
+
+Native ABI 4 adds a direct-fbdev presentation mechanism without changing the
+Wayland implementation or replacing the C++ dashboard. Rust uses the narrow
+Linux framebuffer ioctl and mmap interface, validates the device-reported
+600x1280 RGB565 color fields and stride, builds the rotated 1280x480 image in a
+staging buffer, and publishes only completed active rows. Common Lisp controls
+open, close, logical-size queries, and 24-bit solid-frame presentation. Default
+startup leaves fbdev closed.
+
+Compile-time layout checks cover both 64-bit hosts and the 32-bit ARM ABI. Pure
+mechanism tests cover geometry rejection, RGB565 conversion, rotation, stride
+padding, and corner placement. The ARM/ECL smoke covers ABI 4 and closed-display
+callbacks. On the development Deck, a supervised smoke stopped the dashboard,
+presented accent `#xfe6c27` as RGB565 `#xfb64`, captured the 1,638,400-byte
+stride-aware scanout, verified all 614,400 active pixels with zero mismatches,
+and restored a healthy C++ dashboard. The solid frame validates physical open,
+ioctl, mmap, stride, conversion, and publication; physical orientation of a
+nonuniform Lisp-rendered frame remains for the next rendering slice.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 2,492
+production lines, including the existing catalog compiler, and 3,084 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:
