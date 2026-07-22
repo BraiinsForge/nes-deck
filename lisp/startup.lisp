@@ -3,7 +3,9 @@
   (:export #:abi-version
            #:audio-active-p
            #:canvas-clear
+           #:canvas-configure-projection
            #:canvas-draw-glyph
+           #:canvas-draw-projected-text
            #:canvas-draw-raster
            #:canvas-fill-rect
            #:evdev-next-touch
@@ -20,7 +22,10 @@
            #:raster-clear
            #:raster-load-cover
            #:raster-load-png
+           #:read-regular-file
            #:stop-audio
+           #:text-mask-clear
+           #:text-mask-load
            #:wayland-close
            #:wayland-dispatch
            #:wayland-next-touch
@@ -36,7 +41,9 @@
                 #:abi-version
                 #:audio-active-p
                 #:canvas-clear
+                #:canvas-configure-projection
                 #:canvas-draw-glyph
+                #:canvas-draw-projected-text
                 #:canvas-draw-raster
                 #:canvas-fill-rect
                 #:evdev-next-touch
@@ -50,7 +57,10 @@
                 #:fbdev-size
                 #:finish-audio
                 #:play-tones
+                #:read-regular-file
                 #:stop-audio
+                #:text-mask-clear
+                #:text-mask-load
                 #:wayland-close
                 #:wayland-dispatch
                 #:wayland-next-touch
@@ -81,6 +91,8 @@
            #:bitmap-text-width
            #:clear-canvas
            #:clear-dashboard-raster-cache
+           #:clear-text-mask-cache
+           #:configure-text-projection
            #:close-evdev-touch
            #:close-fbdev
            #:close-wayland
@@ -101,6 +113,7 @@
            #:display-ascii
            #:draw-canvas-glyph
            #:draw-canvas-raster
+           #:draw-projected-text
            #:draw-centered-text
            #:draw-pixel-panel
            #:draw-text
@@ -111,6 +124,7 @@
            #:fit-text-width
            #:load-cover-raster
            #:load-png-raster
+           #:load-text-mask
            #:main
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
@@ -126,6 +140,7 @@
            #:present-fbdev-solid
            #:present-wayland-canvas
            #:present-wayland-solid
+           #:read-bounded-regular-file
            #:reboot-confirmation-active-p
            #:render-dashboard
            #:stop-menu-sound
@@ -134,7 +149,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 8)
+(defconstant +native-abi-version+ 9)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -215,6 +230,46 @@
 
 (defun native-path-string (path)
   (coerce (namestring (pathname path)) 'base-string))
+
+(defun read-bounded-regular-file (path minimum-bytes maximum-bytes)
+  (check-type minimum-bytes (and fixnum (integer 0 4194304)))
+  (check-type maximum-bytes (and fixnum (integer 0 4194304)))
+  (when (> minimum-bytes maximum-bytes)
+    (error "Regular file byte bounds are invalid"))
+  (read-regular-file (native-path-string path) minimum-bytes maximum-bytes))
+
+(defun load-text-mask (text scale)
+  (check-type text string)
+  (check-type scale (and fixnum (integer 1 4294967295)))
+  (let ((handle (text-mask-load
+                 (coerce (display-ascii text) 'base-string) scale)))
+    (and (plusp handle) handle)))
+
+(defun clear-text-mask-cache ()
+  (= (text-mask-clear) 1))
+
+(defun configure-text-projection
+    (elapsed-ms speed-numerator speed-denominator cycle camera-distance
+     maximum-depth horizon-y clip-top fade-invisible-y fade-opaque-y bottom-y
+     color)
+  (check-type elapsed-ms (and fixnum (integer 0 *)))
+  (dolist (value (list speed-numerator speed-denominator cycle camera-distance
+                       maximum-depth))
+    (check-type value (and fixnum (unsigned-byte 32))))
+  (dolist (value (list horizon-y clip-top fade-invisible-y fade-opaque-y
+                       bottom-y))
+    (check-type value (and fixnum (signed-byte 32))))
+  (check-type color (integer 0 16777215))
+  (= (canvas-configure-projection
+      elapsed-ms speed-numerator speed-denominator cycle camera-distance
+      maximum-depth horizon-y clip-top fade-invisible-y fade-opaque-y bottom-y
+      color)
+     1))
+
+(defun draw-projected-text (handle source-y)
+  (check-type handle (and fixnum (integer 1 4294967295)))
+  (check-type source-y (and fixnum (signed-byte 32)))
+  (= (canvas-draw-projected-text handle source-y) 1))
 
 (defun load-cover-raster (path background)
   (check-type background (integer 0 16777215))

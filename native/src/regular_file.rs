@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-pub(crate) fn read_regular(
+pub fn read_regular(
     path: &Path,
     minimum_bytes: u64,
     maximum_bytes: u64,
@@ -31,7 +31,12 @@ pub(crate) fn read_regular(
             path.display()
         ));
     }
-    let mut data = vec![0; size as usize];
+    let length = usize::try_from(size)
+        .map_err(|_| format!("{label} is too large to read: {}", path.display()))?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(length)
+        .map_err(|_| format!("cannot allocate {label} {}", path.display()))?;
+    data.resize(length, 0);
     File::from(descriptor)
         .read_exact(&mut data)
         .map_err(|error| format!("cannot read {label} {}: {error}", path.display()))?;

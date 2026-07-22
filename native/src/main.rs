@@ -1,4 +1,4 @@
-use retrodeck_native::{audio, canvas, fbdev, input, wayland};
+use retrodeck_native::{audio, canvas, fbdev, input, regular_file, wayland};
 use std::env;
 use std::ffi::{CString, OsStr, c_char, c_int, c_void};
 use std::mem;
@@ -15,11 +15,26 @@ type EclTwoArgumentFunction = unsafe extern "C" fn(ClObject, ClObject) -> ClObje
 type EclThreeArgumentFunction = unsafe extern "C" fn(ClObject, ClObject, ClObject) -> ClObject;
 type EclFiveArgumentFunction =
     unsafe extern "C" fn(ClObject, ClObject, ClObject, ClObject, ClObject) -> ClObject;
+type EclTwelveArgumentFunction = unsafe extern "C" fn(
+    ClObject,
+    ClObject,
+    ClObject,
+    ClObject,
+    ClObject,
+    ClObject,
+    ClObject,
+    ClObject,
+    ClObject,
+    ClObject,
+    ClObject,
+    ClObject,
+) -> ClObject;
 
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 8;
+const ABI_VERSION: ClFixnum = 9;
+const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
 (handler-case
@@ -126,25 +141,62 @@ impl Ecl {
             unsafe { ecl_def_c_function(symbol, callback, 5) };
         }
 
-        let name = c_string("RASTER-LOAD-COVER")?;
-        let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
-        let callback = unsafe {
-            mem::transmute::<EclTwoArgumentFunction, EclFixedFunction>(native_raster_load_cover)
-        };
-        unsafe { ecl_def_c_function(symbol, callback, 2) };
+        for (name, function) in [
+            (
+                "RASTER-LOAD-COVER",
+                native_raster_load_cover as EclTwoArgumentFunction,
+            ),
+            (
+                "TEXT-MASK-LOAD",
+                native_text_mask_load as EclTwoArgumentFunction,
+            ),
+            (
+                "CANVAS-DRAW-PROJECTED-TEXT",
+                native_canvas_draw_projected_text as EclTwoArgumentFunction,
+            ),
+        ] {
+            let name = c_string(name)?;
+            let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
+            let callback =
+                unsafe { mem::transmute::<EclTwoArgumentFunction, EclFixedFunction>(function) };
+            unsafe { ecl_def_c_function(symbol, callback, 2) };
+        }
 
-        let name = c_string("RASTER-LOAD-PNG")?;
+        for (name, function) in [
+            (
+                "RASTER-LOAD-PNG",
+                native_raster_load_png as EclThreeArgumentFunction,
+            ),
+            (
+                "READ-REGULAR-FILE",
+                native_read_regular_file as EclThreeArgumentFunction,
+            ),
+        ] {
+            let name = c_string(name)?;
+            let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
+            let callback =
+                unsafe { mem::transmute::<EclThreeArgumentFunction, EclFixedFunction>(function) };
+            unsafe { ecl_def_c_function(symbol, callback, 3) };
+        }
+
+        let name = c_string("CANVAS-CONFIGURE-PROJECTION")?;
         let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
         let callback = unsafe {
-            mem::transmute::<EclThreeArgumentFunction, EclFixedFunction>(native_raster_load_png)
+            mem::transmute::<EclTwelveArgumentFunction, EclFixedFunction>(
+                native_canvas_configure_projection,
+            )
         };
-        unsafe { ecl_def_c_function(symbol, callback, 3) };
+        unsafe { ecl_def_c_function(symbol, callback, 12) };
 
         for (name, function) in [
             ("AUDIO-ACTIVE-P", native_audio_active as EclFixedFunction),
             ("STOP-AUDIO", native_stop_audio as EclFixedFunction),
             ("FINISH-AUDIO", native_finish_audio as EclFixedFunction),
             ("RASTER-CLEAR", native_raster_clear as EclFixedFunction),
+            (
+                "TEXT-MASK-CLEAR",
+                native_text_mask_clear as EclFixedFunction,
+            ),
             (
                 "EVDEV-TOUCH-OPEN",
                 native_evdev_touch_open as EclFixedFunction,
@@ -355,6 +407,68 @@ unsafe extern "C" fn native_canvas_draw_glyph(
     native_status(result)
 }
 
+unsafe extern "C" fn native_text_mask_load(text: ClObject, scale: ClObject) -> ClObject {
+    let result = (|| {
+        canvas::load_text_mask(
+            &decode_base_string(text, "projected text")?,
+            decode_u32(scale, "projected text scale")?,
+        )
+    })();
+    native_handle(result)
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe extern "C" fn native_canvas_configure_projection(
+    elapsed_ms: ClObject,
+    speed_numerator: ClObject,
+    speed_denominator: ClObject,
+    cycle: ClObject,
+    camera_distance: ClObject,
+    maximum_depth: ClObject,
+    horizon_y: ClObject,
+    clip_top: ClObject,
+    fade_invisible_y: ClObject,
+    fade_opaque_y: ClObject,
+    bottom_y: ClObject,
+    color: ClObject,
+) -> ClObject {
+    let result = (|| {
+        canvas::configure_projection(
+            decode_i64(elapsed_ms, "projection elapsed time")?,
+            decode_u32(speed_numerator, "projection speed numerator")?,
+            decode_u32(speed_denominator, "projection speed denominator")?,
+            decode_u32(cycle, "projection cycle")?,
+            decode_u32(camera_distance, "projection camera distance")?,
+            decode_u32(maximum_depth, "projection maximum depth")?,
+            decode_i32(horizon_y, "projection horizon")?,
+            decode_i32(clip_top, "projection clip top")?,
+            decode_i32(fade_invisible_y, "projection invisible fade")?,
+            decode_i32(fade_opaque_y, "projection opaque fade")?,
+            decode_i32(bottom_y, "projection bottom")?,
+            decode_color(color, "projection color")?,
+        )
+    })();
+    native_status(result)
+}
+
+unsafe extern "C" fn native_canvas_draw_projected_text(
+    handle: ClObject,
+    source_y: ClObject,
+) -> ClObject {
+    let result = (|| {
+        canvas::draw_projected_text(
+            decode_u32(handle, "projected text mask handle")?,
+            decode_i32(source_y, "projected text source y")?,
+        )
+    })();
+    native_status(result)
+}
+
+unsafe extern "C" fn native_text_mask_clear() -> ClObject {
+    canvas::clear_text_masks();
+    unsafe { ecl_make_integer(1) }
+}
+
 unsafe extern "C" fn native_raster_clear() -> ClObject {
     canvas::clear_rasters();
     unsafe { ecl_make_integer(1) }
@@ -383,6 +497,29 @@ unsafe extern "C" fn native_raster_load_png(
         )
     })();
     native_handle(result)
+}
+
+unsafe extern "C" fn native_read_regular_file(
+    path: ClObject,
+    minimum_bytes: ClObject,
+    maximum_bytes: ClObject,
+) -> ClObject {
+    let result = (|| {
+        let minimum_bytes = decode_u32(minimum_bytes, "minimum regular file bytes")?;
+        let maximum_bytes = decode_u32(maximum_bytes, "maximum regular file bytes")?;
+        if minimum_bytes > maximum_bytes || maximum_bytes > MAXIMUM_REGULAR_FILE_BYTES {
+            return Err(format!(
+                "regular file byte bounds must not exceed {MAXIMUM_REGULAR_FILE_BYTES}"
+            ));
+        }
+        regular_file::read_regular(
+            &decode_path(path, "regular file path")?,
+            u64::from(minimum_bytes),
+            u64::from(maximum_bytes),
+            "file",
+        )
+    })();
+    native_optional_string(result)
 }
 
 unsafe extern "C" fn native_canvas_draw_raster(
@@ -550,6 +687,23 @@ fn native_handle(result: Result<u32, String>) -> ClObject {
     unsafe { ecl_make_integer(handle) }
 }
 
+fn native_optional_string(result: Result<Option<Vec<u8>>, String>) -> ClObject {
+    match result {
+        Ok(Some(value)) => {
+            let Ok(length) = ClFixnum::try_from(value.len()) else {
+                eprintln!("retrodeck: regular file is too large for ECL");
+                return ECL_NIL;
+            };
+            unsafe { ecl_make_simple_base_string(value.as_ptr().cast(), length) }
+        }
+        Ok(None) => ECL_NIL,
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            ECL_NIL
+        }
+    }
+}
+
 fn make_fixnum_list(values: &[ClFixnum]) -> ClObject {
     let mut list = ECL_NIL;
     for value in values.iter().rev() {
@@ -568,7 +722,7 @@ fn c_string(value: &str) -> Result<CString, String> {
     CString::new(value).map_err(|_| "an internal ECL name contains NUL".to_owned())
 }
 
-fn decode_path(object: ClObject, name: &str) -> Result<PathBuf, String> {
+fn decode_base_string(object: ClObject, name: &str) -> Result<Vec<u8>, String> {
     let length = unsafe { ecl_length(object) };
     if length < 0 {
         return Err(format!("{name} has an invalid length"));
@@ -577,11 +731,15 @@ fn decode_path(object: ClObject, name: &str) -> Result<PathBuf, String> {
     if pointer.is_null() {
         return Err(format!("{name} is unavailable"));
     }
-    let bytes = unsafe { std::slice::from_raw_parts(pointer, length as usize) };
+    Ok(unsafe { std::slice::from_raw_parts(pointer, length as usize) }.to_vec())
+}
+
+fn decode_path(object: ClObject, name: &str) -> Result<PathBuf, String> {
+    let bytes = decode_base_string(object, name)?;
     if bytes.contains(&0) {
         return Err(format!("{name} cannot contain NUL"));
     }
-    Ok(PathBuf::from(OsStr::from_bytes(bytes)))
+    Ok(PathBuf::from(OsStr::from_bytes(&bytes)))
 }
 
 fn decode_fixnum(object: ClObject) -> Option<ClFixnum> {
@@ -592,6 +750,11 @@ fn decode_fixnum(object: ClObject) -> Option<ClFixnum> {
 fn decode_i32(object: ClObject, name: &str) -> Result<c_int, String> {
     let value = decode_fixnum(object).ok_or_else(|| format!("{name} must be an integer"))?;
     c_int::try_from(value).map_err(|_| format!("{name} is out of range"))
+}
+
+fn decode_i64(object: ClObject, name: &str) -> Result<i64, String> {
+    let value = decode_fixnum(object).ok_or_else(|| format!("{name} must be an integer"))?;
+    i64::try_from(value).map_err(|_| format!("{name} is out of range"))
 }
 
 fn decode_u32(object: ClObject, name: &str) -> Result<u32, String> {

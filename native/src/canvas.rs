@@ -1,4 +1,8 @@
-use crate::{font, raster::Raster};
+use crate::{
+    font,
+    projection::{Projection, TextMask},
+    raster::Raster,
+};
 use std::cell::RefCell;
 use std::path::Path;
 use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
@@ -9,6 +13,8 @@ pub const HEIGHT: u32 = 480;
 struct Canvas {
     pixmap: Pixmap,
     rasters: Vec<Raster>,
+    text_masks: Vec<TextMask>,
+    projection: Option<Projection>,
 }
 
 impl Canvas {
@@ -18,6 +24,8 @@ impl Canvas {
         Self {
             pixmap,
             rasters: Vec::new(),
+            text_masks: Vec::new(),
+            projection: None,
         }
     }
 
@@ -67,6 +75,42 @@ impl Canvas {
 
     fn clear_rasters(&mut self) {
         self.rasters.clear();
+    }
+
+    fn store_text_mask(&mut self, mask: TextMask) -> Result<u32, String> {
+        let handle = u32::try_from(self.text_masks.len() + 1)
+            .map_err(|_| "native text mask handle space is exhausted".to_owned())?;
+        self.text_masks.push(mask);
+        Ok(handle)
+    }
+
+    fn clear_text_masks(&mut self) {
+        self.text_masks.clear();
+        self.projection = None;
+    }
+
+    fn configure_projection(&mut self, projection: Projection) {
+        self.projection = Some(projection);
+    }
+
+    fn draw_projected_text(&mut self, handle: u32, source_y: i32) -> Result<(), String> {
+        let index = handle
+            .checked_sub(1)
+            .ok_or_else(|| "native text mask handle must be positive".to_owned())?;
+        let mask = self
+            .text_masks
+            .get(index as usize)
+            .ok_or_else(|| format!("native text mask handle {handle} is unavailable"))?;
+        let projection = self
+            .projection
+            .as_ref()
+            .ok_or_else(|| "native text projection is not configured".to_owned())?;
+        mask.draw(
+            self.pixmap.data_mut(),
+            (WIDTH, HEIGHT),
+            source_y,
+            projection,
+        )
     }
 
     fn draw_raster(
@@ -134,6 +178,53 @@ pub fn draw_glyph(x: i32, y: i32, character: u8, scale: u32, color: u32) {
             .borrow_mut()
             .draw_glyph(x, y, character, scale, color);
     });
+}
+
+pub fn load_text_mask(text: &[u8], scale: u32) -> Result<u32, String> {
+    let mask = TextMask::new(text, scale, (WIDTH, HEIGHT))?;
+    CANVAS.with(|canvas| canvas.borrow_mut().store_text_mask(mask))
+}
+
+pub fn clear_text_masks() {
+    CANVAS.with(|canvas| canvas.borrow_mut().clear_text_masks());
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn configure_projection(
+    elapsed_ms: i64,
+    speed_numerator: u32,
+    speed_denominator: u32,
+    cycle: u32,
+    camera_distance: u32,
+    maximum_depth: u32,
+    horizon_y: i32,
+    clip_top: i32,
+    fade_invisible_y: i32,
+    fade_opaque_y: i32,
+    bottom_y: i32,
+    color: u32,
+) -> Result<(), String> {
+    let projection = Projection::new(
+        elapsed_ms,
+        speed_numerator,
+        speed_denominator,
+        cycle,
+        camera_distance,
+        maximum_depth,
+        horizon_y,
+        clip_top,
+        fade_invisible_y,
+        fade_opaque_y,
+        bottom_y,
+        color,
+        HEIGHT,
+    )?;
+    CANVAS.with(|canvas| canvas.borrow_mut().configure_projection(projection));
+    Ok(())
+}
+
+pub fn draw_projected_text(handle: u32, source_y: i32) -> Result<(), String> {
+    CANVAS.with(|canvas| canvas.borrow_mut().draw_projected_text(handle, source_y))
 }
 
 pub fn load_cover_raster(path: &Path, background: u32) -> Result<u32, String> {

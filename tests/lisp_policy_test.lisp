@@ -17,6 +17,15 @@
 (defparameter *canvas-glyph-calls* nil)
 (defparameter *canvas-fill-status* 1)
 (defparameter *canvas-fill-arguments* nil)
+(defparameter *projection-status* 1)
+(defparameter *projection-arguments* nil)
+(defparameter *projected-text-status* 1)
+(defparameter *projected-text-arguments* nil)
+(defparameter *text-mask-result* 0)
+(defparameter *text-mask-arguments* nil)
+(defparameter *text-mask-clear-count* 0)
+(defparameter *regular-file-result* nil)
+(defparameter *regular-file-arguments* nil)
 (defparameter *canvas-fill-calls* nil)
 (defparameter *canvas-raster-status* 1)
 (defparameter *canvas-raster-arguments* nil)
@@ -55,7 +64,9 @@
   (:export #:abi-version
            #:audio-active-p
            #:canvas-clear
+           #:canvas-configure-projection
            #:canvas-draw-glyph
+           #:canvas-draw-projected-text
            #:canvas-draw-raster
            #:canvas-fill-rect
            #:evdev-next-touch
@@ -72,7 +83,10 @@
            #:raster-clear
            #:raster-load-cover
            #:raster-load-png
+           #:read-regular-file
            #:stop-audio
+           #:text-mask-clear
+           #:text-mask-load
            #:wayland-close
            #:wayland-dispatch
            #:wayland-next-touch
@@ -83,7 +97,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 8)
+      (lambda () 9)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -102,7 +116,17 @@
         (when *record-interaction*
           (push :render *interaction-trace*))
         *canvas-clear-status*)
-      (symbol-function (find-symbol "CANVAS-DRAW-GLYPH" "RETRODECK.NATIVE"))
+      (symbol-function (find-symbol "CANVAS-CONFIGURE-PROJECTION"
+                                    "RETRODECK.NATIVE"))
+       (lambda (&rest arguments)
+         (setf *projection-arguments* arguments)
+         *projection-status*)
+       (symbol-function (find-symbol "CANVAS-DRAW-PROJECTED-TEXT"
+                                    "RETRODECK.NATIVE"))
+       (lambda (&rest arguments)
+         (setf *projected-text-arguments* arguments)
+         *projected-text-status*)
+       (symbol-function (find-symbol "CANVAS-DRAW-GLYPH" "RETRODECK.NATIVE"))
       (lambda (&rest arguments)
         (setf *canvas-glyph-arguments* arguments)
         (push arguments *canvas-glyph-calls*)
@@ -129,7 +153,17 @@
          (setf *raster-png-arguments* arguments)
          (push arguments *raster-png-calls*)
          *raster-png-result*)
-       (symbol-function (find-symbol "EVDEV-TOUCH-OPEN" "RETRODECK.NATIVE"))
+       (symbol-function (find-symbol "READ-REGULAR-FILE" "RETRODECK.NATIVE"))
+        (lambda (&rest arguments)
+          (setf *regular-file-arguments* arguments)
+          *regular-file-result*)
+        (symbol-function (find-symbol "TEXT-MASK-CLEAR" "RETRODECK.NATIVE"))
+        (lambda () (incf *text-mask-clear-count*) 1)
+        (symbol-function (find-symbol "TEXT-MASK-LOAD" "RETRODECK.NATIVE"))
+        (lambda (&rest arguments)
+          (setf *text-mask-arguments* arguments)
+          *text-mask-result*)
+        (symbol-function (find-symbol "EVDEV-TOUCH-OPEN" "RETRODECK.NATIVE"))
          (lambda () *evdev-open-status*)
          (symbol-function (find-symbol "EVDEV-TOUCH-CLOSE" "RETRODECK.NATIVE"))
          (lambda () (incf *evdev-close-count*) 0)
@@ -264,6 +298,43 @@
 (assert (signals-type-error-p
          (lambda () (retrodeck:fill-canvas-rect 0 0 #x100000000 1 0))))
 (assert (null *canvas-fill-arguments*))
+
+(setf *regular-file-result* "project\trole\tlicense\n")
+(assert (string= (retrodeck:read-bounded-regular-file
+                  "/tmp/credits.tsv" 1 32768)
+                 *regular-file-result*))
+(assert (equal *regular-file-arguments* '("/tmp/credits.tsv" 1 32768)))
+(assert (signals-type-error-p
+         (lambda () (retrodeck:read-bounded-regular-file "/tmp/x" -1 2))))
+(assert (signals-type-error-p
+         (lambda ()
+           (retrodeck:read-bounded-regular-file "/tmp/x" 1 4194305))))
+
+(setf *text-mask-result* 17)
+(assert (= (retrodeck:load-text-mask "HH" 4) 17))
+(assert (equal *text-mask-arguments* '("HH" 4)))
+(assert (retrodeck:configure-text-projection
+         2000 1 20 8044 420 4000 56 72 104 210 480 #xffffaf))
+(assert (equal *projection-arguments*
+               '(2000 1 20 8044 420 4000 56 72 104 210 480 #xffffaf)))
+(assert (retrodeck:draw-projected-text 17 44))
+(assert (equal *projected-text-arguments* '(17 44)))
+(assert (retrodeck:clear-text-mask-cache))
+(assert (= *text-mask-clear-count* 1))
+(setf *projection-status* 0
+      *projected-text-status* 0)
+(assert (not (retrodeck:configure-text-projection
+              0 1 20 4044 420 4000 56 72 104 210 480 0)))
+(assert (not (retrodeck:draw-projected-text 17 0)))
+(setf *projection-status* 1
+      *projected-text-status* 1)
+(dolist (function
+         (list (lambda () (retrodeck:load-text-mask "" 0))
+               (lambda ()
+                 (retrodeck:configure-text-projection
+                  -1 1 20 4044 420 4000 56 72 104 210 480 0))
+               (lambda () (retrodeck:draw-projected-text 0 0))))
+  (assert (signals-type-error-p function)))
 
 (setf *raster-cover-result* 17)
 (assert (= (retrodeck:load-cover-raster #P"/tmp/cover.png" #x5f87ff) 17))

@@ -897,7 +897,8 @@
           cp ${./assets/settings-cog/gear-knekko-09.png} settings-icon.png
           substitute ${./tests/native_ecl_smoke.lisp.in} smoke.lisp \
             --subst-var-by startup "$PWD/startup.lisp" \
-            --subst-var-by settings_icon "$PWD/settings-icon.png"
+            --subst-var-by settings_icon "$PWD/settings-icon.png" \
+            --subst-var-by credits ${./deploy/menu/credits.tsv}
           ECLDIR=${eclArm}/lib/ecl/ \
             ${pkgs.qemu-user}/bin/qemu-arm \
             ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \
