@@ -17,15 +17,16 @@ details for development.
 
 ## Prerequisites
 
-Install Nix with flakes enabled. Host tests also require a C and C++ compiler,
-`pkg-config`, libpng and Wayland development headers, `wayland-scanner`, and
-ImageMagick.
+Install Nix with flakes enabled. Host tests also require C, C++, Rust, and
+Common Lisp compilers, `pkg-config`, libpng and Wayland development headers,
+`wayland-scanner`, and ImageMagick.
 
 On Debian or Ubuntu:
 
 ```sh
 sudo apt-get install \
-  build-essential imagemagick libpng-dev libwayland-dev pkg-config
+  build-essential cargo imagemagick libpng-dev libwayland-dev pkg-config \
+  rustc sbcl
 ```
 
 Then clone the private repository:
@@ -98,10 +99,11 @@ It also loads an optional `local.lisp` beside itself, allowing device-local
 policy changes without rebuilding Rust. Deployment updates `startup.lisp` but
 leaves an existing `local.lisp` untouched.
 
-Build the host with:
+Build the host and run its focused mechanism tests with:
 
 ```sh
 nix build --no-link --print-out-paths .#retrodeck-native
+cargo test --manifest-path native/Cargo.toml --locked --lib
 ```
 
 After installation, run the same ARM smoke test used during activation with:
@@ -130,7 +132,8 @@ tests/verify-arm-builds.sh
 
 This rejects a missing executable, a non-ARM or dynamically linked binary, a
 Nix store reference, an incomplete ECL or fbterm runtime, and a changed CC0
-music payload.
+music payload. It also runs the ARM host under QEMU to exercise the embedded
+ECL callback and audio-worker lifecycle.
 
 ## Run the host test suite
 
@@ -141,10 +144,11 @@ clean:
 tests/run-host-tests.sh
 ```
 
-It covers the NES mixer, APU noise, SRAM codec, controller and keyboard input,
-dashboard geometry and behavior, ROM catalog, cover cache, Wi-Fi profile
-helper, rlwrap-backed terminal lifecycle, shared framebuffer/audio runtime,
-timer configuration, and CHIP-8 core.
+It covers Lisp menu-sound policy, the Rust menu-tone renderer, NES mixer, APU
+noise, SRAM codec, controller and keyboard input, dashboard geometry and
+behavior, ROM catalog, cover cache, Wi-Fi profile helper, rlwrap-backed
+terminal lifecycle, shared framebuffer/audio runtime, timer configuration, and
+CHIP-8 core.
 
 The suite also runs the uploader's Go tests for authentication, request
 boundaries, ROM validation, atomic storage, and the Paper UI contract.
