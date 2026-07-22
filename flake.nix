@@ -44,12 +44,16 @@
         fenix.packages.${system}.targets.armv7-unknown-linux-gnueabihf.stable.rust-std
       ];
       nativeSources = pkgs.lib.fileset.toSource {
-        root = ./native;
+        root = ./.;
         fileset = pkgs.lib.fileset.unions [
           ./native/Cargo.lock
           ./native/Cargo.toml
           ./native/src
+          ./protocol/deck-widget-v1.xml
         ];
+      };
+      nativeCargoDeps = pkgs.rustPlatform.importCargoLock {
+        lockFile = ./native/Cargo.lock;
       };
 
       waylandNativeInputs = [ pkgs.wayland-scanner ];
@@ -138,8 +142,11 @@
           version = "0.1.0";
 
           src = nativeSources;
+          cargoDeps = nativeCargoDeps;
+          cargoRoot = "native";
           nativeBuildInputs = [
             rustToolchain
+            pkgs.rustPlatform.cargoSetupHook
             pkgsCross.stdenv.cc
             pkgs.nukeReferences
           ];
@@ -148,6 +155,7 @@
 
           buildPhase = ''
             runHook preBuild
+            cd native
             export CARGO_HOME=$TMPDIR/cargo
             export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf
             export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc"
