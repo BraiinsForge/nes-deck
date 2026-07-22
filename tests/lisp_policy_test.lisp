@@ -816,7 +816,7 @@
 (let* ((games '((:id "alpha" :title "ALPHA" :system :nes :color #x5f87ff)
                 (:id "beta" :title "BETA" :system :nes :color #xafd75f)
                 (:id "long-title" :title "A VERY LONG FIXTURE GAME TITLE"
-                 :system :nes :color #xffffaf)
+                 :system :nes :color #xffd700)
                 (:id "delta" :title "DELTA" :system :nes :color #xd75f5f)
                 (:id "gb" :title "GB FIXTURE" :system :gb :color #x87af87)
                 (:id "gbc" :title "GBC FIXTURE" :system :gbc :color #xecb6e7)
