@@ -3,6 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     fceumm-src = {
       url = "github:libretro/libretro-fceumm/3a84a6fd0ba20dd4877c06b1d58741172148395f";
       flake = false;
@@ -26,12 +30,27 @@
   };
 
   outputs =
-    { self, nixpkgs, fceumm-src, gambatte-src, fuse-src, c-octo-src, lua-src }:
+    { self, nixpkgs, fenix, fceumm-src, gambatte-src, fuse-src, c-octo-src, lua-src }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       pkgsCross = pkgs.pkgsCross.armv7l-hf-multiplatform;
       staticCross = pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsStatic;
+      eclArm = import ./nix/ecl-arm-static.nix { };
+      rustToolchain = fenix.packages.${system}.combine [
+        fenix.packages.${system}.stable.cargo
+        fenix.packages.${system}.stable.rustc
+        fenix.packages.${system}.stable.rust-std
+        fenix.packages.${system}.targets.armv7-unknown-linux-gnueabihf.stable.rust-std
+      ];
+      nativeSources = pkgs.lib.fileset.toSource {
+        root = ./native;
+        fileset = pkgs.lib.fileset.unions [
+          ./native/Cargo.lock
+          ./native/Cargo.toml
+          ./native/src
+        ];
+      };
 
       waylandNativeInputs = [ pkgs.wayland-scanner ];
       waylandStaticInputs = [ staticCross.wayland staticCross.libffi ];
@@ -114,6 +133,53 @@
     in
     {
       packages.${system} = {
+        retrodeck-native = pkgs.stdenvNoCC.mkDerivation {
+          pname = "retrodeck-native";
+          version = "0.1.0";
+
+          src = nativeSources;
+          nativeBuildInputs = [
+            rustToolchain
+            pkgsCross.stdenv.cc
+            pkgs.nukeReferences
+          ];
+          buildInputs = [ pkgsCross.glibc.static ];
+          allowedReferences = [ ];
+
+          buildPhase = ''
+            runHook preBuild
+            export CARGO_HOME=$TMPDIR/cargo
+            export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf
+            export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc"
+            export RUSTFLAGS="\
+              -C target-feature=+crt-static \
+              -C link-arg=-static \
+              -L native=${eclArm.dev}/lib \
+              -L native=${pkgsCross.glibc.static}/lib \
+              -l static=ecl \
+              -l static=eclgc \
+              -l static=gmp \
+              -l dl \
+              -l m"
+            cargo build --release --locked --offline
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            install -Dm755 \
+              target/armv7-unknown-linux-gnueabihf/release/retrodeck-native \
+              $out/bin/retrodeck-native
+            nuke-refs $out/bin/retrodeck-native
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Rust mechanism host for the RetroDeck Lisp orchestrator";
+            platforms = [ system ];
+          };
+        };
+
         runtime-licenses = runtimeLicenses;
 
         nes-deck = pkgsCross.stdenv.mkDerivation {

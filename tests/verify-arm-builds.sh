@@ -64,6 +64,7 @@ verify_package() {
   echo "$attribute: OK"
 }
 
+verify_package retrodeck-native bin/retrodeck-native
 verify_package nes-deck bin/nes-deck
 verify_package gb-deck bin/gb-deck
 verify_package zx-deck bin/zx-deck
