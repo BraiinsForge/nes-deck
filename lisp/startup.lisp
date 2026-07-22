@@ -4,7 +4,14 @@
            #:audio-active-p
            #:finish-audio
            #:play-tones
-           #:stop-audio))
+           #:stop-audio
+           #:wayland-close
+           #:wayland-dispatch
+           #:wayland-next-touch
+           #:wayland-open-widget
+           #:wayland-present-solid
+           #:wayland-shutdown-p
+           #:wayland-size))
 
 (defpackage #:retrodeck
   (:use #:cl)
@@ -13,20 +20,34 @@
                 #:audio-active-p
                 #:finish-audio
                 #:play-tones
-                #:stop-audio)
+                #:stop-audio
+                #:wayland-close
+                #:wayland-dispatch
+                #:wayland-next-touch
+                #:wayland-open-widget
+                #:wayland-present-solid
+                #:wayland-shutdown-p
+                #:wayland-size)
   (:export #:*menu-sound-cues*
            #:*menu-sound-input-tail-ms*
+           #:close-wayland
+           #:current-wayland-size
+           #:dispatch-wayland
            #:finish-menu-sound
            #:main
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
            #:menu-sound-notes
+           #:next-wayland-touch
+           #:open-wayland-widget
            #:play-menu-sound
-           #:stop-menu-sound))
+           #:present-wayland-solid
+           #:stop-menu-sound
+           #:wayland-shutdown-requested-p))
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 2)
+(defconstant +native-abi-version+ 3)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -84,6 +105,35 @@
   (finish-audio)
   (setf *menu-sound-input-until-ms* 0)
   t)
+
+(defun open-wayland-widget ()
+  (= (wayland-open-widget) 1))
+
+(defun close-wayland ()
+  (wayland-close)
+  t)
+
+(defun present-wayland-solid (color)
+  (check-type color (integer 0 16777215))
+  (= (wayland-present-solid color) 1))
+
+(defun dispatch-wayland (&optional (timeout-ms 0))
+  (check-type timeout-ms (integer 0 *))
+  (let ((dispatched (wayland-dispatch timeout-ms)))
+    (unless (minusp dispatched)
+      dispatched)))
+
+(defun next-wayland-touch ()
+  (let ((report (wayland-next-touch)))
+    (when report
+      (destructuring-bind (x y down pressed released) report
+        (list x y (plusp down) (plusp pressed) (plusp released))))))
+
+(defun current-wayland-size ()
+  (wayland-size))
+
+(defun wayland-shutdown-requested-p ()
+  (= (wayland-shutdown-p) 1))
 
 (defun main ()
   (unless (= (abi-version) +native-abi-version+)

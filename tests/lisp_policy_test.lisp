@@ -8,6 +8,15 @@
 (defparameter *active-status* 0)
 (defparameter *stop-count* 0)
 (defparameter *finish-count* 0)
+(defparameter *wayland-open-status* 1)
+(defparameter *wayland-close-count* 0)
+(defparameter *wayland-present-status* 1)
+(defparameter *wayland-present-color* nil)
+(defparameter *wayland-dispatch-result* 0)
+(defparameter *wayland-dispatch-timeout* nil)
+(defparameter *wayland-touch* nil)
+(defparameter *wayland-size* nil)
+(defparameter *wayland-shutdown-status* 0)
 
 (defpackage #:retrodeck.native
   (:use)
@@ -15,10 +24,17 @@
            #:audio-active-p
            #:finish-audio
            #:play-tones
-           #:stop-audio))
+           #:stop-audio
+           #:wayland-close
+           #:wayland-dispatch
+           #:wayland-next-touch
+           #:wayland-open-widget
+           #:wayland-present-solid
+           #:wayland-shutdown-p
+           #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 2)
+      (lambda () 3)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -28,7 +44,25 @@
       (symbol-function (find-symbol "STOP-AUDIO" "RETRODECK.NATIVE"))
       (lambda () (incf *stop-count*) 0)
       (symbol-function (find-symbol "FINISH-AUDIO" "RETRODECK.NATIVE"))
-      (lambda () (incf *finish-count*) 0))
+      (lambda () (incf *finish-count*) 0)
+      (symbol-function (find-symbol "WAYLAND-OPEN-WIDGET" "RETRODECK.NATIVE"))
+      (lambda () *wayland-open-status*)
+      (symbol-function (find-symbol "WAYLAND-CLOSE" "RETRODECK.NATIVE"))
+      (lambda () (incf *wayland-close-count*) 0)
+      (symbol-function (find-symbol "WAYLAND-PRESENT-SOLID" "RETRODECK.NATIVE"))
+      (lambda (color)
+        (setf *wayland-present-color* color)
+        *wayland-present-status*)
+      (symbol-function (find-symbol "WAYLAND-DISPATCH" "RETRODECK.NATIVE"))
+      (lambda (timeout-ms)
+        (setf *wayland-dispatch-timeout* timeout-ms)
+        *wayland-dispatch-result*)
+      (symbol-function (find-symbol "WAYLAND-NEXT-TOUCH" "RETRODECK.NATIVE"))
+      (lambda () *wayland-touch*)
+      (symbol-function (find-symbol "WAYLAND-SIZE" "RETRODECK.NATIVE"))
+      (lambda () *wayland-size*)
+      (symbol-function (find-symbol "WAYLAND-SHUTDOWN-P" "RETRODECK.NATIVE"))
+      (lambda () *wayland-shutdown-status*))
 
 (load (truename (merge-pathnames "../lisp/startup.lisp" *load-truename*))
       :verbose nil :print nil)
@@ -91,5 +125,28 @@
 (assert (retrodeck:finish-menu-sound))
 (assert (= *finish-count* 1))
 (assert (= retrodeck::*menu-sound-input-until-ms* 0))
+
+(assert (retrodeck:open-wayland-widget))
+(assert (retrodeck:close-wayland))
+(assert (= *wayland-close-count* 1))
+(assert (retrodeck:present-wayland-solid #x123456))
+(assert (= *wayland-present-color* #x123456))
+
+(setf *wayland-dispatch-result* 4)
+(assert (= (retrodeck:dispatch-wayland 25) 4))
+(assert (= *wayland-dispatch-timeout* 25))
+(setf *wayland-dispatch-result* -1)
+(assert (null (retrodeck:dispatch-wayland)))
+
+(setf *wayland-touch* '(1279 0 1 0 0))
+(assert (equal (retrodeck:next-wayland-touch)
+               '(1279 0 t nil nil)))
+(setf *wayland-touch* nil
+      *wayland-size* '(1280 480))
+(assert (null (retrodeck:next-wayland-touch)))
+(assert (equal (retrodeck:current-wayland-size) '(1280 480)))
+(assert (not (retrodeck:wayland-shutdown-requested-p)))
+(setf *wayland-shutdown-status* 1)
+(assert (retrodeck:wayland-shutdown-requested-p))
 
 (format t "Lisp policy tests passed.~%")

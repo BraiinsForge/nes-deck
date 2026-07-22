@@ -1,4 +1,4 @@
-use retrodeck_native::audio;
+use retrodeck_native::{audio, wayland};
 use std::env;
 use std::ffi::{CString, c_char, c_int, c_void};
 use std::mem;
@@ -10,13 +10,14 @@ use std::ptr;
 type ClObject = *mut c_void;
 type ClFixnum = isize;
 type EclFixedFunction = unsafe extern "C" fn() -> ClObject;
+type EclOneArgumentFunction = unsafe extern "C" fn(ClObject) -> ClObject;
 type EclFiveArgumentFunction =
     unsafe extern "C" fn(ClObject, ClObject, ClObject, ClObject, ClObject) -> ClObject;
 
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 2;
+const ABI_VERSION: ClFixnum = 3;
 
 const LOAD_STARTUP: &str = r#"
 (handler-case
@@ -45,6 +46,7 @@ unsafe extern "C" {
     fn ecl_make_symbol(name: *const c_char, package: *const c_char) -> ClObject;
     fn ecl_def_c_function(symbol: ClObject, function: EclFixedFunction, arguments: c_int);
     fn ecl_make_integer(value: ClFixnum) -> ClObject;
+    fn ecl_cons(car: ClObject, cdr: ClObject) -> ClObject;
     fn ecl_make_simple_base_string(value: *const c_char, length: ClFixnum) -> ClObject;
     fn ecl_find_package(name: *const c_char) -> ClObject;
     fn ecl_make_package(
@@ -103,10 +105,41 @@ impl Ecl {
             ("AUDIO-ACTIVE-P", native_audio_active as EclFixedFunction),
             ("STOP-AUDIO", native_stop_audio as EclFixedFunction),
             ("FINISH-AUDIO", native_finish_audio as EclFixedFunction),
+            (
+                "WAYLAND-OPEN-WIDGET",
+                native_wayland_open_widget as EclFixedFunction,
+            ),
+            ("WAYLAND-CLOSE", native_wayland_close as EclFixedFunction),
+            (
+                "WAYLAND-NEXT-TOUCH",
+                native_wayland_next_touch as EclFixedFunction,
+            ),
+            ("WAYLAND-SIZE", native_wayland_size as EclFixedFunction),
+            (
+                "WAYLAND-SHUTDOWN-P",
+                native_wayland_shutdown as EclFixedFunction,
+            ),
         ] {
             let name = c_string(name)?;
             let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
             unsafe { ecl_def_c_function(symbol, function, 0) };
+        }
+
+        for (name, function) in [
+            (
+                "WAYLAND-PRESENT-SOLID",
+                native_wayland_present_solid as EclOneArgumentFunction,
+            ),
+            (
+                "WAYLAND-DISPATCH",
+                native_wayland_dispatch as EclOneArgumentFunction,
+            ),
+        ] {
+            let name = c_string(name)?;
+            let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
+            let callback =
+                unsafe { mem::transmute::<EclOneArgumentFunction, EclFixedFunction>(function) };
+            unsafe { ecl_def_c_function(symbol, callback, 1) };
         }
         Ok(())
     }
@@ -140,6 +173,8 @@ impl Ecl {
 
 impl Drop for Ecl {
     fn drop(&mut self) {
+        wayland::close();
+        audio::stop();
         unsafe { cl_shutdown() };
     }
 }
@@ -189,6 +224,96 @@ unsafe extern "C" fn native_finish_audio() -> ClObject {
     unsafe { ecl_make_integer(0) }
 }
 
+unsafe extern "C" fn native_wayland_open_widget() -> ClObject {
+    native_status(wayland::open_widget())
+}
+
+unsafe extern "C" fn native_wayland_close() -> ClObject {
+    wayland::close();
+    unsafe { ecl_make_integer(0) }
+}
+
+unsafe extern "C" fn native_wayland_present_solid(color: ClObject) -> ClObject {
+    let result = (|| {
+        let color = decode_u32(color, "Wayland solid color")?;
+        if color > 0x00ff_ffff {
+            return Err("Wayland solid color is out of range".to_owned());
+        }
+        wayland::present_solid(color)
+    })();
+    native_status(result)
+}
+
+unsafe extern "C" fn native_wayland_dispatch(timeout_ms: ClObject) -> ClObject {
+    let result = (|| {
+        let timeout_ms = decode_u32(timeout_ms, "Wayland dispatch timeout")?;
+        wayland::dispatch(timeout_ms)
+    })();
+    let value = match result {
+        Ok(count) => match ClFixnum::try_from(count) {
+            Ok(count) => count,
+            Err(_) => {
+                eprintln!("retrodeck: Wayland dispatch count is out of range");
+                -1
+            }
+        },
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            -1
+        }
+    };
+    unsafe { ecl_make_integer(value) }
+}
+
+unsafe extern "C" fn native_wayland_next_touch() -> ClObject {
+    let Some(report) = wayland::next_touch() else {
+        return ECL_NIL;
+    };
+    make_fixnum_list(&[
+        report.x as ClFixnum,
+        report.y as ClFixnum,
+        boolean_fixnum(report.down),
+        boolean_fixnum(report.pressed),
+        boolean_fixnum(report.released),
+    ])
+}
+
+unsafe extern "C" fn native_wayland_size() -> ClObject {
+    let Some((width, height)) = wayland::size() else {
+        return ECL_NIL;
+    };
+    make_fixnum_list(&[width as ClFixnum, height as ClFixnum])
+}
+
+unsafe extern "C" fn native_wayland_shutdown() -> ClObject {
+    unsafe { ecl_make_integer(boolean_fixnum(wayland::shutdown_requested())) }
+}
+
+fn native_status(result: Result<(), String>) -> ClObject {
+    let status = match result {
+        Ok(()) => 1,
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            0
+        }
+    };
+    unsafe { ecl_make_integer(status) }
+}
+
+fn make_fixnum_list(values: &[ClFixnum]) -> ClObject {
+    let mut list = ECL_NIL;
+    for value in values.iter().rev() {
+        unsafe {
+            list = ecl_cons(ecl_make_integer(*value), list);
+        }
+    }
+    list
+}
+
+fn boolean_fixnum(value: bool) -> ClFixnum {
+    if value { 1 } else { 0 }
+}
+
 fn c_string(value: &str) -> Result<CString, String> {
     CString::new(value).map_err(|_| "an internal ECL name contains NUL".to_owned())
 }
@@ -201,6 +326,11 @@ fn decode_fixnum(object: ClObject) -> Option<ClFixnum> {
 fn decode_i32(object: ClObject, name: &str) -> Result<c_int, String> {
     let value = decode_fixnum(object).ok_or_else(|| format!("{name} must be an integer"))?;
     c_int::try_from(value).map_err(|_| format!("{name} is out of range"))
+}
+
+fn decode_u32(object: ClObject, name: &str) -> Result<u32, String> {
+    let value = decode_fixnum(object).ok_or_else(|| format!("{name} must be an integer"))?;
+    u32::try_from(value).map_err(|_| format!("{name} is out of range"))
 }
 
 fn decode_exit_code(object: ClObject) -> Result<u8, String> {
@@ -224,9 +354,7 @@ fn run() -> Result<u8, String> {
     let ecl = Ecl::boot()?;
     ecl.register_primitives()?;
     ecl.load(&startup)?;
-    let result = ecl.run();
-    audio::stop();
-    result
+    ecl.run()
 }
 
 fn main() -> ExitCode {
