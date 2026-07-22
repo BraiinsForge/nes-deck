@@ -458,6 +458,54 @@ production lines, including the existing catalog compiler, and 8,013 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Dashboard Wi-Fi editor checkpoint
+
+Startup-loaded `wifi.lisp` now owns the exact editor labels, geometry, key rows,
+field limits, helper path, rendering, hit testing, editing state, validation,
+and save/back action plans. It preserves the 30-key alphabet layout, uppercase
+mode, 42-key symbol layout, active field borders, masked password tail, status
+and network footers, and every half-open control and key bound. Touch requires
+press and release over the same target. Menu controller and keyboard commands
+remain modal: only Back closes the editor.
+
+SSID and password edits retain the original 32- and 63-character limits and
+clear stale status after every accepted target, including no-op delete and
+full-field insertion. Save validation accepts only printable ASCII, requires an
+SSID of 1 through 32 characters and a password of 8 through 63 characters, and
+prepares the existing helper with exactly `ssid`, newline, password, newline on
+standard input. A successful completion clears the in-memory password and shows
+the deferred-use status; failure retains both fields and displays the helper
+error. Save always produces the Confirm cue, editing produces Next, and Back
+produces the original dashboard status and Back cue. Existing C++ remains
+responsible for helper execution until the full Lisp loop is integrated. The
+working C++ dashboard remains authoritative and deployed, native ABI 10 is
+unchanged, and terminal launch remains a later slice.
+
+The authoritative C++ renderer and ARM/ECL smoke test pin these frames:
+
+| Fixture | RGB565 FNV-1a hash |
+| --- | --- |
+| empty lowercase alphabet editor | `d6be2f43c4faf0e6` |
+| empty uppercase alphabet editor | `7682dc83b0062730` |
+| uppercase password field with `NETWORK` and masked `password` | `a5c18f4c41654088` |
+| symbol keyboard with the same populated fields | `f919741f85fe2c31` |
+
+Host tests, `nix flake check`, static ARM verification, complete deployment, and
+the Deck health check passed. With the C++ dashboard stopped under an automatic
+restore trap, each installed Lisp/native fixture validated its in-memory canvas
+hash, presented through fbdev, and produced a 1,638,400-byte stride-aware
+capture. Unrotating all 614,400 logical RGB565 pixels with
+`physical-row = 1279 - logical-x` and `physical-column = logical-y` reproduced
+all four hashes. Lowercase, uppercase, populated password, and symbol captures
+were inspected visually, then the normal C++ dashboard was restored healthy.
+Physical Wayland presentation remains blocked by the missing compositor
+firmware.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 6,462
+production lines, including the existing catalog compiler, and 8,641 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:
@@ -474,6 +522,8 @@ Established on 2026-07-22:
 - ABI 10 matched all six animated and reduced-motion credits frame hashes
   through the installed ARM/ECL and physical fbdev paths
 - ABI 10 matched all eight dashboard settings frame hashes through the
+  installed ARM/ECL and physical fbdev paths
+- ABI 10 matched all four dashboard Wi-Fi editor frame hashes through the
   installed ARM/ECL and physical fbdev paths
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
