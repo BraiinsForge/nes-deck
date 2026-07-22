@@ -115,9 +115,8 @@ details when they are needed for archaeology.
   audio failure as non-fatal so video and input remain usable.
 - Menu volume is stored from 0 through 100 in five-point steps and is passed to
   every child. Muting remembers the last audible level.
-- FCEUmm reports 48 kHz. The OSS device remains configured at its required
-  nominal 48 kHz while the runtime resamples to the measured 47,328-frame
-  application clock to avoid slowing emulation.
+- FCEUmm and its OSS stream use 48 kHz without an additional application-rate
+  correction.
 - Gambatte produces 32,768 Hz and is resampled to the Deck's verified 32 kHz
   OSS rate.
 - NES battery RAM is saved atomically beside the ROM as `.srm`. GB and GBC use

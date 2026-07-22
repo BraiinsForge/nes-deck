@@ -118,13 +118,7 @@ bool DeckReadVolumePercent(unsigned int *volume, std::string *error) {
 
 unsigned int DeckAudioOutputRate(unsigned int source_rate,
                                  unsigned int negotiated_rate) {
-  // The Deck's OSS bridge reports an exact 48 kHz stream, but live queue and
-  // frame-clock measurements show that it consumes about 47,328 mono
-  // application frames per second.  Sending all 48,000 blocks the emulator
-  // about 1.5 percent slow.  Resample to the measured application clock while
-  // leaving ALSA configured at its required nominal 48 kHz rate.
-  if (source_rate == 48000 && negotiated_rate == 48000)
-    return 47328;
+  (void)source_rate;
   return negotiated_rate;
 }
 
