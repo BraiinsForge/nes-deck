@@ -800,6 +800,66 @@ int main() {
              UINT64_C(0x65b48f5f3b66d535),
          "dashboard fixture keeps the complete reference frame");
 
+  std::string navigation_system = "nes";
+  size_t navigation_position = 0;
+  std::ostringstream navigation_trace;
+  render_menu(dashboard_fixture_games, navigation_system, navigation_position,
+              std::string(), &dashboard_fixture_canvas,
+              &dashboard_fixture_layout);
+  const auto append_navigation = [&](int pressed_x, int pressed_y,
+                                     int released_x, int released_y) {
+    const int pressed = target_at(dashboard_fixture_layout, pressed_x,
+                                  pressed_y);
+    const int released = target_at(dashboard_fixture_layout, released_x,
+                                   released_y);
+    bool rendered = false;
+    const char *cue = "none";
+    if (pressed == released && pressed >= MenuTargetSystemBase &&
+        pressed - MenuTargetSystemBase <
+            static_cast<int>(dashboard_fixture_layout.systems.size())) {
+      const std::string requested = dashboard_fixture_layout.systems[
+          static_cast<size_t>(pressed - MenuTargetSystemBase)];
+      const bool moved = requested != navigation_system;
+      navigation_system = requested;
+      navigation_position = 0;
+      rendered = true;
+      cue = moved ? "next" : "none";
+    } else if (pressed == released &&
+               (pressed == MenuTargetGamePrevious ||
+                pressed == MenuTargetGameNext) &&
+               !dashboard_fixture_layout.game_indices.empty()) {
+      const size_t count = dashboard_fixture_layout.game_indices.size();
+      navigation_position =
+          pressed == MenuTargetGamePrevious
+              ? (navigation_position == 0 ? count - 1
+                                          : navigation_position - 1)
+              : (navigation_position + 1) % count;
+      rendered = true;
+      cue = pressed == MenuTargetGamePrevious ? "previous" : "next";
+    }
+    if (rendered) {
+      render_menu(dashboard_fixture_games, navigation_system,
+                  navigation_position, std::string(),
+                  &dashboard_fixture_canvas, &dashboard_fixture_layout);
+    }
+    navigation_trace << navigation_system << '\t' << navigation_position
+                     << '\t' << (rendered ? 1 : 0) << '\t' << cue << '\t'
+                     << std::hex << canvas_hash(dashboard_fixture_canvas)
+                     << std::dec << '\n';
+  };
+  append_navigation(1084, 282, 1084, 282);
+  append_navigation(1084, 282, 196, 282);
+  append_navigation(1084, 282, 1084, 282);
+  append_navigation(346, 102, 346, 102);
+  append_navigation(346, 102, 346, 102);
+  expect(navigation_trace.str() ==
+             "nes\t1\t1\tnext\t9f7ec7647982e7bd\n"
+             "nes\t1\t0\tnone\t9f7ec7647982e7bd\n"
+             "nes\t2\t1\tnext\tde67cf4c35ff2b4d\n"
+             "gb\t0\t1\tnext\t4e9094bcf7a7f9e5\n"
+             "gb\t0\t1\tnone\t4e9094bcf7a7f9e5\n",
+         "dashboard navigation keeps the deterministic reference trace");
+
   CoverImage dashboard_fixture_cover;
   error.clear();
   expect(load_png_cover_image(settings_icon_path,

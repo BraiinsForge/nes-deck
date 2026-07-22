@@ -813,4 +813,51 @@
         *play-status* 1
         retrodeck::*menu-sound-input-until-ms* 0))
 
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes :color #x5f87ff)
+                (:id "beta" :title "BETA" :system :nes :color #xafd75f)
+                (:id "long-title" :title "A VERY LONG FIXTURE GAME TITLE"
+                 :system :nes :color #xffffaf)
+                (:id "delta" :title "DELTA" :system :nes :color #xd75f5f)
+                (:id "gb" :title "GB FIXTURE" :system :gb :color #x87af87)
+                (:id "gbc" :title "GBC FIXTURE" :system :gbc :color #xecb6e7)
+                (:id "zx" :title "ZX FIXTURE" :system :zx :color #x87afff)
+                (:id "chip8" :title "CHIP-8 FIXTURE" :system :chip8
+                 :color #xffffaf)
+                (:id "deck-fixture" :title "DECK FIXTURE" :system :deck
+                 :color #xff8700)))
+       (state (retrodeck:dashboard-initial-state games))
+       (layout (retrodeck:render-dashboard games :nes 0 ""))
+       (trace nil))
+  (labels ((trace-touch (pressed-x pressed-y released-x released-y)
+             (multiple-value-bind (pressed ignored)
+                 (retrodeck:dashboard-touch-transition
+                  state layout (list pressed-x pressed-y t t nil))
+               (declare (ignore ignored))
+               (multiple-value-bind (released effect)
+                   (retrodeck:dashboard-touch-transition
+                    pressed layout (list released-x released-y nil nil t))
+                 (setf state released)
+                 (when (getf effect :render)
+                   (setf layout
+                         (retrodeck:render-dashboard
+                          games (getf state :active-system)
+                          (getf state :game-position) (getf state :status))))
+                 (push (list (getf state :active-system)
+                             (getf state :game-position)
+                             (not (null (getf effect :render)))
+                             (getf effect :cue))
+                       trace)))))
+    (trace-touch 1084 282 1084 282)
+    (trace-touch 1084 282 196 282)
+    (trace-touch 1084 282 1084 282)
+    (trace-touch 346 102 346 102)
+    (trace-touch 346 102 346 102))
+  ;; Shared with the C++ reference trace and its per-frame RGB565 hashes.
+  (assert (equal (nreverse trace)
+                 '((:nes 1 t :next)
+                   (:nes 1 nil nil)
+                   (:nes 2 t :next)
+                   (:gb 0 t :next)
+                   (:gb 0 t nil)))))
+
 (format t "Lisp policy tests passed.~%")
