@@ -61,6 +61,8 @@ grep -Fq '[ -s /mnt/data/nes-deck/lisp/policy.lisp ]' "$remote_script" ||
   fail 'remote health check does not verify the editable Lisp policy'
 grep -Fq '[ -s /mnt/data/nes-deck/lisp/settings.lisp ]' "$remote_script" ||
   fail 'remote health check does not verify the editable Lisp settings'
+grep -Fq '[ -s /mnt/data/nes-deck/lisp/wifi.lisp ]' "$remote_script" ||
+  fail 'remote health check does not verify the editable Lisp Wi-Fi editor'
 grep -Fq '[ -s /mnt/data/nes-deck/lisp/credits.lisp ]' "$remote_script" ||
   fail 'remote health check does not verify the editable Lisp credits'
 grep -Fq '[ -s /mnt/data/nes-deck/lisp/dashboard.lisp ]' "$remote_script" ||

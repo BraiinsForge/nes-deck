@@ -894,6 +894,7 @@
           cp ${./lisp/ui.lisp} ui.lisp
           cp ${./lisp/policy.lisp} policy.lisp
           cp ${./lisp/settings.lisp} settings.lisp
+          cp ${./lisp/wifi.lisp} wifi.lisp
           cp ${./lisp/credits.lisp} credits.lisp
           cp ${./lisp/dashboard.lisp} dashboard.lisp
           cp ${./assets/settings-cog/gear-knekko-09.png} settings-icon.png

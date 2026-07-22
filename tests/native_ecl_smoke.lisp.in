@@ -91,6 +91,43 @@
             (error "Settings layout crossed the native boundary incorrectly"))
           (unless (= (canvas-rgb565-hash) expected)
             (error "Settings frame mismatch for ~S" selected)))))
+    (dolist (fixture
+             '(("" "" :ssid nil nil 30 #\q #\- #xd6be2f43c4faf0e6)
+               ("" "" :ssid t nil 30 #\Q #\- #x7682dc83b0062730)
+               ("NETWORK" "password" :passphrase t nil
+                30 #\Q #\- #xa5c18f4c41654088)
+               ("NETWORK" "password" :passphrase nil t
+                42 #\1 #\> #xf919741f85fe2c31)))
+      (destructuring-bind
+          (ssid passphrase field uppercase symbols
+           key-count first-key last-key expected)
+          fixture
+        (let* ((network '(:ssid "net1" :wlan-ipv4 "10.249.110.248"
+                          :wireguard-ipv4 "10.0.0.10"
+                          :selector "CONNECTED"))
+               (state (wifi-initial-state
+                       :ssid ssid :passphrase passphrase :field field
+                       :uppercase uppercase :symbols symbols))
+               (layout (render-dashboard-wifi state network))
+               (keys (getf layout :keys)))
+          (unless (and
+                   (equal (subseq layout 0 16)
+                          '(:back (16 10 120 62)
+                            :ssid (330 10 310 62)
+                            :passphrase (650 10 330 62)
+                            :save (990 10 274 62)
+                            :mode (16 364 152 66)
+                            :shift (176 364 168 66)
+                            :space (352 364 700 66)
+                            :delete (1060 364 204 66)))
+                   (= (length keys) key-count)
+                   (char= (second (first keys)) first-key)
+                   (char= (second (car (last keys))) last-key))
+            (error "Wi-Fi layout crossed the native boundary incorrectly"))
+          (unless (= (canvas-rgb565-hash) expected)
+            (error "Wi-Fi frame mismatch for ~S/~S"
+                   field (if symbols :symbols
+                             (if uppercase :uppercase :lowercase)))))))
     (let ((icon (load-png-raster "@settings_icon@" 23 23)))
       (unless icon
         (error "PNG raster callback did not load the settings asset"))

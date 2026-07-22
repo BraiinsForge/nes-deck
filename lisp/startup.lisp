@@ -91,6 +91,11 @@
            #:*dashboard-settings-paths*
            #:*dashboard-settings-selection-order*
            #:*dashboard-systems*
+           #:*dashboard-wifi-geometry*
+           #:*dashboard-wifi-key-rows*
+           #:*dashboard-wifi-labels*
+           #:*dashboard-wifi-limits*
+           #:*dashboard-wifi-paths*
            #:*dashboard-terminal-login-shell*
            #:*dashboard-timings*
            #:*dashboard-volume-default*
@@ -121,6 +126,11 @@
            #:dashboard-settings-geometry
            #:dashboard-settings-label
            #:dashboard-settings-path
+           #:dashboard-wifi-geometry
+           #:dashboard-wifi-key-rows
+           #:dashboard-wifi-label
+           #:dashboard-wifi-limit
+           #:dashboard-wifi-path
            #:dashboard-initial-state
            #:dashboard-launch-plan
            #:dashboard-menu-geometry
@@ -167,6 +177,7 @@
            #:reboot-confirmation-active-p
            #:render-dashboard
            #:render-dashboard-settings
+           #:render-dashboard-wifi
            #:render-project-credits
            #:settings-activation-plan
            #:settings-brightness-after-target
@@ -178,6 +189,17 @@
            #:settings-touch-transition
            #:settings-volume-after-target
            #:stop-menu-sound
+           #:wifi-activate-target
+           #:wifi-apply-target
+           #:wifi-complete-save
+           #:wifi-controller-transition
+           #:wifi-initial-state
+           #:wifi-open-state
+           #:wifi-save-plan
+           #:wifi-tail-for-field
+           #:wifi-target-at
+           #:wifi-touch-transition
+           #:wifi-valid-text-p
            #:stroke-canvas-rect
            #:wayland-shutdown-requested-p))
 
@@ -416,6 +438,7 @@
   (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "settings.lisp" startup) :verbose nil :print nil)
+  (load (merge-pathnames "wifi.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "credits.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "dashboard.lisp" startup) :verbose nil :print nil)
   (let ((local (merge-pathnames "local.lisp" startup)))
