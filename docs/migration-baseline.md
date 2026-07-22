@@ -156,10 +156,12 @@ Common Lisp decides whether to open, dispatch, present, consume touch, close, or
 honor shutdown. Default startup deliberately leaves the display closed.
 
 Host tests cover frame geometry, touch clamping, Lisp policy conversions, the
-ECL boundary, generated protocol bindings, and static ARM linkage. The allocated
-Deck cannot advertise the custom protocol because its firmware has no BMC
-compositor, so actual wire events, scene lifecycle, compositor hit testing, and
-physical Wayland touch remain acceptance work rather than inferred parity.
+ECL boundary, generated protocol bindings, and static ARM linkage. A deployed
+ARM smoke also confirms ABI 3 and both one-argument Wayland callbacks while the
+display is closed. The allocated Deck cannot advertise the custom protocol
+because its firmware has no BMC compositor, so actual wire events, scene
+lifecycle, compositor hit testing, and physical Wayland touch remain acceptance
+work rather than inferred parity.
 
 At this checkpoint the physical Rust and Common Lisp footprint is 1,868
 production lines, including the existing catalog compiler, and 2,149 lines with
