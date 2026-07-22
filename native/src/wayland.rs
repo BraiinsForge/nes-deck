@@ -1,3 +1,4 @@
+use crate::canvas;
 use crate::protocol::deck_widget::{deck_widget_manager_v1, deck_widget_surface_v1};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::fs::{MemfdFlags, ftruncate, memfd_create};
@@ -332,6 +333,20 @@ impl Widget {
     }
 
     fn present_solid(&mut self, color: u32) -> Result<(), String> {
+        self.present_frame(|pixels| pixels.fill(0xff00_0000 | (color & 0x00ff_ffff)))
+    }
+
+    fn present_rgba(&mut self, rgba: &[u8]) -> Result<(), String> {
+        if self.state.width != canvas::WIDTH
+            || self.state.height != canvas::HEIGHT
+            || rgba.len() != canvas::WIDTH as usize * canvas::HEIGHT as usize * 4
+        {
+            return Err("Wayland surface does not match the native canvas".to_owned());
+        }
+        self.present_frame(|pixels| copy_rgba_to_xrgb(rgba, pixels))
+    }
+
+    fn present_frame(&mut self, draw: impl FnOnce(&mut [u32])) -> Result<(), String> {
         if !self.state.configured {
             return Err("Wayland surface is not configured".to_owned());
         }
@@ -346,9 +361,7 @@ impl Widget {
             .clone()
             .expect("created while opening widget");
         let slot = &mut self.state.slots[index];
-        slot.mapping
-            .pixels()
-            .fill(0xff00_0000 | (color & 0x00ff_ffff));
+        draw(slot.mapping.pixels());
         slot.busy = true;
         surface.attach(Some(&slot.buffer), 0, 0);
         surface.damage(0, 0, self.state.width as i32, self.state.height as i32);
@@ -380,6 +393,10 @@ pub fn dispatch(timeout_ms: u32) -> Result<usize, String> {
 
 pub fn present_solid(color: u32) -> Result<(), String> {
     with_widget(|widget| widget.present_solid(color))
+}
+
+pub fn present_rgba(rgba: &[u8]) -> Result<(), String> {
+    with_widget(|widget| widget.present_rgba(rgba))
 }
 
 pub fn next_touch() -> Option<TouchReport> {
@@ -441,6 +458,16 @@ fn frame_size(width: u32, height: u32) -> Result<usize, String> {
         .and_then(|pixels| pixels.checked_mul(4))
         .filter(|size| *size <= i32::MAX as usize)
         .ok_or_else(|| "Wayland buffer dimensions are invalid".to_owned())
+}
+
+fn copy_rgba_to_xrgb(rgba: &[u8], pixels: &mut [u32]) {
+    debug_assert_eq!(rgba.len(), pixels.len() * 4);
+    for (pixel, color) in pixels.iter_mut().zip(rgba.chunks_exact(4)) {
+        *pixel = 0xff00_0000
+            | (u32::from(color[0]) << 16)
+            | (u32::from(color[1]) << 8)
+            | u32::from(color[2]);
+    }
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for State {
@@ -605,6 +632,10 @@ mod tests {
         assert_eq!(frame_size(1280, 480).unwrap(), 2_457_600);
         assert!(frame_size(0, 480).is_err());
         assert!(frame_size(i32::MAX as u32, 2).is_err());
+        let rgba = [0xfe, 0x6c, 0x27, 0xff, 0xec, 0xb6, 0xe7, 0xff];
+        let mut pixels = [0; 2];
+        copy_rgba_to_xrgb(&rgba, &mut pixels);
+        assert_eq!(pixels, [0xfffe_6c27, 0xffec_b6e7]);
     }
 
     #[test]

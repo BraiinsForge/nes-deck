@@ -1,3 +1,4 @@
+use crate::canvas;
 use rustix::mm::{MapFlags, ProtFlags, mmap, munmap};
 use std::cell::RefCell;
 use std::ffi::{c_int, c_ulong, c_void};
@@ -7,8 +8,8 @@ use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::ptr;
 
-const LOGICAL_WIDTH: usize = 1280;
-const LOGICAL_HEIGHT: usize = 480;
+const LOGICAL_WIDTH: usize = canvas::WIDTH as usize;
+const LOGICAL_HEIGHT: usize = canvas::HEIGHT as usize;
 const PHYSICAL_WIDTH: usize = 600;
 const PHYSICAL_HEIGHT: usize = 1280;
 const FBIOGET_VSCREENINFO: c_ulong = 0x4600;
@@ -176,7 +177,7 @@ struct Framebuffer {
     _file: File,
     mapping: Mapping,
     stride: usize,
-    canvas: Vec<u16>,
+    pixels: Vec<u16>,
     frame: Vec<u16>,
 }
 
@@ -222,15 +223,26 @@ impl Framebuffer {
             _file: file,
             mapping,
             stride: geometry.stride,
-            canvas: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
+            pixels: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
             frame: vec![0; geometry.map_size / 2],
         })
     }
 
     fn present_solid(&mut self, color: u32) -> Result<(), String> {
-        self.canvas.fill(rgb565(color));
+        self.pixels.fill(rgb565(color));
+        self.publish()
+    }
+
+    fn present_rgba(&mut self, rgba: &[u8]) -> Result<(), String> {
+        if !convert_rgba_to_rgb565(rgba, &mut self.pixels) {
+            return Err("native canvas dimensions are invalid".to_owned());
+        }
+        self.publish()
+    }
+
+    fn publish(&mut self) -> Result<(), String> {
         let row_words = self.stride / 2;
-        if !stage_canvas_for_scanout(&self.canvas, row_words, &mut self.frame) {
+        if !stage_canvas_for_scanout(&self.pixels, row_words, &mut self.frame) {
             return Err("framebuffer staging buffer is unavailable".to_owned());
         }
         let active_row_bytes = LOGICAL_HEIGHT * 2;
@@ -260,6 +272,19 @@ fn rgb565(color: u32) -> u16 {
     let green = (color >> 8) & 0xff;
     let blue = color & 0xff;
     (((red & 0xf8) << 8) | ((green & 0xfc) << 3) | (blue >> 3)) as u16
+}
+
+fn convert_rgba_to_rgb565(rgba: &[u8], pixels: &mut [u16]) -> bool {
+    if rgba.len() != LOGICAL_WIDTH * LOGICAL_HEIGHT * 4
+        || pixels.len() != LOGICAL_WIDTH * LOGICAL_HEIGHT
+    {
+        return false;
+    }
+    for (pixel, color) in pixels.iter_mut().zip(rgba.chunks_exact(4)) {
+        *pixel =
+            rgb565((u32::from(color[0]) << 16) | (u32::from(color[1]) << 8) | u32::from(color[2]));
+    }
+    true
 }
 
 fn stage_canvas_for_scanout(canvas: &[u16], row_words: usize, frame: &mut [u16]) -> bool {
@@ -306,6 +331,15 @@ pub fn present_solid(color: u32) -> Result<(), String> {
             .as_mut()
             .ok_or_else(|| "fbdev display is not open".to_owned())?
             .present_solid(color)
+    })
+}
+
+pub fn present_rgba(rgba: &[u8]) -> Result<(), String> {
+    FRAMEBUFFER.with(|slot| {
+        slot.borrow_mut()
+            .as_mut()
+            .ok_or_else(|| "fbdev display is not open".to_owned())?
+            .present_rgba(rgba)
     })
 }
 
@@ -385,6 +419,11 @@ mod tests {
         assert_eq!(rgb565(0x000000), 0x0000);
         assert_eq!(rgb565(0xffffff), 0xffff);
         assert_eq!(rgb565(0xfe6c27), 0xfb64);
+        let mut rgba = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT * 4];
+        rgba[..4].copy_from_slice(&[0xfe, 0x6c, 0x27, 0xff]);
+        let mut pixels = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT];
+        assert!(convert_rgba_to_rgb565(&rgba, &mut pixels));
+        assert_eq!(pixels[0], 0xfb64);
 
         let row_words = PHYSICAL_WIDTH + 3;
         let mut canvas = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT];

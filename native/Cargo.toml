@@ -15,6 +15,7 @@ strip = true
 
 [dependencies]
 rustix = { version = "=1.1.4", features = ["event", "fs", "mm"] }
+tiny-skia = { version = "=0.12.0", default-features = false, features = ["std"] }
 wayland-backend = "=0.3.15"
 wayland-client = "=0.31.14"
 wayland-scanner = "=0.31.10"
