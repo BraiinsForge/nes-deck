@@ -1,4 +1,4 @@
-use retrodeck_native::{audio, fbdev, wayland};
+use retrodeck_native::{audio, canvas, fbdev, wayland};
 use std::env;
 use std::ffi::{CString, c_char, c_int, c_void};
 use std::mem;
@@ -17,7 +17,7 @@ type EclFiveArgumentFunction =
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 4;
+const ABI_VERSION: ClFixnum = 5;
 
 const LOAD_STARTUP: &str = r#"
 (handler-case
@@ -101,13 +101,28 @@ impl Ecl {
         };
         unsafe { ecl_def_c_function(play, callback, 5) };
 
+        let fill_name = c_string("CANVAS-FILL-RECT")?;
+        let fill = unsafe { ecl_make_symbol(fill_name.as_ptr(), package_name.as_ptr()) };
+        let callback = unsafe {
+            mem::transmute::<EclFiveArgumentFunction, EclFixedFunction>(native_canvas_fill_rect)
+        };
+        unsafe { ecl_def_c_function(fill, callback, 5) };
+
         for (name, function) in [
             ("AUDIO-ACTIVE-P", native_audio_active as EclFixedFunction),
             ("STOP-AUDIO", native_stop_audio as EclFixedFunction),
             ("FINISH-AUDIO", native_finish_audio as EclFixedFunction),
+            (
+                "FBDEV-PRESENT-CANVAS",
+                native_fbdev_present_canvas as EclFixedFunction,
+            ),
             ("FBDEV-OPEN", native_fbdev_open as EclFixedFunction),
             ("FBDEV-CLOSE", native_fbdev_close as EclFixedFunction),
             ("FBDEV-SIZE", native_fbdev_size as EclFixedFunction),
+            (
+                "WAYLAND-PRESENT-CANVAS",
+                native_wayland_present_canvas as EclFixedFunction,
+            ),
             (
                 "WAYLAND-OPEN-WIDGET",
                 native_wayland_open_widget as EclFixedFunction,
@@ -129,6 +144,10 @@ impl Ecl {
         }
 
         for (name, function) in [
+            (
+                "CANVAS-CLEAR",
+                native_canvas_clear as EclOneArgumentFunction,
+            ),
             (
                 "FBDEV-PRESENT-SOLID",
                 native_fbdev_present_solid as EclOneArgumentFunction,
@@ -232,6 +251,34 @@ unsafe extern "C" fn native_finish_audio() -> ClObject {
     unsafe { ecl_make_integer(0) }
 }
 
+unsafe extern "C" fn native_canvas_clear(color: ClObject) -> ClObject {
+    let result = (|| {
+        canvas::clear(decode_color(color, "canvas clear color")?);
+        Ok(())
+    })();
+    native_status(result)
+}
+
+unsafe extern "C" fn native_canvas_fill_rect(
+    x: ClObject,
+    y: ClObject,
+    width: ClObject,
+    height: ClObject,
+    color: ClObject,
+) -> ClObject {
+    let result = (|| {
+        canvas::fill_rect(
+            decode_i32(x, "canvas rectangle x")?,
+            decode_i32(y, "canvas rectangle y")?,
+            decode_u32(width, "canvas rectangle width")?,
+            decode_u32(height, "canvas rectangle height")?,
+            decode_color(color, "canvas rectangle color")?,
+        );
+        Ok(())
+    })();
+    native_status(result)
+}
+
 unsafe extern "C" fn native_fbdev_open() -> ClObject {
     native_status(fbdev::open())
 }
@@ -241,14 +288,12 @@ unsafe extern "C" fn native_fbdev_close() -> ClObject {
     unsafe { ecl_make_integer(0) }
 }
 
+unsafe extern "C" fn native_fbdev_present_canvas() -> ClObject {
+    native_status(canvas::with_pixels(fbdev::present_rgba))
+}
+
 unsafe extern "C" fn native_fbdev_present_solid(color: ClObject) -> ClObject {
-    let result = (|| {
-        let color = decode_u32(color, "fbdev solid color")?;
-        if color > 0x00ff_ffff {
-            return Err("fbdev solid color is out of range".to_owned());
-        }
-        fbdev::present_solid(color)
-    })();
+    let result = (|| fbdev::present_solid(decode_color(color, "fbdev solid color")?))();
     native_status(result)
 }
 
@@ -268,14 +313,12 @@ unsafe extern "C" fn native_wayland_close() -> ClObject {
     unsafe { ecl_make_integer(0) }
 }
 
+unsafe extern "C" fn native_wayland_present_canvas() -> ClObject {
+    native_status(canvas::with_pixels(wayland::present_rgba))
+}
+
 unsafe extern "C" fn native_wayland_present_solid(color: ClObject) -> ClObject {
-    let result = (|| {
-        let color = decode_u32(color, "Wayland solid color")?;
-        if color > 0x00ff_ffff {
-            return Err("Wayland solid color is out of range".to_owned());
-        }
-        wayland::present_solid(color)
-    })();
+    let result = (|| wayland::present_solid(decode_color(color, "Wayland solid color")?))();
     native_status(result)
 }
 
@@ -366,6 +409,13 @@ fn decode_i32(object: ClObject, name: &str) -> Result<c_int, String> {
 fn decode_u32(object: ClObject, name: &str) -> Result<u32, String> {
     let value = decode_fixnum(object).ok_or_else(|| format!("{name} must be an integer"))?;
     u32::try_from(value).map_err(|_| format!("{name} is out of range"))
+}
+
+fn decode_color(object: ClObject, name: &str) -> Result<u32, String> {
+    let color = decode_u32(object, name)?;
+    (color <= 0x00ff_ffff)
+        .then_some(color)
+        .ok_or_else(|| format!("{name} is out of range"))
 }
 
 fn decode_exit_code(object: ClObject) -> Result<u8, String> {

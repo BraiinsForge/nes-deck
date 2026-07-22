@@ -8,13 +8,19 @@
 (defparameter *active-status* 0)
 (defparameter *stop-count* 0)
 (defparameter *finish-count* 0)
+(defparameter *canvas-clear-status* 1)
+(defparameter *canvas-clear-color* nil)
+(defparameter *canvas-fill-status* 1)
+(defparameter *canvas-fill-arguments* nil)
 (defparameter *fbdev-open-status* 1)
 (defparameter *fbdev-close-count* 0)
+(defparameter *fbdev-canvas-status* 1)
 (defparameter *fbdev-present-status* 1)
 (defparameter *fbdev-present-color* nil)
 (defparameter *fbdev-size* nil)
 (defparameter *wayland-open-status* 1)
 (defparameter *wayland-close-count* 0)
+(defparameter *wayland-canvas-status* 1)
 (defparameter *wayland-present-status* 1)
 (defparameter *wayland-present-color* nil)
 (defparameter *wayland-dispatch-result* 0)
@@ -27,8 +33,11 @@
   (:use)
   (:export #:abi-version
            #:audio-active-p
+           #:canvas-clear
+           #:canvas-fill-rect
            #:fbdev-close
            #:fbdev-open
+           #:fbdev-present-canvas
            #:fbdev-present-solid
            #:fbdev-size
            #:finish-audio
@@ -38,12 +47,13 @@
            #:wayland-dispatch
            #:wayland-next-touch
            #:wayland-open-widget
+           #:wayland-present-canvas
            #:wayland-present-solid
            #:wayland-shutdown-p
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 4)
+      (lambda () 5)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -54,10 +64,20 @@
       (lambda () (incf *stop-count*) 0)
       (symbol-function (find-symbol "FINISH-AUDIO" "RETRODECK.NATIVE"))
       (lambda () (incf *finish-count*) 0)
+      (symbol-function (find-symbol "CANVAS-CLEAR" "RETRODECK.NATIVE"))
+      (lambda (color)
+        (setf *canvas-clear-color* color)
+        *canvas-clear-status*)
+      (symbol-function (find-symbol "CANVAS-FILL-RECT" "RETRODECK.NATIVE"))
+      (lambda (&rest arguments)
+        (setf *canvas-fill-arguments* arguments)
+        *canvas-fill-status*)
       (symbol-function (find-symbol "FBDEV-OPEN" "RETRODECK.NATIVE"))
       (lambda () *fbdev-open-status*)
       (symbol-function (find-symbol "FBDEV-CLOSE" "RETRODECK.NATIVE"))
       (lambda () (incf *fbdev-close-count*) 0)
+      (symbol-function (find-symbol "FBDEV-PRESENT-CANVAS" "RETRODECK.NATIVE"))
+      (lambda () *fbdev-canvas-status*)
       (symbol-function (find-symbol "FBDEV-PRESENT-SOLID" "RETRODECK.NATIVE"))
       (lambda (color)
         (setf *fbdev-present-color* color)
@@ -68,6 +88,8 @@
       (lambda () *wayland-open-status*)
       (symbol-function (find-symbol "WAYLAND-CLOSE" "RETRODECK.NATIVE"))
       (lambda () (incf *wayland-close-count*) 0)
+      (symbol-function (find-symbol "WAYLAND-PRESENT-CANVAS" "RETRODECK.NATIVE"))
+      (lambda () *wayland-canvas-status*)
       (symbol-function (find-symbol "WAYLAND-PRESENT-SOLID" "RETRODECK.NATIVE"))
       (lambda (color)
         (setf *wayland-present-color* color)
@@ -85,6 +107,11 @@
 
 (load (truename (merge-pathnames "../lisp/startup.lisp" *load-truename*))
       :verbose nil :print nil)
+
+(defun signals-type-error-p (function)
+  (handler-case
+      (progn (funcall function) nil)
+    (type-error () t)))
 
 (assert (equal (retrodeck:menu-sound-notes :volume)
                '((660 60) (880 60))))
@@ -145,9 +172,21 @@
 (assert (= *finish-count* 1))
 (assert (= retrodeck::*menu-sound-input-until-ms* 0))
 
+(assert (retrodeck:clear-canvas #x121212))
+(assert (= *canvas-clear-color* #x121212))
+(assert (retrodeck:fill-canvas-rect -4 8 12 16 #xfe6c27))
+(assert (equal *canvas-fill-arguments* '(-4 8 12 16 #xfe6c27)))
+(setf *canvas-fill-arguments* nil)
+(assert (signals-type-error-p
+         (lambda () (retrodeck:fill-canvas-rect #x80000000 0 1 1 0))))
+(assert (signals-type-error-p
+         (lambda () (retrodeck:fill-canvas-rect 0 0 #x100000000 1 0))))
+(assert (null *canvas-fill-arguments*))
+
 (setf *fbdev-size* '(1280 480))
 (assert (retrodeck:open-fbdev))
 (assert (equal (retrodeck:current-fbdev-size) '(1280 480)))
+(assert (retrodeck:present-fbdev-canvas))
 (assert (retrodeck:present-fbdev-solid #xfe6c27))
 (assert (= *fbdev-present-color* #xfe6c27))
 (assert (retrodeck:close-fbdev))
@@ -156,6 +195,7 @@
 (assert (retrodeck:open-wayland-widget))
 (assert (retrodeck:close-wayland))
 (assert (= *wayland-close-count* 1))
+(assert (retrodeck:present-wayland-canvas))
 (assert (retrodeck:present-wayland-solid #x123456))
 (assert (= *wayland-present-color* #x123456))
 

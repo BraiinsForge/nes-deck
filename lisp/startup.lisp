@@ -2,8 +2,11 @@
   (:use)
   (:export #:abi-version
            #:audio-active-p
+           #:canvas-clear
+           #:canvas-fill-rect
            #:fbdev-close
            #:fbdev-open
+           #:fbdev-present-canvas
            #:fbdev-present-solid
            #:fbdev-size
            #:finish-audio
@@ -13,6 +16,7 @@
            #:wayland-dispatch
            #:wayland-next-touch
            #:wayland-open-widget
+           #:wayland-present-canvas
            #:wayland-present-solid
            #:wayland-shutdown-p
            #:wayland-size))
@@ -22,8 +26,11 @@
   (:import-from #:retrodeck.native
                 #:abi-version
                 #:audio-active-p
+                #:canvas-clear
+                #:canvas-fill-rect
                 #:fbdev-close
                 #:fbdev-open
+                #:fbdev-present-canvas
                 #:fbdev-present-solid
                 #:fbdev-size
                 #:finish-audio
@@ -33,6 +40,7 @@
                 #:wayland-dispatch
                 #:wayland-next-touch
                 #:wayland-open-widget
+                #:wayland-present-canvas
                 #:wayland-present-solid
                 #:wayland-shutdown-p
                 #:wayland-size)
@@ -51,6 +59,7 @@
            #:*dashboard-volume-step*
            #:*menu-sound-cues*
            #:*menu-sound-input-tail-ms*
+           #:clear-canvas
            #:close-fbdev
            #:close-wayland
            #:current-fbdev-size
@@ -62,6 +71,7 @@
            #:dashboard-system-label
            #:dashboard-timing
            #:dispatch-wayland
+           #:fill-canvas-rect
            #:finish-menu-sound
            #:main
            #:menu-sound-blocks-input-p
@@ -71,7 +81,9 @@
            #:open-fbdev
            #:open-wayland-widget
            #:play-menu-sound
+           #:present-fbdev-canvas
            #:present-fbdev-solid
+           #:present-wayland-canvas
            #:present-wayland-solid
            #:reboot-confirmation-active-p
            #:stop-menu-sound
@@ -79,7 +91,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 4)
+(defconstant +native-abi-version+ 5)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -138,12 +150,27 @@
   (setf *menu-sound-input-until-ms* 0)
   t)
 
+(defun clear-canvas (color)
+  (check-type color (integer 0 16777215))
+  (= (canvas-clear color) 1))
+
+(defun fill-canvas-rect (x y width height color)
+  (check-type x (and fixnum (signed-byte 32)))
+  (check-type y (and fixnum (signed-byte 32)))
+  (check-type width (and fixnum (unsigned-byte 32)))
+  (check-type height (and fixnum (unsigned-byte 32)))
+  (check-type color (integer 0 16777215))
+  (= (canvas-fill-rect x y width height color) 1))
+
 (defun open-fbdev ()
   (= (fbdev-open) 1))
 
 (defun close-fbdev ()
   (fbdev-close)
   t)
+
+(defun present-fbdev-canvas ()
+  (= (fbdev-present-canvas) 1))
 
 (defun present-fbdev-solid (color)
   (check-type color (integer 0 16777215))
@@ -158,6 +185,9 @@
 (defun close-wayland ()
   (wayland-close)
   t)
+
+(defun present-wayland-canvas ()
+  (= (wayland-present-canvas) 1))
 
 (defun present-wayland-solid (color)
   (check-type color (integer 0 16777215))
