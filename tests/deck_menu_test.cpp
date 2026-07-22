@@ -1187,6 +1187,26 @@ int main() {
                   network_status, &canvas, &settings_layout);
   expect(canvas_hash(canvas) == UINT64_C(0x99ed5871b55b5f6b),
          "Czech settings fixture keeps the complete reference frame");
+  render_settings(42, 60, "us", SettingsTargetWifi, std::string(),
+                  network_status, &canvas, &settings_layout);
+  expect(canvas_hash(canvas) == UINT64_C(0x65f7d573c69bccbb),
+         "selected WiFi fixture keeps the complete reference frame");
+  render_settings(42, 60, "us", SettingsTargetTerminal, std::string(),
+                  network_status, &canvas, &settings_layout);
+  expect(canvas_hash(canvas) == UINT64_C(0x9cabcc3df5188ce3),
+         "selected terminal fixture keeps the complete reference frame");
+  render_settings(42, 60, "us", SettingsTargetVolumeDown,
+                  "VOLUME SAVED; CONFIRMATION TONE FAILED", network_status,
+                  &canvas, &settings_layout);
+  expect(canvas_hash(canvas) == UINT64_C(0x05a5652bb03e0b8b),
+         "settings status fixture keeps the complete reference frame");
+  render_settings(
+      42, 60, "us", SettingsTargetVolumeDown,
+      "THIS SETTINGS STATUS FIXTURE IS INTENTIONALLY LONG ENOUGH TO USE THE "
+      "SMALL FOOTER SCALE ACROSS THE COMPLETE DISPLAY",
+      network_status, &canvas, &settings_layout);
+  expect(canvas_hash(canvas) == UINT64_C(0x773a6a165672bd8b),
+         "small settings footer fixture keeps the complete reference frame");
 
   WifiState wifi_state;
   WifiLayout wifi_layout;

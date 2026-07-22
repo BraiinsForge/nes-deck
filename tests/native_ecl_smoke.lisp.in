@@ -61,6 +61,36 @@
           (unless (= (canvas-rgb565-hash) expected)
             (error "Credits frame mismatch at ~D ms" elapsed-ms))))
       (clear-credits-text-mask-cache))
+    (let ((network '(:ssid "net1" :wlan-ipv4 "10.249.110.248"
+                     :wireguard-ipv4 "10.0.0.10" :selector "CONNECTED")))
+      (dolist (fixture
+               '((42 60 "us" :volume-down "" #x46d1527abb9f2bcb)
+                 (0 60 "us" :volume-up "" #xc2c55ee7eb47608b)
+                 (42 100 "us" :brightness-up "" #x6e348df7ca27725f)
+                 (42 60 "cz" :keymap "" #x99ed5871b55b5f6b)
+                 (42 60 "us" :wifi "" #x65f7d573c69bccbb)
+                 (42 60 "us" :terminal "" #x9cabcc3df5188ce3)
+                 (42 60 "us" :volume-down
+                  "VOLUME SAVED; CONFIRMATION TONE FAILED"
+                  #x05a5652bb03e0b8b)
+                 (42 60 "us" :volume-down
+                  "THIS SETTINGS STATUS FIXTURE IS INTENTIONALLY LONG ENOUGH TO USE THE SMALL FOOTER SCALE ACROSS THE COMPLETE DISPLAY"
+                  #x773a6a165672bd8b)))
+        (destructuring-bind
+            (volume brightness keymap selected status expected) fixture
+          (unless (equal (render-dashboard-settings
+                          volume brightness keymap selected status network)
+                         '(:close (1212 12 56 56)
+                           :wifi (926 20 262 108)
+                           :volume-down (108 208 104 104)
+                           :volume-up (228 208 104 104)
+                           :brightness-down (438 208 104 104)
+                           :brightness-up (558 208 104 104)
+                           :terminal (792 208 112 104)
+                           :keymap (1036 208 112 104)))
+            (error "Settings layout crossed the native boundary incorrectly"))
+          (unless (= (canvas-rgb565-hash) expected)
+            (error "Settings frame mismatch for ~S" selected)))))
     (let ((icon (load-png-raster "@settings_icon@" 23 23)))
       (unless icon
         (error "PNG raster callback did not load the settings asset"))

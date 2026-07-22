@@ -85,7 +85,11 @@
            #:*dashboard-palette*
            #:*dashboard-reboot-confirmation-text*
            #:*dashboard-reduced-motion-environment*
+           #:*dashboard-settings-geometry*
            #:*dashboard-settings-icon-path*
+           #:*dashboard-settings-labels*
+           #:*dashboard-settings-paths*
+           #:*dashboard-settings-selection-order*
            #:*dashboard-systems*
            #:*dashboard-terminal-login-shell*
            #:*dashboard-timings*
@@ -114,6 +118,9 @@
            #:dashboard-credits-geometry
            #:dashboard-credits-label
            #:dashboard-executable
+           #:dashboard-settings-geometry
+           #:dashboard-settings-label
+           #:dashboard-settings-path
            #:dashboard-initial-state
            #:dashboard-launch-plan
            #:dashboard-menu-geometry
@@ -159,7 +166,17 @@
            #:read-bounded-regular-file
            #:reboot-confirmation-active-p
            #:render-dashboard
+           #:render-dashboard-settings
            #:render-project-credits
+           #:settings-activation-plan
+           #:settings-brightness-after-target
+           #:settings-complete-action
+           #:settings-controller-transition
+           #:settings-initial-state
+           #:settings-move-selection
+           #:settings-target-at
+           #:settings-touch-transition
+           #:settings-volume-after-target
            #:stop-menu-sound
            #:stroke-canvas-rect
            #:wayland-shutdown-requested-p))
@@ -398,6 +415,7 @@
 (let ((startup *load-truename*))
   (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
+  (load (merge-pathnames "settings.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "credits.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "dashboard.lisp" startup) :verbose nil :print nil)
   (let ((local (merge-pathnames "local.lisp" startup)))
