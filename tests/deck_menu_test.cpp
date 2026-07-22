@@ -1117,6 +1117,9 @@ int main() {
   network_status.selector = "CONNECTED";
   render_settings(42, 60, "us", SettingsTargetVolumeDown, std::string(),
                   network_status, &canvas, &settings_layout);
+  // Shared with the Lisp settings composition smoke.
+  expect(canvas_hash(canvas) == UINT64_C(0x46d1527abb9f2bcb),
+         "settings fixture keeps the complete reference frame");
   expect(settings_layout.close_button.x == 1212 &&
              settings_layout.close_button.y == 12 &&
              settings_target_at(settings_layout,
@@ -1172,6 +1175,18 @@ int main() {
              rect_contains_color(canvas, settings_layout.keymap_button,
                                  color_pixel(kColorText)),
          "settings renders muted volume, full brightness, and Czech keys");
+  render_settings(0, 60, "us", SettingsTargetVolumeUp, std::string(),
+                  network_status, &canvas, &settings_layout);
+  expect(canvas_hash(canvas) == UINT64_C(0xc2c55ee7eb47608b),
+         "muted settings fixture keeps the complete reference frame");
+  render_settings(42, 100, "us", SettingsTargetBrightnessUp, std::string(),
+                  network_status, &canvas, &settings_layout);
+  expect(canvas_hash(canvas) == UINT64_C(0x6e348df7ca27725f),
+         "bright settings fixture keeps the complete reference frame");
+  render_settings(42, 60, "cz", SettingsTargetKeymap, std::string(),
+                  network_status, &canvas, &settings_layout);
+  expect(canvas_hash(canvas) == UINT64_C(0x99ed5871b55b5f6b),
+         "Czech settings fixture keeps the complete reference frame");
 
   WifiState wifi_state;
   WifiLayout wifi_layout;
