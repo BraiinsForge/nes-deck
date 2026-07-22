@@ -338,6 +338,16 @@ impl Widget {
         self.present_frame(|pixels| copy_rgba_to_xrgb(rgba, pixels))
     }
 
+    fn present_rgb565(&mut self, rgb565: &[u16]) -> Result<(), String> {
+        if self.state.width != canvas::WIDTH
+            || self.state.height != canvas::HEIGHT
+            || rgb565.len() != canvas::WIDTH as usize * canvas::HEIGHT as usize
+        {
+            return Err("Wayland surface does not match the RGB565 frame".to_owned());
+        }
+        self.present_frame(|pixels| copy_rgb565_to_xrgb(rgb565, pixels))
+    }
+
     fn present_frame(&mut self, draw: impl FnOnce(&mut [u32])) -> Result<(), String> {
         if !self.state.configured {
             return Err("Wayland surface is not configured".to_owned());
@@ -389,6 +399,10 @@ pub fn present_solid(color: u32) -> Result<(), String> {
 
 pub fn present_rgba(rgba: &[u8]) -> Result<(), String> {
     with_widget(|widget| widget.present_rgba(rgba))
+}
+
+pub fn present_rgb565(rgb565: &[u16]) -> Result<(), String> {
+    with_widget(|widget| widget.present_rgb565(rgb565))
 }
 
 pub fn next_touch() -> Option<TouchReport> {
@@ -459,6 +473,17 @@ fn copy_rgba_to_xrgb(rgba: &[u8], pixels: &mut [u32]) {
             | (u32::from(color[0]) << 16)
             | (u32::from(color[1]) << 8)
             | u32::from(color[2]);
+    }
+}
+
+fn copy_rgb565_to_xrgb(rgb565: &[u16], pixels: &mut [u32]) {
+    debug_assert_eq!(rgb565.len(), pixels.len());
+    for (destination, source) in pixels.iter_mut().zip(rgb565) {
+        let red = u32::from((source >> 11) & 0x1f);
+        let green = u32::from((source >> 5) & 0x3f);
+        let blue = u32::from(source & 0x1f);
+        *destination =
+            0xff00_0000 | ((red * 255 / 31) << 16) | ((green * 255 / 63) << 8) | (blue * 255 / 31);
     }
 }
 
@@ -628,6 +653,8 @@ mod tests {
         let mut pixels = [0; 2];
         copy_rgba_to_xrgb(&rgba, &mut pixels);
         assert_eq!(pixels, [0xfffe_6c27, 0xffec_b6e7]);
+        copy_rgb565_to_xrgb(&[0xfb64, 0xffff], &mut pixels);
+        assert_eq!(pixels, [0xffff_6d20, 0xffff_ffff]);
     }
 
     #[test]

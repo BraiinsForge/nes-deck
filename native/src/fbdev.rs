@@ -143,24 +143,56 @@ fn validate_geometry(
     Ok(Geometry { stride, map_size })
 }
 
+fn validate_console_geometry(
+    variable: &FbVariableScreenInfo,
+    fixed: &FbFixedScreenInfo,
+) -> Result<Geometry, String> {
+    let rows = if variable.yres_virtual == 0 {
+        variable.yres
+    } else {
+        variable.yres_virtual
+    } as usize;
+    let stride = fixed.line_length as usize;
+    let required = stride
+        .checked_mul(rows)
+        .ok_or_else(|| "unsupported console framebuffer geometry".to_owned())?;
+    let map_size = fixed.smem_len as usize;
+    if variable.xres != PHYSICAL_WIDTH as u32
+        || variable.yres != PHYSICAL_HEIGHT as u32
+        || variable.bits_per_pixel != 16
+        || rows < PHYSICAL_HEIGHT
+        || stride < PHYSICAL_WIDTH * 2
+        || !stride.is_multiple_of(2)
+        || map_size < required
+    {
+        return Err("unsupported console framebuffer geometry".to_owned());
+    }
+    Ok(Geometry { stride, map_size })
+}
+
 struct Mapping {
     pointer: *mut c_void,
     size: usize,
 }
 
 impl Mapping {
-    fn new(file: &File, size: usize) -> Result<Self, String> {
+    fn new(
+        file: &File,
+        size: usize,
+        protections: ProtFlags,
+        context: &str,
+    ) -> Result<Self, String> {
         let pointer = unsafe {
             mmap(
                 ptr::null_mut(),
                 size,
-                ProtFlags::READ | ProtFlags::WRITE,
+                protections,
                 MapFlags::SHARED,
                 file,
                 0,
             )
         }
-        .map_err(|error| format!("cannot map /dev/fb0: {error}"))?;
+        .map_err(|error| format!("{context}: {error}"))?;
         Ok(Self { pointer, size })
     }
 }
@@ -211,7 +243,12 @@ impl Framebuffer {
             ));
         }
         let geometry = validate_geometry(&variable, &fixed)?;
-        let mapping = Mapping::new(&file, geometry.map_size)?;
+        let mapping = Mapping::new(
+            &file,
+            geometry.map_size,
+            ProtFlags::READ | ProtFlags::WRITE,
+            "cannot map /dev/fb0",
+        )?;
         let blank_result = unsafe { ioctl(file.as_raw_fd(), FBIOBLANK, FB_BLANK_UNBLANK) };
         if blank_result != 0 {
             let error = io::Error::last_os_error();
@@ -305,6 +342,69 @@ fn stage_canvas_for_scanout(canvas: &[u16], row_words: usize, frame: &mut [u16])
         }
     }
     true
+}
+
+fn read_scanout_into_canvas(frame: &[u16], row_words: usize, canvas: &mut [u16]) -> bool {
+    let Some(required) = row_words.checked_mul(PHYSICAL_HEIGHT) else {
+        return false;
+    };
+    if frame.len() < required
+        || row_words < PHYSICAL_WIDTH
+        || canvas.len() != LOGICAL_WIDTH * LOGICAL_HEIGHT
+    {
+        return false;
+    }
+    for logical_x in 0..LOGICAL_WIDTH {
+        let physical_row = PHYSICAL_HEIGHT - 1 - logical_x;
+        let source = &frame[physical_row * row_words..][..LOGICAL_HEIGHT];
+        for logical_y in 0..LOGICAL_HEIGHT {
+            canvas[logical_y * LOGICAL_WIDTH + logical_x] = source[logical_y];
+        }
+    }
+    true
+}
+
+pub fn read_console_scanout() -> Result<Vec<u16>, String> {
+    let file = OpenOptions::new()
+        .read(true)
+        .open("/dev/fb0")
+        .map_err(|error| format!("cannot open console framebuffer: {error}"))?;
+    let mut variable = FbVariableScreenInfo::default();
+    let mut fixed = FbFixedScreenInfo::default();
+    if unsafe {
+        ioctl(
+            file.as_raw_fd(),
+            FBIOGET_VSCREENINFO,
+            &mut variable as *mut FbVariableScreenInfo,
+        )
+    } != 0
+        || unsafe {
+            ioctl(
+                file.as_raw_fd(),
+                FBIOGET_FSCREENINFO,
+                &mut fixed as *mut FbFixedScreenInfo,
+            )
+        } != 0
+    {
+        return Err(format!(
+            "cannot query console framebuffer: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    let geometry = validate_console_geometry(&variable, &fixed)?;
+    let mapping = Mapping::new(
+        &file,
+        geometry.map_size,
+        ProtFlags::READ,
+        "cannot map console framebuffer",
+    )?;
+    let frame =
+        unsafe { std::slice::from_raw_parts(mapping.pointer.cast::<u16>(), geometry.map_size / 2) };
+    let mut canvas = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT];
+    if !read_scanout_into_canvas(frame, geometry.stride / 2, &mut canvas) {
+        return Err("cannot rotate console framebuffer".to_owned());
+    }
+    Ok(canvas)
 }
 
 thread_local! {
@@ -412,6 +512,9 @@ mod tests {
         let geometry = validate_geometry(&variable, &fixed).unwrap();
         assert_eq!(geometry.stride, 1200);
         assert_eq!(geometry.map_size, 1_536_000);
+        let console_geometry = validate_console_geometry(&variable, &fixed).unwrap();
+        assert_eq!(console_geometry.stride, 1200);
+        assert_eq!(console_geometry.map_size, 1_536_000);
     }
 
     #[test]
@@ -473,5 +576,9 @@ mod tests {
         assert_eq!(frame[LOGICAL_HEIGHT - 1], 0xabcd);
         assert_eq!(frame[LOGICAL_HEIGHT], 0xdead);
         assert_eq!(frame[row_words - 1], 0xdead);
+
+        let mut restored = vec![0; canvas.len()];
+        assert!(read_scanout_into_canvas(&frame, row_words, &mut restored));
+        assert_eq!(restored, canvas);
     }
 }
