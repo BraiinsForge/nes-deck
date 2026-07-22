@@ -80,6 +80,14 @@ else
   failures=$((failures + 1))
 fi
 
+if [ -s /mnt/data/nes-deck/lisp/startup.lisp ] &&
+   [ -s /mnt/data/nes-deck/lisp/policy.lisp ]; then
+  report LISP-POLICY 'startup and editable policy installed'
+else
+  report LISP-POLICY 'STARTUP OR POLICY MISSING'
+  failures=$((failures + 1))
+fi
+
 if [ -x /etc/init.d/bmc-compositor ]; then
   presentation='BMC compositor'
   if /etc/init.d/bmc-compositor status >/dev/null 2>&1; then

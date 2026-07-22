@@ -114,8 +114,9 @@ done
   echo "Staged dashboard palette is empty" >&2
   exit 1
 }
-[ -s "$stage/nes-deck/lisp/startup.lisp" ] || {
-  echo "Staged Common Lisp startup is empty" >&2
+[ -s "$stage/nes-deck/lisp/startup.lisp" ] && \
+  [ -s "$stage/nes-deck/lisp/policy.lisp" ] || {
+  echo "Staged Common Lisp startup or policy is empty" >&2
   exit 1
 }
 [ -s "$stage/nes-deck/licenses/runtime/Wayland-COPYING" ] && \
@@ -195,8 +196,9 @@ cp -p "$stage/nes-deck/chiptune-deck" "$base/chiptune-deck"
 cp -p "$stage/nes-deck/retrodeck-native" "$base/retrodeck-native"
 mkdir -p "$base/lisp"
 cp -p "$stage/nes-deck/lisp/startup.lisp" "$base/lisp/startup.lisp"
+cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"
 chmod 0700 "$base/retrodeck-native" "$base/lisp"
-chmod 0600 "$base/lisp/startup.lisp"
+chmod 0600 "$base/lisp/startup.lisp" "$base/lisp/policy.lisp"
 cp -p "$stage/nes-deck/uploader/rom-uploader" \
   "$base/uploader/rom-uploader"
 chmod 0700 "$base/uploader" "$base/uploads" \

@@ -890,8 +890,10 @@
 
       checks.${system}.retrodeck-native-smoke =
         pkgs.runCommand "retrodeck-native-smoke" { } ''
+          cp ${./lisp/startup.lisp} startup.lisp
+          cp ${./lisp/policy.lisp} policy.lisp
           substitute ${./tests/native_ecl_smoke.lisp.in} smoke.lisp \
-            --subst-var-by startup ${./lisp/startup.lisp}
+            --subst-var-by startup "$PWD/startup.lisp"
           ECLDIR=${eclArm}/lib/ecl/ \
             ${pkgs.qemu-user}/bin/qemu-arm \
             ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \
