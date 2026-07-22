@@ -1,0 +1,98 @@
+(in-package #:retrodeck)
+
+(defconstant +bitmap-glyph-width+ 5)
+(defconstant +bitmap-glyph-height+ 7)
+(defconstant +bitmap-glyph-advance+ 6)
+
+(defun display-ascii (text)
+  (check-type text string)
+  (map 'string (lambda (character)
+                 (if (< (char-code character) 128) character #\?))
+       text))
+
+(defun bitmap-text-width (text scale)
+  (check-type text string)
+  (check-type scale (integer 1 *))
+  (if (zerop (length text))
+      0
+      (- (* (length text) +bitmap-glyph-advance+ scale) scale)))
+
+(defun fit-text-scale (text maximum-width preferred minimum)
+  (check-type text string)
+  (check-type maximum-width integer)
+  (check-type preferred (integer 1 *))
+  (check-type minimum (integer 1 *))
+  (let ((shown (display-ascii text)))
+    (loop for scale from preferred downto minimum
+          when (<= (bitmap-text-width shown scale) maximum-width)
+            return scale
+          finally (return minimum))))
+
+(defun fit-text-width (text maximum-width scale)
+  (check-type text string)
+  (check-type maximum-width integer)
+  (check-type scale (integer 1 *))
+  (let ((shown (display-ascii text)))
+    (when (<= (bitmap-text-width shown scale) maximum-width)
+      (return-from fit-text-width shown))
+    (let* ((character-width (* +bitmap-glyph-advance+ scale))
+           (capacity (if (plusp maximum-width)
+                         (floor (+ maximum-width scale) character-width)
+                         0)))
+      (cond ((zerop capacity) "")
+            ((<= capacity 3) (subseq shown 0 capacity))
+            (t (concatenate 'string
+                            (subseq shown 0 (- capacity 3))
+                            "..."))))))
+
+(defun draw-text (x y text scale color)
+  (let ((shown (display-ascii text)))
+    (loop for character across shown
+          for offset from 0 by (* +bitmap-glyph-advance+ scale)
+          always (draw-canvas-glyph (+ x offset) y (char-code character)
+                                    scale color))))
+
+(defun draw-centered-text (x y width height text scale color)
+  (let* ((shown (display-ascii text))
+         (text-width (bitmap-text-width shown scale))
+         (text-height (* +bitmap-glyph-height+ scale)))
+    (draw-text (+ x (max 0 (floor (- width text-width) 2)))
+               (+ y (max 0 (floor (- height text-height) 2)))
+               shown scale color)))
+
+(defun fill-canvas-area (x y width height color)
+  (if (or (not (plusp width)) (not (plusp height)))
+      t
+      (fill-canvas-rect x y width height color)))
+
+(defun stroke-canvas-rect (x y width height thickness color)
+  (check-type width integer)
+  (check-type height integer)
+  (check-type thickness (integer 0 *))
+  (let ((top (fill-canvas-area x y width thickness color))
+        (bottom (fill-canvas-area x (+ y height (- thickness))
+                                  width thickness color))
+        (left (fill-canvas-area x y thickness height color))
+        (right (fill-canvas-area (+ x width (- thickness)) y
+                                 thickness height color)))
+    (and top bottom left right)))
+
+(defun fill-pixel-cut-rect (x y width height cut color)
+  (check-type width integer)
+  (check-type height integer)
+  (check-type cut (integer 0 *))
+  (when (or (<= width (* cut 2)) (<= height (* cut 2)))
+    (return-from fill-pixel-cut-rect t))
+  (let ((horizontal (fill-canvas-area (+ x cut) y (- width (* cut 2))
+                                      height color))
+        (vertical (fill-canvas-area x (+ y cut) width (- height (* cut 2))
+                                    color)))
+    (and horizontal vertical)))
+
+(defun draw-pixel-panel (x y width height fill border &optional (thickness 4))
+  (let ((outside (fill-pixel-cut-rect x y width height thickness border))
+        (inside (fill-pixel-cut-rect (+ x thickness) (+ y thickness)
+                                     (- width (* thickness 2))
+                                     (- height (* thickness 2))
+                                     thickness fill)))
+    (and outside inside)))

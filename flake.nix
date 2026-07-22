@@ -891,6 +891,7 @@
       checks.${system}.retrodeck-native-smoke =
         pkgs.runCommand "retrodeck-native-smoke" { } ''
           cp ${./lisp/startup.lisp} startup.lisp
+          cp ${./lisp/ui.lisp} ui.lisp
           cp ${./lisp/policy.lisp} policy.lisp
           substitute ${./tests/native_ecl_smoke.lisp.in} smoke.lisp \
             --subst-var-by startup "$PWD/startup.lisp"

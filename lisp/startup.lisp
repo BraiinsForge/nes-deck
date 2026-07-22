@@ -61,6 +61,7 @@
            #:*dashboard-volume-step*
            #:*menu-sound-cues*
            #:*menu-sound-input-tail-ms*
+           #:bitmap-text-width
            #:clear-canvas
            #:close-fbdev
            #:close-wayland
@@ -73,9 +74,16 @@
            #:dashboard-system-label
            #:dashboard-timing
            #:dispatch-wayland
+           #:display-ascii
            #:draw-canvas-glyph
+           #:draw-centered-text
+           #:draw-pixel-panel
+           #:draw-text
            #:fill-canvas-rect
+           #:fill-pixel-cut-rect
            #:finish-menu-sound
+           #:fit-text-scale
+           #:fit-text-width
            #:main
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
@@ -90,6 +98,7 @@
            #:present-wayland-solid
            #:reboot-confirmation-active-p
            #:stop-menu-sound
+           #:stroke-canvas-rect
            #:wayland-shutdown-requested-p))
 
 (in-package #:retrodeck)
@@ -230,6 +239,7 @@
   0)
 
 (let ((startup *load-truename*))
+  (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
   (let ((local (merge-pathnames "local.lisp" startup)))
     (when (probe-file local)

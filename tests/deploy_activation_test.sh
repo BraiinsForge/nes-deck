@@ -34,10 +34,14 @@ grep -Fq "ssh \"\$target\" sh -s -- \"\$remote_stage\" <\"\$activate_script\"" \
   "$deployer" || fail 'deployer does not stream the activation script'
 grep -Fq "[[ -f \$activate_script && ! -L \$activate_script ]]" "$deployer" ||
   fail 'deployer does not validate the activation script'
-grep -Fq 'cp lisp/startup.lisp lisp/policy.lisp "$payload/nes-deck/lisp/"' \
-  "$deployer" || fail 'deployer does not stage the editable Lisp policy'
+grep -Fq 'cp lisp/startup.lisp lisp/ui.lisp lisp/policy.lisp "$payload/nes-deck/lisp/"' \
+  "$deployer" || fail 'deployer does not stage the editable Lisp UI and policy'
+grep -Fq '[ -s "$stage/nes-deck/lisp/ui.lisp" ]' "$activation" ||
+  fail 'activation does not validate the staged editable Lisp UI'
 grep -Fq '[ -s "$stage/nes-deck/lisp/policy.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp policy'
+grep -Fq 'cp -p "$stage/nes-deck/lisp/ui.lisp" "$base/lisp/ui.lisp"' \
+  "$activation" || fail 'activation does not install the editable Lisp UI'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp policy'
 

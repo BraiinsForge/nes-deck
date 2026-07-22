@@ -81,10 +81,11 @@ else
 fi
 
 if [ -s /mnt/data/nes-deck/lisp/startup.lisp ] &&
+   [ -s /mnt/data/nes-deck/lisp/ui.lisp ] &&
    [ -s /mnt/data/nes-deck/lisp/policy.lisp ]; then
-  report LISP-POLICY 'startup and editable policy installed'
+  report LISP-POLICY 'startup, UI, and editable policy installed'
 else
-  report LISP-POLICY 'STARTUP OR POLICY MISSING'
+  report LISP-POLICY 'STARTUP, UI, OR POLICY MISSING'
   failures=$((failures + 1))
 fi
 
