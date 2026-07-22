@@ -26,6 +26,11 @@
 (defparameter *raster-png-result* 0)
 (defparameter *raster-png-arguments* nil)
 (defparameter *raster-png-calls* nil)
+(defparameter *evdev-open-status* 1)
+(defparameter *evdev-close-count* 0)
+(defparameter *evdev-dispatch-result* 0)
+(defparameter *evdev-dispatch-timeout* nil)
+(defparameter *evdev-touch* nil)
 (defparameter *fbdev-open-status* 1)
 (defparameter *fbdev-close-count* 0)
 (defparameter *fbdev-canvas-status* 1)
@@ -51,6 +56,10 @@
            #:canvas-draw-glyph
            #:canvas-draw-raster
            #:canvas-fill-rect
+           #:evdev-next-touch
+           #:evdev-touch-close
+           #:evdev-touch-dispatch
+           #:evdev-touch-open
            #:fbdev-close
            #:fbdev-open
            #:fbdev-present-canvas
@@ -72,7 +81,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 7)
+      (lambda () 8)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -114,7 +123,17 @@
          (setf *raster-png-arguments* arguments)
          (push arguments *raster-png-calls*)
          *raster-png-result*)
-       (symbol-function (find-symbol "FBDEV-OPEN" "RETRODECK.NATIVE"))
+       (symbol-function (find-symbol "EVDEV-TOUCH-OPEN" "RETRODECK.NATIVE"))
+         (lambda () *evdev-open-status*)
+         (symbol-function (find-symbol "EVDEV-TOUCH-CLOSE" "RETRODECK.NATIVE"))
+         (lambda () (incf *evdev-close-count*) 0)
+         (symbol-function (find-symbol "EVDEV-TOUCH-DISPATCH" "RETRODECK.NATIVE"))
+         (lambda (timeout-ms)
+           (setf *evdev-dispatch-timeout* timeout-ms)
+           *evdev-dispatch-result*)
+         (symbol-function (find-symbol "EVDEV-NEXT-TOUCH" "RETRODECK.NATIVE"))
+         (lambda () *evdev-touch*)
+         (symbol-function (find-symbol "FBDEV-OPEN" "RETRODECK.NATIVE"))
       (lambda () *fbdev-open-status*)
       (symbol-function (find-symbol "FBDEV-CLOSE" "RETRODECK.NATIVE"))
       (lambda () (incf *fbdev-close-count*) 0)
@@ -390,6 +409,19 @@
   (assert (not (member '(578 190 124 144 #x5f87ff) *canvas-fill-calls*
                        :test #'equal))))
 (setf *raster-cover-result* 0)
+
+(setf *evdev-touch* '(17 23 1 1 0)
+      *evdev-dispatch-result* 3)
+(assert (retrodeck:open-evdev-touch))
+(assert (= (retrodeck:dispatch-evdev-touch 25) 3))
+(assert (= *evdev-dispatch-timeout* 25))
+(assert (equal (retrodeck:next-evdev-touch) '(17 23 t t nil)))
+(setf *evdev-touch* nil
+      *evdev-dispatch-result* -1)
+(assert (null (retrodeck:next-evdev-touch)))
+(assert (null (retrodeck:dispatch-evdev-touch)))
+(assert (retrodeck:close-evdev-touch))
+(assert (= *evdev-close-count* 1))
 
 (setf *fbdev-size* '(1280 480))
 (assert (retrodeck:open-fbdev))

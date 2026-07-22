@@ -1,4 +1,4 @@
-use retrodeck_native::{audio, canvas, fbdev, wayland};
+use retrodeck_native::{audio, canvas, fbdev, input, wayland};
 use std::env;
 use std::ffi::{CString, OsStr, c_char, c_int, c_void};
 use std::mem;
@@ -19,7 +19,7 @@ type EclFiveArgumentFunction =
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 7;
+const ABI_VERSION: ClFixnum = 8;
 
 const LOAD_STARTUP: &str = r#"
 (handler-case
@@ -146,6 +146,18 @@ impl Ecl {
             ("FINISH-AUDIO", native_finish_audio as EclFixedFunction),
             ("RASTER-CLEAR", native_raster_clear as EclFixedFunction),
             (
+                "EVDEV-TOUCH-OPEN",
+                native_evdev_touch_open as EclFixedFunction,
+            ),
+            (
+                "EVDEV-TOUCH-CLOSE",
+                native_evdev_touch_close as EclFixedFunction,
+            ),
+            (
+                "EVDEV-NEXT-TOUCH",
+                native_evdev_next_touch as EclFixedFunction,
+            ),
+            (
                 "FBDEV-PRESENT-CANVAS",
                 native_fbdev_present_canvas as EclFixedFunction,
             ),
@@ -180,6 +192,10 @@ impl Ecl {
             (
                 "CANVAS-CLEAR",
                 native_canvas_clear as EclOneArgumentFunction,
+            ),
+            (
+                "EVDEV-TOUCH-DISPATCH",
+                native_evdev_touch_dispatch as EclOneArgumentFunction,
             ),
             (
                 "FBDEV-PRESENT-SOLID",
@@ -233,6 +249,7 @@ impl Ecl {
 impl Drop for Ecl {
     fn drop(&mut self) {
         fbdev::close();
+        input::close_touch();
         wayland::close();
         audio::stop();
         unsafe { cl_shutdown() };
@@ -387,6 +404,30 @@ unsafe extern "C" fn native_canvas_draw_raster(
     native_status(result)
 }
 
+unsafe extern "C" fn native_evdev_touch_open() -> ClObject {
+    native_status(input::open_touch())
+}
+
+unsafe extern "C" fn native_evdev_touch_close() -> ClObject {
+    input::close_touch();
+    unsafe { ecl_make_integer(0) }
+}
+
+unsafe extern "C" fn native_evdev_touch_dispatch(timeout_ms: ClObject) -> ClObject {
+    let result = (|| {
+        let timeout_ms = decode_u32(timeout_ms, "evdev touch dispatch timeout")?;
+        input::dispatch_touch(timeout_ms)
+    })();
+    native_count(result, "evdev touch dispatch count")
+}
+
+unsafe extern "C" fn native_evdev_next_touch() -> ClObject {
+    let Some(report) = input::next_touch() else {
+        return ECL_NIL;
+    };
+    make_touch_report(report)
+}
+
 unsafe extern "C" fn native_fbdev_open() -> ClObject {
     native_status(fbdev::open())
 }
@@ -435,33 +476,14 @@ unsafe extern "C" fn native_wayland_dispatch(timeout_ms: ClObject) -> ClObject {
         let timeout_ms = decode_u32(timeout_ms, "Wayland dispatch timeout")?;
         wayland::dispatch(timeout_ms)
     })();
-    let value = match result {
-        Ok(count) => match ClFixnum::try_from(count) {
-            Ok(count) => count,
-            Err(_) => {
-                eprintln!("retrodeck: Wayland dispatch count is out of range");
-                -1
-            }
-        },
-        Err(error) => {
-            eprintln!("retrodeck: {error}");
-            -1
-        }
-    };
-    unsafe { ecl_make_integer(value) }
+    native_count(result, "Wayland dispatch count")
 }
 
 unsafe extern "C" fn native_wayland_next_touch() -> ClObject {
     let Some(report) = wayland::next_touch() else {
         return ECL_NIL;
     };
-    make_fixnum_list(&[
-        report.x as ClFixnum,
-        report.y as ClFixnum,
-        boolean_fixnum(report.down),
-        boolean_fixnum(report.pressed),
-        boolean_fixnum(report.released),
-    ])
+    make_touch_report(report)
 }
 
 unsafe extern "C" fn native_wayland_size() -> ClObject {
@@ -473,6 +495,33 @@ unsafe extern "C" fn native_wayland_size() -> ClObject {
 
 unsafe extern "C" fn native_wayland_shutdown() -> ClObject {
     unsafe { ecl_make_integer(boolean_fixnum(wayland::shutdown_requested())) }
+}
+
+fn native_count(result: Result<usize, String>, name: &str) -> ClObject {
+    let value = match result {
+        Ok(count) => match ClFixnum::try_from(count) {
+            Ok(count) => count,
+            Err(_) => {
+                eprintln!("retrodeck: {name} is out of range");
+                -1
+            }
+        },
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            -1
+        }
+    };
+    unsafe { ecl_make_integer(value) }
+}
+
+fn make_touch_report(report: input::TouchReport) -> ClObject {
+    make_fixnum_list(&[
+        report.x as ClFixnum,
+        report.y as ClFixnum,
+        boolean_fixnum(report.down),
+        boolean_fixnum(report.pressed),
+        boolean_fixnum(report.released),
+    ])
 }
 
 fn native_status(result: Result<(), String>) -> ClObject {

@@ -6,6 +6,10 @@
            #:canvas-draw-glyph
            #:canvas-draw-raster
            #:canvas-fill-rect
+           #:evdev-next-touch
+           #:evdev-touch-close
+           #:evdev-touch-dispatch
+           #:evdev-touch-open
            #:fbdev-close
            #:fbdev-open
            #:fbdev-present-canvas
@@ -35,6 +39,10 @@
                 #:canvas-draw-glyph
                 #:canvas-draw-raster
                 #:canvas-fill-rect
+                #:evdev-next-touch
+                #:evdev-touch-close
+                #:evdev-touch-dispatch
+                #:evdev-touch-open
                 #:fbdev-close
                 #:fbdev-open
                 #:fbdev-present-canvas
@@ -72,6 +80,7 @@
            #:bitmap-text-width
            #:clear-canvas
            #:clear-dashboard-raster-cache
+           #:close-evdev-touch
            #:close-fbdev
            #:close-wayland
            #:current-fbdev-size
@@ -86,6 +95,7 @@
            #:dashboard-target-at
            #:dashboard-timing
            #:dashboard-touch-transition
+           #:dispatch-evdev-touch
            #:dispatch-wayland
            #:display-ascii
            #:draw-canvas-glyph
@@ -104,7 +114,9 @@
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
            #:menu-sound-notes
+           #:next-evdev-touch
            #:next-wayland-touch
+           #:open-evdev-touch
            #:open-fbdev
            #:open-wayland-widget
            #:play-menu-sound
@@ -121,7 +133,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 7)
+(defconstant +native-abi-version+ 8)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -224,6 +236,27 @@
   (check-type height (and fixnum (integer 1 4294967295)))
   (= (canvas-draw-raster handle x y width height) 1))
 
+(defun normalize-touch-report (report)
+  (when report
+    (destructuring-bind (x y down pressed released) report
+      (list x y (plusp down) (plusp pressed) (plusp released)))))
+
+(defun open-evdev-touch ()
+  (= (evdev-touch-open) 1))
+
+(defun close-evdev-touch ()
+  (evdev-touch-close)
+  t)
+
+(defun dispatch-evdev-touch (&optional (timeout-ms 0))
+  (check-type timeout-ms (integer 0 *))
+  (let ((dispatched (evdev-touch-dispatch timeout-ms)))
+    (unless (minusp dispatched)
+      dispatched)))
+
+(defun next-evdev-touch ()
+  (normalize-touch-report (evdev-next-touch)))
+
 (defun open-fbdev ()
   (= (fbdev-open) 1))
 
@@ -262,10 +295,7 @@
       dispatched)))
 
 (defun next-wayland-touch ()
-  (let ((report (wayland-next-touch)))
-    (when report
-      (destructuring-bind (x y down pressed released) report
-        (list x y (plusp down) (plusp pressed) (plusp released))))))
+  (normalize-touch-report (wayland-next-touch)))
 
 (defun current-wayland-size ()
   (wayland-size))

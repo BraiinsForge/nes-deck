@@ -1,4 +1,5 @@
 use crate::canvas;
+use crate::input::TouchReport;
 use crate::protocol::deck_widget::{deck_widget_manager_v1, deck_widget_surface_v1};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::fs::{MemfdFlags, ftruncate, memfd_create};
@@ -25,15 +26,6 @@ const BUFFER_COUNT: usize = 3;
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(2);
 const O_CLOEXEC: i32 = 0o2000000;
 static SHM_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TouchReport {
-    pub x: i32,
-    pub y: i32,
-    pub down: bool,
-    pub pressed: bool,
-    pub released: bool,
-}
 
 struct Mapping {
     pointer: *mut c_void,
