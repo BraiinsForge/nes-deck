@@ -1,0 +1,153 @@
+#!/bin/sh
+
+# Switch a Wayland-capable Deck between the BMC compositor and direct fbdev.
+
+set -eu
+
+marker=/mnt/data/nes-deck/state/force-framebuffer
+compositor=/etc/init.d/bmc-compositor
+framebuffer=/etc/init.d/nes-deck
+
+usage() {
+	printf 'Usage: %s {framebuffer|wayland|apply|status}\n' "$0" >&2
+	exit 2
+}
+
+require_services() {
+	[ -x "$compositor" ] || {
+		echo "BMC compositor service is unavailable" >&2
+		exit 1
+	}
+	[ -x "$framebuffer" ] || {
+		echo "Retro Deck framebuffer service is unavailable" >&2
+		exit 1
+	}
+}
+
+wait_for_dashboard() {
+	service=$1
+	attempt=0
+	while [ "$attempt" -lt 60 ]; do
+		if "$service" status >/dev/null 2>&1 && pidof deck-menu >/dev/null 2>&1; then
+			return 0
+		fi
+		attempt=$((attempt + 1))
+		sleep 1
+	done
+	return 1
+}
+
+wait_for_owner_stopped() {
+	service=$1
+	owner=$2
+	child=${3:-}
+	attempt=0
+	while [ "$attempt" -lt 30 ]; do
+		if ! "$service" status >/dev/null 2>&1 &&
+			! pidof "$owner" >/dev/null 2>&1 &&
+			{ [ -z "$child" ] || ! pidof "$child" >/dev/null 2>&1; }; then
+			return 0
+		fi
+		attempt=$((attempt + 1))
+		sleep 1
+	done
+	return 1
+}
+
+use_framebuffer() {
+	require_services
+	mkdir -p "$(dirname "$marker")"
+	temporary=$marker.tmp.$$
+	printf 'framebuffer\n' > "$temporary"
+	mv -f "$temporary" "$marker"
+
+	"$compositor" stop 2>/dev/null || :
+	if ! wait_for_owner_stopped "$compositor" bmc-openwrt deck-menu; then
+		echo "BMC compositor did not stop; leaving Wayland active" >&2
+		rm -f "$marker"
+		exit 1
+	fi
+	"$compositor" disable 2>/dev/null || :
+	"$framebuffer" enable
+	"$framebuffer" start
+
+	if wait_for_dashboard "$framebuffer"; then
+		echo "Retro Deck is using the direct framebuffer"
+		return 0
+	fi
+
+	echo "Framebuffer startup failed; restoring Wayland" >&2
+	rm -f "$marker"
+	"$framebuffer" stop 2>/dev/null || :
+	wait_for_owner_stopped "$framebuffer" deck-menu || :
+	"$framebuffer" disable 2>/dev/null || :
+	"$compositor" enable
+	"$compositor" start
+	exit 1
+}
+
+use_wayland() {
+	require_services
+	"$framebuffer" stop 2>/dev/null || :
+	if ! wait_for_owner_stopped "$framebuffer" deck-menu; then
+		echo "Framebuffer service did not stop; leaving it active" >&2
+		exit 1
+	fi
+	rm -f "$marker"
+	"$framebuffer" disable 2>/dev/null || :
+	"$compositor" enable
+	"$compositor" start
+
+	if wait_for_dashboard "$compositor"; then
+		echo "Retro Deck is using the BMC Wayland compositor"
+		return 0
+	fi
+
+	echo "Wayland startup failed; restoring the direct framebuffer" >&2
+	mkdir -p "$(dirname "$marker")"
+	printf 'framebuffer\n' > "$marker"
+	"$compositor" stop 2>/dev/null || :
+	wait_for_owner_stopped "$compositor" bmc-openwrt deck-menu || :
+	"$compositor" disable 2>/dev/null || :
+	"$framebuffer" enable
+	"$framebuffer" start
+	exit 1
+}
+
+show_status() {
+	if [ -e "$marker" ]; then
+		echo "configured=framebuffer"
+	else
+		echo "configured=wayland"
+	fi
+	if "$compositor" status >/dev/null 2>&1; then
+		echo "bmc-compositor=running"
+	else
+		echo "bmc-compositor=stopped"
+	fi
+	if "$framebuffer" status >/dev/null 2>&1; then
+		echo "nes-deck=running"
+	else
+		echo "nes-deck=stopped"
+	fi
+}
+
+case ${1:-} in
+	framebuffer)
+		use_framebuffer
+		;;
+	wayland)
+		use_wayland
+		;;
+	apply)
+		if [ -e "$marker" ]; then
+			use_framebuffer
+		fi
+		;;
+	status)
+		show_status
+		;;
+	*)
+		usage
+		;;
+esac

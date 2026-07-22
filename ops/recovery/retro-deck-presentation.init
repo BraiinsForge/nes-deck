@@ -1,0 +1,20 @@
+#!/bin/sh /etc/rc.common
+
+# Reapply a requested direct-framebuffer fallback after Nix boot activation.
+
+# OpenWrt rc.common reads these declarations before calling start.
+# shellcheck disable=SC2034
+START=98
+# shellcheck disable=SC2034
+STOP=04
+
+start() {
+	command=/mnt/data/nes-deck/recovery/retro-deck-presentation
+	marker=/mnt/data/nes-deck/state/force-framebuffer
+	[ -e "$marker" ] || return 0
+	[ -x "$command" ] || {
+		logger -t retro-deck-presentation "fallback command is unavailable"
+		return 1
+	}
+	"$command" apply
+}

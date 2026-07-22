@@ -1,0 +1,3 @@
+#!/bin/sh
+
+exec /mnt/data/nes-deck/recovery/retro-deck-presentation framebuffer
