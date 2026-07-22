@@ -7,6 +7,25 @@
 
 namespace {
 
+uint16_t rgb565(uint32_t color) {
+  const uint32_t red = (color >> 16) & 0xff;
+  const uint32_t green = (color >> 8) & 0xff;
+  const uint32_t blue = color & 0xff;
+  return static_cast<uint16_t>(((red & 0xf8) << 8) |
+                               ((green & 0xfc) << 3) | (blue >> 3));
+}
+
+uint64_t canvas_hash(const Canvas &canvas) {
+  uint64_t hash = UINT64_C(0xcbf29ce484222325);
+  for (uint16_t pixel : canvas) {
+    hash ^= pixel & 0xff;
+    hash *= UINT64_C(0x100000001b3);
+    hash ^= pixel >> 8;
+    hash *= UINT64_C(0x100000001b3);
+  }
+  return hash;
+}
+
 struct ColorBounds {
   bool found;
   int left;
@@ -79,6 +98,25 @@ int main(int argc, char **argv) {
            static_cast<size_t>(crawl.lines[index].source_width *
                                crawl.lines[index].source_height));
   }
+
+  const uint16_t reference_background = rgb565(0x000000);
+  const uint16_t reference_accent = rgb565(0xffffaf);
+  const uint16_t reference_text = rgb565(0xeeeeee);
+  const uint16_t reference_muted = rgb565(0x949494);
+  const auto reference_hash = [&](bool reduced_motion, int64_t elapsed_ms) {
+    Canvas frame;
+    CreditsLayout frame_layout;
+    render_project_credits(crawl, reduced_motion, elapsed_ms,
+                           reference_background, reference_accent,
+                           reference_text, reference_muted, &frame,
+                           &frame_layout);
+    return canvas_hash(frame);
+  };
+  assert(reference_hash(false, 0) == UINT64_C(0x94ebf079be6e596b));
+  assert(reference_hash(false, 2000) == UINT64_C(0x1f14f6b786549363));
+  assert(reference_hash(false, 20000) == UINT64_C(0x6267b51f6f787c83));
+  assert(reference_hash(true, 0) == UINT64_C(0x9a44bcef4a13dde3));
+  assert(reference_hash(true, 60000) == UINT64_C(0x9a44bcef4a13dde3));
 
   Canvas first;
   Canvas second;
