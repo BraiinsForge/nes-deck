@@ -66,7 +66,7 @@ for executable in \
   }
 done
 for executable in \
-  menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
+  retrodeck-native menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
   terminal/fbterm terminal/loadkeys terminal/retro-terminal terminal/rlwrap \
   langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin \
   uploader/rom-uploader; do
@@ -114,6 +114,10 @@ done
   echo "Staged dashboard palette is empty" >&2
   exit 1
 }
+[ -s "$stage/nes-deck/lisp/startup.lisp" ] || {
+  echo "Staged Common Lisp startup is empty" >&2
+  exit 1
+}
 [ -s "$stage/nes-deck/licenses/runtime/Wayland-COPYING" ] && \
   [ -s "$stage/nes-deck/licenses/ecl-deck/ECL-LICENSE" ] || {
   echo "Staged third-party license archive is incomplete" >&2
@@ -143,6 +147,8 @@ scheme_result=$(
   echo "Staged Scheme runtime failed its smoke test" >&2
   exit 1
 }
+ECLDIR="$stage/nes-deck/ecl/lib/ecl/" \
+  "$stage/nes-deck/retrodeck-native" "$stage/nes-deck/lisp/startup.lisp"
 "$stage/nes-deck/menu/deck-menu" --help >/dev/null
 "$stage/nes-deck/menu/deck-menu" --validate-palette \
   "$stage/nes-deck/menu/palette.tsv"
@@ -186,6 +192,11 @@ cp -p "$stage/nes-deck/zx-deck" "$base/zx-deck"
 cp -p "$stage/nes-deck/chip8-deck" "$base/chip8-deck"
 cp -p "$stage/nes-deck/ten-seconds-deck" "$base/ten-seconds-deck"
 cp -p "$stage/nes-deck/chiptune-deck" "$base/chiptune-deck"
+cp -p "$stage/nes-deck/retrodeck-native" "$base/retrodeck-native"
+mkdir -p "$base/lisp"
+cp -p "$stage/nes-deck/lisp/startup.lisp" "$base/lisp/startup.lisp"
+chmod 0700 "$base/retrodeck-native" "$base/lisp"
+chmod 0600 "$base/lisp/startup.lisp"
 cp -p "$stage/nes-deck/uploader/rom-uploader" \
   "$base/uploader/rom-uploader"
 chmod 0700 "$base/uploader" "$base/uploads" \

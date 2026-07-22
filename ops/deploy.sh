@@ -85,6 +85,7 @@ zx=$(build_flake .#zx-deck)
 chip8=$(build_flake .#chip8-deck)
 timer=$(build_flake .#ten-seconds-deck)
 menu=$(build_flake .#deck-menu)
+native=$(build_flake .#retrodeck-native)
 fbterm=$(build_flake .#fbterm-deck)
 rlwrap=$(build_flake .#rlwrap-deck)
 lua=$(build_flake .#lua-deck)
@@ -100,6 +101,7 @@ ops/deck-menu/fetch-foss-games.sh "$foss"
 mkdir -p \
   "$payload/nes-deck/menu" \
   "$payload/nes-deck/games" \
+  "$payload/nes-deck/lisp" \
   "$payload/nes-deck/langs/chibi/lib" \
   "$payload/nes-deck/licenses" \
   "$payload/nes-deck/terminal/fonts" \
@@ -119,6 +121,8 @@ cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
 cp "$chip8/bin/chip8-deck" "$payload/nes-deck/chip8-deck"
 cp "$timer/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
 cp "$menu/bin/deck-menu" "$payload/nes-deck/menu/deck-menu"
+cp "$native/bin/retrodeck-native" "$payload/nes-deck/retrodeck-native"
+cp lisp/startup.lisp "$payload/nes-deck/lisp/startup.lisp"
 cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
 cp "$uploader/bin/rom-uploader" \
   "$payload/nes-deck/uploader/rom-uploader"
@@ -200,13 +204,15 @@ done
 find "$payload/nes-deck" -type f \( \
   -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o \
   -name 'chip8-deck' -o -name 'ten-seconds-deck' -o \
-  -name 'chiptune-deck' -o -name 'deck-menu' -o \
+  -name 'chiptune-deck' -o -name 'retrodeck-native' -o \
+  -name 'deck-menu' -o \
   -name 'deck-menu-launcher' -o -name 'fetch-covers' -o \
   -name 'retro-terminal' -o -name 'fbterm' -o -name 'loadkeys' -o \
   -name 'rlwrap' -o \
   -name 'lua' -o -name 'python' -o -name 'chibi-scheme' -o \
   -name 'ecl.bin' \) -exec chmod 0700 {} +
 chmod 0700 "$payload/nes-deck/uploader/rom-uploader"
+chmod 0600 "$payload/nes-deck/lisp/startup.lisp"
 chmod 0600 "$payload/nes-deck/uploader/password.conf"
 chmod 0600 "$payload/nes-deck/uploader/address.conf"
 chmod 0700 "$payload/usr/bin/ecl" \
