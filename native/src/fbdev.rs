@@ -356,6 +356,17 @@ mod tests {
     use super::*;
     use std::mem;
 
+    fn canvas_hash(canvas: &[u16]) -> u64 {
+        let mut hash = 0xcbf29ce484222325_u64;
+        for pixel in canvas {
+            hash ^= u64::from(pixel & 0xff);
+            hash = hash.wrapping_mul(0x100000001b3);
+            hash ^= u64::from(pixel >> 8);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash
+    }
+
     fn valid_geometry() -> (FbVariableScreenInfo, FbFixedScreenInfo) {
         let variable = FbVariableScreenInfo {
             xres: PHYSICAL_WIDTH as u32,
@@ -412,6 +423,32 @@ mod tests {
         let (variable, mut fixed) = valid_geometry();
         fixed.line_length = 1198;
         assert!(validate_geometry(&variable, &fixed).is_err());
+    }
+
+    #[test]
+    fn matches_cpp_ui_fixture() {
+        canvas::clear(0x000000);
+        canvas::fill_rect(104, 100, 192, 80, 0xfe6c27);
+        canvas::fill_rect(100, 104, 200, 72, 0xfe6c27);
+        canvas::fill_rect(108, 104, 184, 72, 0x121212);
+        canvas::fill_rect(104, 108, 192, 64, 0x121212);
+        canvas::fill_rect(340, 100, 180, 4, 0xeeeeee);
+        canvas::fill_rect(340, 176, 180, 4, 0xeeeeee);
+        canvas::fill_rect(340, 100, 4, 80, 0xeeeeee);
+        canvas::fill_rect(516, 100, 4, 80, 0xeeeeee);
+        for (index, character) in b"RETRO".iter().enumerate() {
+            canvas::draw_glyph(171 + index as i32 * 12, 133, *character, 2, 0xeeeeee);
+        }
+        for (index, character) in b"ABCDE...".iter().enumerate() {
+            canvas::draw_glyph(383 + index as i32 * 12, 133, *character, 2, 0xeeeeee);
+        }
+        canvas::draw_glyph(10, 10, b'A', 1, 0xffffaf);
+        canvas::draw_glyph(16, 10, b'?', 1, 0xffffaf);
+
+        let mut pixels = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT];
+        canvas::with_pixels(|rgba| assert!(convert_rgba_to_rgb565(rgba, &mut pixels)));
+        // Shared with tests/menu_ui_test.cpp.
+        assert_eq!(canvas_hash(&pixels), 0x4140_7945_3e13_44d5);
     }
 
     #[test]
