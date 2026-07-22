@@ -332,6 +332,47 @@ production lines, including the existing catalog compiler, and 5,251 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Dashboard touch boundary checkpoint
+
+Native ABI 8 adds one synchronous `evdev` 0.13.2-backed Goodix reader for the
+fbdev fallback. Rust scans only numbered `/dev/input/event*` devices, requires
+the authoritative device-name substring, exact 0..1279 and 0..479 absolute
+ranges, and `BTN_TOUCH`, then uses a non-blocking descriptor and best-effort
+exclusive grab. The small report state machine preserves coordinate clamping,
+press and release edges, every `SYN_REPORT`, and the reference
+`SYN_DROPPED` resynchronization boundary. Wayland and evdev now return the same
+five-value touch report to Lisp.
+
+Common Lisp owns primary-dashboard targeting and state transitions. It preserves
+target priority, half-open bounds, press and release over the same target,
+drag-off and cancellation behavior, tab selection and reset, carousel wrapping,
+status clearing, and the absence of a cue when the active tab is tapped. Accepted
+navigation renders and presents first, then triggers the existing asynchronous
+cue without consulting controller-only audio quarantine. Settings, credits,
+card launch, keyboard, and controller actions remain outside this narrow slice.
+
+A shared deterministic trace covers two Next activations, a drag from Next to
+Previous, a GAME BOY tab activation, and a repeated active-tab tap. The C++
+reference pins the corresponding logical RGB565 hashes at
+`9f7ec7647982e7bd`, `de67cf4c35ff2b4d`, and `4e9094bcf7a7f9e5`; Lisp pins the
+same state, render, and cue sequence. Focused tests also process a second touch
+while native audio reports active, preserving the known-defect fix.
+
+Host tests, static ARM/ECL verification, `nix flake check`, and complete
+activation passed. With the C++ dashboard stopped under an automatic restore
+trap, the deployed native process opened and exclusively owned the physical
+Goodix device. The installed Lisp fixture then rendered its initial NES frame
+through fbdev; its 1,638,400-byte capture unrotated to C++ hash
+`0ef078d4dc7a53bd`. The normal C++ dashboard was restored healthy after each
+exercise. No physical touch occurred during the unattended 60-second report
+window, so actual panel navigation and cue-overlap responsiveness still require
+an operator at the Deck.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 4,586
+production lines, including the existing catalog compiler, and 6,034 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:
@@ -343,6 +384,8 @@ Established on 2026-07-22:
 - Development Deck health check: passed
 - Static Lisp dashboard framebuffer hash matched the complete C++ reference
 - Raster fixture hash matched C++ at `5c932dc59681241e` on the Deck
+- ABI 8 opened the physical Goodix device and matched navigation fixture hash
+  `0ef078d4dc7a53bd` through fbdev
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
