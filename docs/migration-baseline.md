@@ -270,14 +270,46 @@ production lines, including the existing catalog compiler, and 3,897 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Static dashboard checkpoint
+
+Startup now loads editable `dashboard.lisp` after the native UI and policy
+layers and before optional owner `local.lisp` overrides. Lisp owns the exact
+credits and settings controls, populated system tabs, three-card carousel
+window, selection geometry, pixel-cut cards, cartridge fallback art, compact
+built-in Deck logos, mirrored arrows, indicators, and status footer. Geometry,
+labels, colors, and composition order remain ordinary device-editable Lisp.
+
+A deterministic nine-game fixture fixes the six populated tabs, shifted NES
+carousel, selected third game, long-title fitting, four indicators, and status
+text. The authoritative C++ renderer pins the complete logical RGB565 frame at
+FNV-1a `65b48f5f3b66d535`; focused Lisp tests pin matching layout metadata,
+selected fills and footer text, plus empty-system, single-card, and covered-game
+fallback behavior. Covered catalog entries deliberately keep deterministic
+fallback art until the narrow raster-blit slice arrives, while the working C++
+dashboard remains deployed and authoritative.
+
+On the development Deck, the installed Lisp fixture rendered through ABI 6 and
+fbdev. Its 1,638,400-byte stride-aware capture produced the same
+`65b48f5f3b66d535` hash after all 614,400 logical pixels were unrotated with
+`physical-row = 1279 - logical-x` and `physical-column = logical-y`. The
+supervised fixture then restored a healthy C++ dashboard. Physical Wayland
+presentation remains blocked by the missing compositor firmware.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 3,335
+production lines, including the existing catalog compiler, and 4,282 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:
 
 - `./tests/run-host-tests.sh`: passed
+- `./tests/verify-arm-builds.sh`: passed
+- `nix flake check`: passed
 - Static ARM build and complete deployment: passed
 - Development Deck health check: passed
-- Dashboard framebuffer capture: visually matches the current 1280x480 menu
+- Static Lisp dashboard framebuffer hash matched the complete C++ reference
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
