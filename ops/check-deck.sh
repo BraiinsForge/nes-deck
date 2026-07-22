@@ -82,10 +82,11 @@ fi
 
 if [ -s /mnt/data/nes-deck/lisp/startup.lisp ] &&
    [ -s /mnt/data/nes-deck/lisp/ui.lisp ] &&
-   [ -s /mnt/data/nes-deck/lisp/policy.lisp ]; then
-  report LISP-POLICY 'startup, UI, and editable policy installed'
+   [ -s /mnt/data/nes-deck/lisp/policy.lisp ] &&
+   [ -s /mnt/data/nes-deck/lisp/dashboard.lisp ]; then
+  report LISP-POLICY 'startup, UI, policy, and dashboard installed'
 else
-  report LISP-POLICY 'STARTUP, UI, OR POLICY MISSING'
+  report LISP-POLICY 'COMMON LISP DASHBOARD FILE MISSING'
   failures=$((failures + 1))
 fi
 

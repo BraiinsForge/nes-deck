@@ -250,6 +250,73 @@
                  (108 104 4 12 #x121212)
                  (104 108 12 4 #x121212))))
 
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes :color #x5f87ff)
+                (:id "beta" :title "BETA" :system :nes :color #xafd75f)
+                (:id "long-title" :title "A VERY LONG FIXTURE GAME TITLE"
+                 :system :nes :color #xffd700)
+                (:id "delta" :title "DELTA" :system :nes :color #xd75f5f)
+                (:id "gb" :title "GB FIXTURE" :system :gb :color #x87af87)
+                (:id "gbc" :title "GBC FIXTURE" :system :gbc :color #xecb6e7)
+                (:id "zx" :title "ZX FIXTURE" :system :zx :color #x87afff)
+                (:id "chip8" :title "CHIP-8 FIXTURE" :system :chip8
+                 :color #xffffaf)
+                (:id "deck-fixture" :title "DECK FIXTURE" :system :deck
+                 :color #xff8700)))
+       (*canvas-fill-calls* nil)
+       (*canvas-glyph-calls* nil)
+       (layout (retrodeck:render-dashboard games :nes 2 "FIXTURE STATUS")))
+  (assert (= *canvas-clear-color* #x000000))
+  (assert (equal (getf layout :systems) '(:nes :gb :gbc :zx :chip8 :deck)))
+  (assert (equal (getf layout :system-buttons)
+                 '((56 76 188 52) (252 76 188 52) (448 76 188 52)
+                   (644 76 188 52) (840 76 188 52) (1036 76 188 52))))
+  (assert (equal (getf layout :game-indices) '(0 1 2 3)))
+  (assert (= (getf layout :shown-game-index) 2))
+  (assert (equal (getf layout :visible-game-indices) '(1 2 3)))
+  (assert (equal (getf layout :game-buttons)
+                 '((280 154 216 264) (532 154 216 264) (784 154 216 264))))
+  (assert (equal (getf layout :indicators)
+                 '((596 438 16 8) (620 438 16 8)
+                   (644 438 16 8) (668 438 16 8))))
+  (assert (equal (getf layout :previous) '(156 232 80 100)))
+  (assert (equal (getf layout :next) '(1044 232 80 100)))
+  (assert (member '(536 154 208 264 #xfe6c27) *canvas-fill-calls*
+                  :test #'equal))
+  (assert (member '(536 162 208 248 #x503311) *canvas-fill-calls*
+                  :test #'equal))
+  (assert (member '(557 457 70 2 #xbcbcbc) *canvas-glyph-calls*
+                  :test #'equal)))
+
+(let* ((games '((:id "only-nes" :title "ONLY NES" :system :nes
+                 :color #x5f87ff)))
+       (layout (retrodeck:render-dashboard games :gb 0 "NO MATCH")))
+  (assert (= (getf layout :shown-game-index) (length games)))
+  (assert (null (getf layout :game-indices)))
+  (assert (null (getf layout :visible-game-indices)))
+  (assert (null (getf layout :game-buttons)))
+  (assert (null (getf layout :indicators)))
+  (assert (equal (getf layout :previous) '(156 232 80 100)))
+  (assert (equal (getf layout :next) '(1044 232 80 100))))
+
+(let* ((games '((:id "nes" :title "NES" :system :nes :color #x5f87ff)
+                (:id "gb" :title "ONLY GB" :system :gb :color #x87af87)))
+       (layout (retrodeck:render-dashboard games :gb 7 "ONE CARD")))
+  (assert (= (getf layout :shown-game-index) 1))
+  (assert (equal (getf layout :game-indices) '(1)))
+  (assert (equal (getf layout :visible-game-indices) '(1)))
+  (assert (equal (getf layout :game-buttons) '((532 154 216 264))))
+  (assert (equal (getf layout :indicators) '((632 438 16 8))))
+  (assert (equal (getf layout :previous) '(0 0 0 0)))
+  (assert (equal (getf layout :next) '(0 0 0 0))))
+
+(let* ((games '((:id "covered" :title "COVERED" :system :nes
+                 :color #x5f87ff :cover "/tmp/fixture.png")))
+       (*canvas-fill-calls* nil)
+       (layout (retrodeck:render-dashboard games :nes 0 "COVER FALLBACK")))
+  (assert (= (getf layout :shown-game-index) 0))
+  (assert (member '(578 190 124 144 #x5f87ff) *canvas-fill-calls*
+                  :test #'equal)))
+
 (setf *fbdev-size* '(1280 480))
 (assert (retrodeck:open-fbdev))
 (assert (equal (retrodeck:current-fbdev-size) '(1280 480)))

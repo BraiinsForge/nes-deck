@@ -51,6 +51,7 @@
            #:*dashboard-built-in-applications*
            #:*dashboard-controller-burst-limit*
            #:*dashboard-executables*
+           #:*dashboard-menu-geometry*
            #:*dashboard-palette*
            #:*dashboard-reboot-confirmation-text*
            #:*dashboard-reduced-motion-environment*
@@ -71,6 +72,7 @@
            #:dashboard-color
            #:dashboard-executable
            #:dashboard-launch-plan
+           #:dashboard-menu-geometry
            #:dashboard-system-label
            #:dashboard-timing
            #:dispatch-wayland
@@ -97,6 +99,7 @@
            #:present-wayland-canvas
            #:present-wayland-solid
            #:reboot-confirmation-active-p
+           #:render-dashboard
            #:stop-menu-sound
            #:stroke-canvas-rect
            #:wayland-shutdown-requested-p))
@@ -241,6 +244,7 @@
 (let ((startup *load-truename*))
   (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
+  (load (merge-pathnames "dashboard.lisp" startup) :verbose nil :print nil)
   (let ((local (merge-pathnames "local.lisp" startup)))
     (when (probe-file local)
       (load local :verbose nil :print nil))))

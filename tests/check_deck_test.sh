@@ -59,6 +59,8 @@ grep -Fq '[ -s /mnt/data/nes-deck/lisp/ui.lisp ]' "$remote_script" ||
   fail 'remote health check does not verify the editable Lisp UI'
 grep -Fq '[ -s /mnt/data/nes-deck/lisp/policy.lisp ]' "$remote_script" ||
   fail 'remote health check does not verify the editable Lisp policy'
+grep -Fq '[ -s /mnt/data/nes-deck/lisp/dashboard.lisp ]' "$remote_script" ||
+  fail 'remote health check does not verify the Lisp dashboard'
 grep -Fq 'interface_address wlan0' "$remote_script" ||
   fail 'remote health check does not report the WLAN address'
 grep -Fq '/usr/sbin/iw dev wlan0 link' "$remote_script" ||

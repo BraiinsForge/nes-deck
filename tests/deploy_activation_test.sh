@@ -34,15 +34,19 @@ grep -Fq "ssh \"\$target\" sh -s -- \"\$remote_stage\" <\"\$activate_script\"" \
   "$deployer" || fail 'deployer does not stream the activation script'
 grep -Fq "[[ -f \$activate_script && ! -L \$activate_script ]]" "$deployer" ||
   fail 'deployer does not validate the activation script'
-grep -Fq 'cp lisp/startup.lisp lisp/ui.lisp lisp/policy.lisp "$payload/nes-deck/lisp/"' \
-  "$deployer" || fail 'deployer does not stage the editable Lisp UI and policy'
+grep -Fq 'cp lisp/startup.lisp lisp/ui.lisp lisp/policy.lisp lisp/dashboard.lisp' \
+  "$deployer" || fail 'deployer does not stage the editable Lisp dashboard'
 grep -Fq '[ -s "$stage/nes-deck/lisp/ui.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp UI'
 grep -Fq '[ -s "$stage/nes-deck/lisp/policy.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp policy'
+grep -Fq '[ -s "$stage/nes-deck/lisp/dashboard.lisp" ]' "$activation" ||
+  fail 'activation does not validate the staged Lisp dashboard'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/ui.lisp" "$base/lisp/ui.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp UI'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp policy'
+grep -Fq 'cp -p "$stage/nes-deck/lisp/dashboard.lisp" "$base/lisp/dashboard.lisp"' \
+  "$activation" || fail 'activation does not install the Lisp dashboard'
 
 printf 'deploy-activation-test: OK\n'

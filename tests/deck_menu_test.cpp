@@ -40,6 +40,28 @@ bool rect_contains_color(const Canvas &canvas, const Rect &rect,
   return false;
 }
 
+uint64_t canvas_hash(const Canvas &canvas) {
+  uint64_t hash = UINT64_C(0xcbf29ce484222325);
+  for (uint16_t pixel : canvas) {
+    hash ^= pixel & 0xff;
+    hash *= UINT64_C(0x100000001b3);
+    hash ^= pixel >> 8;
+    hash *= UINT64_C(0x100000001b3);
+  }
+  return hash;
+}
+
+GameEntry fixture_game(const char *id, const char *title, const char *system,
+                       unsigned int red, unsigned int green,
+                       unsigned int blue) {
+  GameEntry game;
+  game.id = id;
+  game.title = title;
+  game.system = system;
+  game.color = RgbColor{red, green, blue};
+  return game;
+}
+
 bool rects_are_horizontal_mirrors(const Canvas &canvas, const Rect &left,
                                   const Rect &right) {
   if (left.width != right.width || left.height != right.height)
@@ -743,6 +765,40 @@ int main() {
   expect(source_icon_canvas == fallback_icon_canvas,
          "the built-in fallback exactly matches the approved settings icon");
   reset_dashboard_palette();
+
+  std::vector<GameEntry> dashboard_fixture_games;
+  dashboard_fixture_games.push_back(
+      fixture_game("alpha", "ALPHA", "nes", 95, 135, 255));
+  dashboard_fixture_games.push_back(
+      fixture_game("beta", "BETA", "nes", 175, 215, 95));
+  dashboard_fixture_games.push_back(fixture_game(
+      "long-title", "A VERY LONG FIXTURE GAME TITLE", "nes", 255, 215, 0));
+  dashboard_fixture_games.push_back(
+      fixture_game("delta", "DELTA", "nes", 215, 95, 95));
+  dashboard_fixture_games.push_back(
+      fixture_game("gb", "GB FIXTURE", "gb", 135, 175, 135));
+  dashboard_fixture_games.push_back(
+      fixture_game("gbc", "GBC FIXTURE", "gbc", 236, 182, 231));
+  dashboard_fixture_games.push_back(
+      fixture_game("zx", "ZX FIXTURE", "zx", 135, 175, 255));
+  dashboard_fixture_games.push_back(
+      fixture_game("chip8", "CHIP-8 FIXTURE", "chip8", 255, 255, 175));
+  dashboard_fixture_games.push_back(
+      fixture_game("deck-fixture", "DECK FIXTURE", "deck", 255, 135, 0));
+  Canvas dashboard_fixture_canvas;
+  MenuLayout dashboard_fixture_layout;
+  render_menu(dashboard_fixture_games, "nes", 2, "FIXTURE STATUS",
+              &dashboard_fixture_canvas, &dashboard_fixture_layout);
+  expect(dashboard_fixture_layout.systems.size() == 6 &&
+             dashboard_fixture_layout.shown_game_index == 2 &&
+             dashboard_fixture_layout.visible_game_indices.size() == 3 &&
+             dashboard_fixture_layout.visible_game_indices[0] == 1 &&
+             dashboard_fixture_layout.visible_game_indices[2] == 3,
+         "dashboard fixture fixes tabs and shifted carousel geometry");
+  // Shared with the Lisp dashboard composition smoke.
+  expect(canvas_hash(dashboard_fixture_canvas) ==
+             UINT64_C(0x65b48f5f3b66d535),
+         "dashboard fixture keeps the complete reference frame");
 
   render_menu(tab_games, "nes", 0, std::string(), &canvas, &menu_layout);
   expect(canvas.size() == static_cast<size_t>(kLogicalWidth * kLogicalHeight),
