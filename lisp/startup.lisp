@@ -3,6 +3,7 @@
   (:export #:abi-version
            #:audio-active-p
            #:canvas-clear
+           #:canvas-draw-glyph
            #:canvas-fill-rect
            #:fbdev-close
            #:fbdev-open
@@ -27,6 +28,7 @@
                 #:abi-version
                 #:audio-active-p
                 #:canvas-clear
+                #:canvas-draw-glyph
                 #:canvas-fill-rect
                 #:fbdev-close
                 #:fbdev-open
@@ -71,6 +73,7 @@
            #:dashboard-system-label
            #:dashboard-timing
            #:dispatch-wayland
+           #:draw-canvas-glyph
            #:fill-canvas-rect
            #:finish-menu-sound
            #:main
@@ -91,7 +94,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 5)
+(defconstant +native-abi-version+ 6)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -153,6 +156,14 @@
 (defun clear-canvas (color)
   (check-type color (integer 0 16777215))
   (= (canvas-clear color) 1))
+
+(defun draw-canvas-glyph (x y character-code scale color)
+  (check-type x (and fixnum (signed-byte 32)))
+  (check-type y (and fixnum (signed-byte 32)))
+  (check-type character-code (integer 0 255))
+  (check-type scale (and fixnum (integer 1 4294967295)))
+  (check-type color (integer 0 16777215))
+  (= (canvas-draw-glyph x y character-code scale color) 1))
 
 (defun fill-canvas-rect (x y width height color)
   (check-type x (and fixnum (signed-byte 32)))

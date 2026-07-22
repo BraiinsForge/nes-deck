@@ -17,7 +17,7 @@ type EclFiveArgumentFunction =
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 5;
+const ABI_VERSION: ClFixnum = 6;
 
 const LOAD_STARTUP: &str = r#"
 (handler-case
@@ -101,12 +101,22 @@ impl Ecl {
         };
         unsafe { ecl_def_c_function(play, callback, 5) };
 
-        let fill_name = c_string("CANVAS-FILL-RECT")?;
-        let fill = unsafe { ecl_make_symbol(fill_name.as_ptr(), package_name.as_ptr()) };
-        let callback = unsafe {
-            mem::transmute::<EclFiveArgumentFunction, EclFixedFunction>(native_canvas_fill_rect)
-        };
-        unsafe { ecl_def_c_function(fill, callback, 5) };
+        for (name, function) in [
+            (
+                "CANVAS-FILL-RECT",
+                native_canvas_fill_rect as EclFiveArgumentFunction,
+            ),
+            (
+                "CANVAS-DRAW-GLYPH",
+                native_canvas_draw_glyph as EclFiveArgumentFunction,
+            ),
+        ] {
+            let name = c_string(name)?;
+            let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
+            let callback =
+                unsafe { mem::transmute::<EclFiveArgumentFunction, EclFixedFunction>(function) };
+            unsafe { ecl_def_c_function(symbol, callback, 5) };
+        }
 
         for (name, function) in [
             ("AUDIO-ACTIVE-P", native_audio_active as EclFixedFunction),
@@ -273,6 +283,32 @@ unsafe extern "C" fn native_canvas_fill_rect(
             decode_u32(width, "canvas rectangle width")?,
             decode_u32(height, "canvas rectangle height")?,
             decode_color(color, "canvas rectangle color")?,
+        );
+        Ok(())
+    })();
+    native_status(result)
+}
+
+unsafe extern "C" fn native_canvas_draw_glyph(
+    x: ClObject,
+    y: ClObject,
+    character: ClObject,
+    scale: ClObject,
+    color: ClObject,
+) -> ClObject {
+    let result = (|| {
+        let character = u8::try_from(decode_u32(character, "canvas glyph character")?)
+            .map_err(|_| "canvas glyph character is out of range".to_owned())?;
+        let scale = decode_u32(scale, "canvas glyph scale")?;
+        if scale == 0 {
+            return Err("canvas glyph scale must be positive".to_owned());
+        }
+        canvas::draw_glyph(
+            decode_i32(x, "canvas glyph x")?,
+            decode_i32(y, "canvas glyph y")?,
+            character,
+            scale,
+            decode_color(color, "canvas glyph color")?,
         );
         Ok(())
     })();

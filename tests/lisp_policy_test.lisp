@@ -10,6 +10,8 @@
 (defparameter *finish-count* 0)
 (defparameter *canvas-clear-status* 1)
 (defparameter *canvas-clear-color* nil)
+(defparameter *canvas-glyph-status* 1)
+(defparameter *canvas-glyph-arguments* nil)
 (defparameter *canvas-fill-status* 1)
 (defparameter *canvas-fill-arguments* nil)
 (defparameter *fbdev-open-status* 1)
@@ -34,6 +36,7 @@
   (:export #:abi-version
            #:audio-active-p
            #:canvas-clear
+           #:canvas-draw-glyph
            #:canvas-fill-rect
            #:fbdev-close
            #:fbdev-open
@@ -53,7 +56,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 5)
+      (lambda () 6)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -68,6 +71,10 @@
       (lambda (color)
         (setf *canvas-clear-color* color)
         *canvas-clear-status*)
+      (symbol-function (find-symbol "CANVAS-DRAW-GLYPH" "RETRODECK.NATIVE"))
+      (lambda (&rest arguments)
+        (setf *canvas-glyph-arguments* arguments)
+        *canvas-glyph-status*)
       (symbol-function (find-symbol "CANVAS-FILL-RECT" "RETRODECK.NATIVE"))
       (lambda (&rest arguments)
         (setf *canvas-fill-arguments* arguments)
@@ -174,6 +181,21 @@
 
 (assert (retrodeck:clear-canvas #x121212))
 (assert (= *canvas-clear-color* #x121212))
+(assert (retrodeck:draw-canvas-glyph -4 8 65 2 #xfe6c27))
+(assert (equal *canvas-glyph-arguments* '(-4 8 65 2 #xfe6c27)))
+(assert (retrodeck:draw-canvas-glyph 0 0 0 1 0))
+(assert (retrodeck:draw-canvas-glyph 0 0 255 1 #xffffff))
+(setf *canvas-glyph-status* 0)
+(assert (not (retrodeck:draw-canvas-glyph 0 0 65 1 0)))
+(setf *canvas-glyph-status* 1
+      *canvas-glyph-arguments* nil)
+(dolist (arguments '((#x80000000 0 65 1 0)
+                     (0 0 256 1 0)
+                     (0 0 65 0 0)
+                     (0 0 65 #x100000000 0)))
+  (assert (signals-type-error-p
+           (lambda () (apply #'retrodeck:draw-canvas-glyph arguments)))))
+(assert (null *canvas-glyph-arguments*))
 (assert (retrodeck:fill-canvas-rect -4 8 12 16 #xfe6c27))
 (assert (equal *canvas-fill-arguments* '(-4 8 12 16 #xfe6c27)))
 (setf *canvas-fill-arguments* nil)
