@@ -438,11 +438,13 @@ DeckAudio::~DeckAudio() {
 
 bool DeckAudio::open_device(unsigned int source_rate,
                             unsigned int volume_percent,
-                            std::string *error) {
+                            std::string *error,
+                            unsigned int fragment_count) {
   close_device();
-  if (source_rate == 0 || volume_percent > 100) {
+  if (source_rate == 0 || volume_percent > 100 || fragment_count == 0 ||
+      fragment_count > 64) {
     if (error)
-      *error = "invalid audio rate or volume";
+      *error = "invalid audio rate, volume, or buffer size";
     return false;
   }
   // Muted playback needs no OSS device; the frame clock still paces the
@@ -457,10 +459,12 @@ bool DeckAudio::open_device(unsigned int source_rate,
     return false;
   }
 
-  // Match the live-proven OSS ring: eight 1024-byte S16 periods,
-  // roughly 93 ms at 44.1 kHz mono.  The earlier four 512-byte periods left
-  // only about 23 ms and audibly underrran during framebuffer updates.
-  int fragment = (8 << 16) | 10;
+  // Use 1024-byte S16 periods.  The default eight-period ring is roughly
+  // 93 ms at 44.1 kHz mono; the independently paced chiptune player requests
+  // four periods for roughly 46 ms of control latency.  The earlier four
+  // 512-byte periods left only about 23 ms and audibly underrran during
+  // framebuffer updates.
+  int fragment = (static_cast<int>(fragment_count) << 16) | 10;
   int format = AFMT_S16_LE;
   int channels = 1;
   // The Deck's OSS compatibility layer reports a requested 32768 Hz stream

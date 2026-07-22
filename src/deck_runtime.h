@@ -120,7 +120,7 @@ public:
 
   /* Audio failure is non-fatal to emulation; callers can use FrameClock. */
   bool open_device(unsigned int source_rate, unsigned int volume_percent,
-                   std::string *error);
+                   std::string *error, unsigned int fragment_count = 8);
   void close_device();
   bool available() const;
   size_t queued_frames() const;
