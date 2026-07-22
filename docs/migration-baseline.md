@@ -168,6 +168,27 @@ production lines, including the existing catalog compiler, and 2,149 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Dashboard policy checkpoint
+
+Startup-loaded `lisp/policy.lisp` now owns the exact system order and labels,
+all 22 semantic dashboard colors, executable routes, built-in Deck applications
+and their append order, launch arguments and environment ordering, volume and
+brightness steps, controller limits, reboot text, terminal label, reduced-motion
+environment name, and dashboard timing values. Its launch-plan functions retain
+the GBC-to-GB route, Deck and chiptune argument differences, touch supervision,
+terminal console mirroring, and reboot handling from the C++ dashboard.
+
+`startup.lisp` loads this editable policy before an optional device-local
+`local.lisp`. Deployment installs both tracked Lisp files, preserves
+`local.lisp`, and validates the ARM/ECL startup as part of activation. The C++
+dashboard remains authoritative and continues to render and launch applications
+until the Lisp-orchestrated replacement reaches physical parity.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 2,111
+production lines, including the existing catalog compiler, and 2,589 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:

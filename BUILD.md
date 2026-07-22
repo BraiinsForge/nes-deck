@@ -94,10 +94,12 @@ uses the integer returned by `RETRODECK:MAIN` as its process status. With no
 argument it loads `/mnt/data/nes-deck/lisp/startup.lisp`; one alternate startup
 path may be supplied for development and smoke tests.
 
-`lisp/startup.lisp` validates the native ABI before entering the orchestrator.
-It also loads an optional `local.lisp` beside itself, allowing device-local
-policy changes without rebuilding Rust. Deployment updates `startup.lisp` but
-leaves an existing `local.lisp` untouched.
+`lisp/startup.lisp` validates the native ABI and loads `policy.lisp` before
+entering the orchestrator. The policy file owns the dashboard systems, labels,
+colors, built-in applications, launch plans, and timing values. Startup then
+loads an optional `local.lisp` beside it for device-local overrides without a
+Rust rebuild. Deployment updates `startup.lisp` and `policy.lisp` but leaves an
+existing `local.lisp` untouched.
 
 Native ABI 3 adds widget-side Wayland primitives for opening and closing the
 custom Deck surface, presenting a solid XRGB8888 frame, bounded event dispatch,
