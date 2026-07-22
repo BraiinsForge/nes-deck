@@ -77,6 +77,7 @@
            #:*dashboard-volume-step*
            #:*menu-sound-cues*
            #:*menu-sound-input-tail-ms*
+           #:apply-dashboard-touch
            #:bitmap-text-width
            #:clear-canvas
            #:clear-dashboard-raster-cache

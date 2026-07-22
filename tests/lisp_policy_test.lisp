@@ -5,6 +5,8 @@
 
 (defparameter *play-status* 1)
 (defparameter *play-arguments* nil)
+(defparameter *record-interaction* nil)
+(defparameter *interaction-trace* nil)
 (defparameter *active-status* 0)
 (defparameter *stop-count* 0)
 (defparameter *finish-count* 0)
@@ -87,6 +89,8 @@
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
       (lambda (&rest arguments)
         (setf *play-arguments* arguments)
+        (when *record-interaction*
+          (push :sound *interaction-trace*))
         *play-status*)
       (symbol-function (find-symbol "STOP-AUDIO" "RETRODECK.NATIVE"))
       (lambda () (incf *stop-count*) 0)
@@ -95,6 +99,8 @@
       (symbol-function (find-symbol "CANVAS-CLEAR" "RETRODECK.NATIVE"))
       (lambda (color)
         (setf *canvas-clear-color* color)
+        (when *record-interaction*
+          (push :render *interaction-trace*))
         *canvas-clear-status*)
       (symbol-function (find-symbol "CANVAS-DRAW-GLYPH" "RETRODECK.NATIVE"))
       (lambda (&rest arguments)
@@ -757,5 +763,54 @@
       (assert (zerop (getf released :game-position)))
       (assert (null (getf released :pressed-target)))
       (assert (null release-effect)))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes :color #x5f87ff)
+                (:id "beta" :title "BETA" :system :nes :color #xafd75f)
+                (:id "gamma" :title "GAMMA" :system :nes :color #xffffaf)
+                (:id "delta" :title "DELTA" :system :nes :color #xd75f5f)))
+       (layout (retrodeck:render-dashboard games :nes 0 ""))
+       (state (retrodeck:dashboard-initial-state games))
+       (*record-interaction* t)
+       (*interaction-trace* nil)
+       (*play-status* 1)
+       (*active-status* 0)
+       (presenter (lambda ()
+                    (push :present *interaction-trace*)
+                    t)))
+  (multiple-value-bind (pressed pressed-layout effect)
+      (retrodeck:apply-dashboard-touch games state layout
+                                       '(1084 282 t t nil) 42 presenter)
+    (assert (eq pressed-layout layout))
+    (assert (null effect))
+    (assert (null *interaction-trace*))
+    (multiple-value-bind (released released-layout release-effect)
+        (retrodeck:apply-dashboard-touch games pressed pressed-layout
+                                         '(1084 282 nil nil t) 42 presenter)
+      (assert (= (getf released :game-position) 1))
+      (assert (= (getf released-layout :shown-game-index) 1))
+      (assert (equal release-effect '(:render t :cue :next)))
+      (assert (equal (reverse *interaction-trace*)
+                     '(:render :present :sound)))
+      (assert (equal *play-arguments* '(659 35 0 0 42)))
+
+      (setf *interaction-trace* nil
+            *active-status* 1
+            *play-status* 2)
+      (multiple-value-bind (pressed-again ignored-layout ignored-effect)
+          (retrodeck:apply-dashboard-touch games released released-layout
+                                           '(1084 282 t t nil) 42 presenter)
+        (declare (ignore ignored-layout))
+        (assert (null ignored-effect))
+        (multiple-value-bind (released-again final-layout final-effect)
+            (retrodeck:apply-dashboard-touch games pressed-again released-layout
+                                             '(1084 282 nil nil t) 42 presenter)
+          (assert (= (getf released-again :game-position) 2))
+          (assert (= (getf final-layout :shown-game-index) 2))
+          (assert (equal final-effect '(:render t :cue :next)))
+          (assert (equal (reverse *interaction-trace*)
+                         '(:render :present :sound)))))))
+  (setf *active-status* 0
+        *play-status* 1
+        retrodeck::*menu-sound-input-until-ms* 0))
 
 (format t "Lisp policy tests passed.~%")

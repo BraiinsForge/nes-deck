@@ -441,3 +441,22 @@
                          (getf next :status) ""
                          effect (list :render t :cue target)))))))))
       (values next effect))))
+
+(defun apply-dashboard-touch (games state layout report volume-percent presenter)
+  (check-type games list)
+  (check-type volume-percent (integer 0 100))
+  (check-type presenter function)
+  (multiple-value-bind (next effect)
+      (dashboard-touch-transition state layout report)
+    (if (getf effect :render)
+        (let ((next-layout
+                (render-dashboard games
+                                  (getf next :active-system)
+                                  (getf next :game-position)
+                                  (getf next :status))))
+          (funcall presenter)
+          (let ((cue (getf effect :cue)))
+            (when cue
+              (play-menu-sound cue volume-percent)))
+          (values next next-layout effect))
+        (values next layout nil))))
