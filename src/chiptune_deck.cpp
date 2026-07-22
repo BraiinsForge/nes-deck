@@ -14,6 +14,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <linux/input.h>
+#include <mutex>
 #include <string>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -30,6 +31,7 @@ const int kCanvasOffset = 16;
 const int kCanvasScale = 2;
 const unsigned int kSampleRate = 44100;
 const size_t kFramesPerTick = 735;
+const unsigned int kAudioFragments = 4;
 const size_t kMaximumFiles = 1024;
 const off_t kMaximumFileSize = 16 * 1024 * 1024;
 const unsigned short kTheGamepadVendor = 0x1c59;
@@ -1109,6 +1111,89 @@ private:
   std::vector<int16_t> visual_;
 };
 
+class ChiptuneAudioLoop {
+public:
+  ChiptuneAudioLoop(ChiptunePlayer *player, DeckAudio *audio)
+      : player_(player), audio_(audio), thread_(), started_(false),
+        stopping_(false), failed_(false) {}
+
+  ~ChiptuneAudioLoop() { stop(); }
+
+  bool start(std::string *error) {
+    if (started_)
+      return true;
+    const int result = pthread_create(&thread_, NULL, thread_entry, this);
+    if (result != 0) {
+      if (error)
+        *error = std::string("cannot start chiptune audio loop: ") +
+                 std::strerror(result);
+      return false;
+    }
+    started_ = true;
+    return true;
+  }
+
+  void stop() {
+    if (!started_)
+      return;
+    {
+      std::lock_guard<std::mutex> guard(mutex_);
+      stopping_ = true;
+    }
+    pthread_join(thread_, NULL);
+    started_ = false;
+  }
+
+  std::mutex &mutex() { return mutex_; }
+
+  bool take_error(std::string *error) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (playback_error_.empty())
+      return false;
+    if (error)
+      error->swap(playback_error_);
+    else
+      playback_error_.clear();
+    return true;
+  }
+
+private:
+  static void *thread_entry(void *context) {
+    ChiptuneAudioLoop *loop = static_cast<ChiptuneAudioLoop *>(context);
+    if (loop)
+      loop->run();
+    return NULL;
+  }
+
+  void run() {
+    DeckFrameClock clock(60.0);
+    while (true) {
+      {
+        std::lock_guard<std::mutex> guard(mutex_);
+        if (stopping_)
+          break;
+        if (!failed_) {
+          std::string error;
+          if (!player_->generate(audio_, &error)) {
+            playback_error_ = error;
+            failed_ = true;
+          }
+        }
+      }
+      clock.wait_for_next_frame();
+    }
+  }
+
+  ChiptunePlayer *player_;
+  DeckAudio *audio_;
+  pthread_t thread_;
+  bool started_;
+  bool stopping_;
+  bool failed_;
+  std::string playback_error_;
+  std::mutex mutex_;
+};
+
 std::string format_time(int milliseconds) {
   const int seconds = std::max(0, milliseconds / 1000);
   char text[32];
@@ -1523,7 +1608,8 @@ int main(int argc, char **argv) {
   const std::string volume_state =
       volume_state_environment ? volume_state_environment : std::string();
   DeckAudio audio;
-  if (!audio.open_device(kSampleRate, volume_percent, &error)) {
+  if (!audio.open_device(kSampleRate, volume_percent, &error,
+                         kAudioFragments)) {
     std::fprintf(stderr, "chiptune-deck: %s; continuing muted\n",
                  error.c_str());
   }
@@ -1534,6 +1620,11 @@ int main(int argc, char **argv) {
     status = std::string("CANNOT PLAY FILES: ") + error;
     std::fprintf(stderr, "chiptune-deck: %s\n", status.c_str());
   }
+  ChiptuneAudioLoop playback(&player, &audio);
+  if (!playback.start(&error)) {
+    std::fprintf(stderr, "chiptune-deck: %s\n", error.c_str());
+    return 1;
+  }
 
   Canvas canvas;
   DeckFrameClock clock(60.0);
@@ -1543,19 +1634,33 @@ int main(int argc, char **argv) {
     const unsigned int commands = input.read_commands();
     if (commands & ControlBack)
       break;
-    if ((commands & ControlPreviousFile) && player.change_file(-1, &error))
-      dirty = true;
-    if ((commands & ControlNextFile) && player.change_file(1, &error))
-      dirty = true;
-    if ((commands & ControlPreviousTrack) && player.change_track(-1, &error))
-      dirty = true;
-    if ((commands & ControlNextTrack) && player.change_track(1, &error))
-      dirty = true;
+    if (commands & ControlPreviousFile) {
+      std::lock_guard<std::mutex> guard(playback.mutex());
+      if (player.change_file(-1, &error))
+        dirty = true;
+    }
+    if (commands & ControlNextFile) {
+      std::lock_guard<std::mutex> guard(playback.mutex());
+      if (player.change_file(1, &error))
+        dirty = true;
+    }
+    if (commands & ControlPreviousTrack) {
+      std::lock_guard<std::mutex> guard(playback.mutex());
+      if (player.change_track(-1, &error))
+        dirty = true;
+    }
+    if (commands & ControlNextTrack) {
+      std::lock_guard<std::mutex> guard(playback.mutex());
+      if (player.change_track(1, &error))
+        dirty = true;
+    }
     if (commands & ControlTogglePause) {
+      std::lock_guard<std::mutex> guard(playback.mutex());
       player.toggle_pause();
       dirty = true;
     }
     if (commands & ControlCyclePlaybackMode) {
+      std::lock_guard<std::mutex> guard(playback.mutex());
       player.cycle_playback_mode();
       dirty = true;
     }
@@ -1566,7 +1671,13 @@ int main(int argc, char **argv) {
               : (volume_percent >= 5 ? volume_percent - 5 : 0);
       if (requested != volume_percent) {
         std::string volume_error;
-        if (audio.open_device(kSampleRate, requested, &volume_error)) {
+        bool reopened = false;
+        {
+          std::lock_guard<std::mutex> guard(playback.mutex());
+          reopened = audio.open_device(kSampleRate, requested, &volume_error,
+                                       kAudioFragments);
+        }
+        if (reopened) {
           volume_percent = requested;
           dirty = true;
           if (!save_player_volume(volume_state, volume_percent,
@@ -1581,12 +1692,17 @@ int main(int argc, char **argv) {
       }
     }
 
-    if (!player.generate(&audio, &error)) {
-      status = std::string("PLAYBACK ERROR: ") + error;
+    std::string playback_error;
+    if (playback.take_error(&playback_error)) {
+      status = std::string("PLAYBACK ERROR: ") + playback_error;
       std::fprintf(stderr, "chiptune-deck: %s\n", status.c_str());
+      dirty = true;
     }
     if (dirty || frame_number % 2 == 0) {
-      render_player(&canvas, player, status, volume_percent);
+      {
+        std::lock_guard<std::mutex> guard(playback.mutex());
+        render_player(&canvas, player, status, volume_percent);
+      }
       if (!framebuffer.present_rgb565(&canvas[0], kCanvasWidth, kCanvasHeight,
                                       kCanvasWidth * sizeof(canvas[0]),
                                       &error)) {

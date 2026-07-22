@@ -219,8 +219,10 @@ the menu and timer cues are mono. FCEUmm reports 48 kHz. The OSS device stays at
 required nominal 48 kHz while the runtime resamples to the measured 47,328
 frames/s application clock. Fuse, CHIP-8, the timer, menu cues, and chiptunes
 use 44.1 kHz. Gambatte produces 32,768 Hz and is explicitly resampled to the
-Deck's verified 32 kHz OSS rate. Gain is applied in the native mixer because
-the kernel OSS path bypasses ALSA userspace soft volume.
+Deck's verified 32 kHz OSS rate. Emulators keep the eight-fragment resilient
+output ring, while the independently paced chiptune player uses four fragments
+for responsive controls. Gain is applied in the native mixer because the
+kernel OSS path bypasses ALSA userspace soft volume.
 
 The framebuffer has no page-flip API. Frontends build complete frames in
 cacheable memory and copy finished rows to fb0 to reduce tearing and protect
