@@ -117,6 +117,7 @@ done
 [ -s "$stage/nes-deck/lisp/startup.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/ui.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/policy.lisp" ] && \
+  [ -s "$stage/nes-deck/lisp/credits.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/dashboard.lisp" ] || {
   echo "Staged Common Lisp dashboard files are incomplete" >&2
   exit 1
@@ -200,10 +201,12 @@ mkdir -p "$base/lisp"
 cp -p "$stage/nes-deck/lisp/startup.lisp" "$base/lisp/startup.lisp"
 cp -p "$stage/nes-deck/lisp/ui.lisp" "$base/lisp/ui.lisp"
 cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"
+cp -p "$stage/nes-deck/lisp/credits.lisp" "$base/lisp/credits.lisp"
 cp -p "$stage/nes-deck/lisp/dashboard.lisp" "$base/lisp/dashboard.lisp"
 chmod 0700 "$base/retrodeck-native" "$base/lisp"
 chmod 0600 "$base/lisp/startup.lisp" "$base/lisp/ui.lisp" \
-  "$base/lisp/policy.lisp" "$base/lisp/dashboard.lisp"
+  "$base/lisp/policy.lisp" "$base/lisp/credits.lisp" \
+  "$base/lisp/dashboard.lisp"
 cp -p "$stage/nes-deck/uploader/rom-uploader" \
   "$base/uploader/rom-uploader"
 chmod 0700 "$base/uploader" "$base/uploads" \

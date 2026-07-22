@@ -253,6 +253,20 @@ pub fn with_pixels<T>(callback: impl FnOnce(&[u8]) -> T) -> T {
     CANVAS.with(|canvas| callback(canvas.borrow().pixmap.data()))
 }
 
+pub fn rgb565_hash() -> u64 {
+    with_pixels(|pixels| {
+        let mut hash = 0xcbf29ce484222325_u64;
+        for color in pixels.chunks_exact(4) {
+            let pixel = (u16::from(color[0] & 0xf8) << 8)
+                | (u16::from(color[1] & 0xfc) << 3)
+                | u16::from(color[2] >> 3);
+            hash = (hash ^ u64::from(pixel & 0xff)).wrapping_mul(0x100000001b3);
+            hash = (hash ^ u64::from(pixel >> 8)).wrapping_mul(0x100000001b3);
+        }
+        hash
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -33,7 +33,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 9;
+const ABI_VERSION: ClFixnum = 10;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -190,6 +190,10 @@ impl Ecl {
 
         for (name, function) in [
             ("AUDIO-ACTIVE-P", native_audio_active as EclFixedFunction),
+            (
+                "CANVAS-RGB565-HASH-WORDS",
+                native_canvas_rgb565_hash_words as EclFixedFunction,
+            ),
             ("STOP-AUDIO", native_stop_audio as EclFixedFunction),
             ("FINISH-AUDIO", native_finish_audio as EclFixedFunction),
             ("RASTER-CLEAR", native_raster_clear as EclFixedFunction),
@@ -353,6 +357,16 @@ unsafe extern "C" fn native_finish_audio() -> ClObject {
     unsafe { ecl_make_integer(0) }
 }
 
+unsafe extern "C" fn native_canvas_rgb565_hash_words() -> ClObject {
+    let hash = canvas::rgb565_hash();
+    make_fixnum_list(&[
+        ((hash >> 48) & 0xffff) as ClFixnum,
+        ((hash >> 32) & 0xffff) as ClFixnum,
+        ((hash >> 16) & 0xffff) as ClFixnum,
+        (hash & 0xffff) as ClFixnum,
+    ])
+}
+
 unsafe extern "C" fn native_canvas_clear(color: ClObject) -> ClObject {
     let result = (|| {
         canvas::clear(decode_color(color, "canvas clear color")?);
@@ -434,7 +448,7 @@ unsafe extern "C" fn native_canvas_configure_projection(
 ) -> ClObject {
     let result = (|| {
         canvas::configure_projection(
-            decode_i64(elapsed_ms, "projection elapsed time")?,
+            decode_i64_hex(elapsed_ms, "projection elapsed time")?,
             decode_u32(speed_numerator, "projection speed numerator")?,
             decode_u32(speed_denominator, "projection speed denominator")?,
             decode_u32(cycle, "projection cycle")?,
@@ -752,8 +766,13 @@ fn decode_i32(object: ClObject, name: &str) -> Result<c_int, String> {
     c_int::try_from(value).map_err(|_| format!("{name} is out of range"))
 }
 
-fn decode_i64(object: ClObject, name: &str) -> Result<i64, String> {
-    let value = decode_fixnum(object).ok_or_else(|| format!("{name} must be an integer"))?;
+fn decode_i64_hex(object: ClObject, name: &str) -> Result<i64, String> {
+    let bytes = decode_base_string(object, name)?;
+    if bytes.len() != 16 || !bytes.iter().all(u8::is_ascii_hexdigit) {
+        return Err(format!("{name} must contain sixteen hexadecimal digits"));
+    }
+    let text = std::str::from_utf8(&bytes).map_err(|_| format!("{name} is not ASCII"))?;
+    let value = u64::from_str_radix(text, 16).map_err(|_| format!("{name} is out of range"))?;
     i64::try_from(value).map_err(|_| format!("{name} is out of range"))
 }
 

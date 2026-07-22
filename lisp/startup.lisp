@@ -8,6 +8,7 @@
            #:canvas-draw-projected-text
            #:canvas-draw-raster
            #:canvas-fill-rect
+           #:canvas-rgb565-hash-words
            #:evdev-next-touch
            #:evdev-touch-close
            #:evdev-touch-dispatch
@@ -46,6 +47,7 @@
                 #:canvas-draw-projected-text
                 #:canvas-draw-raster
                 #:canvas-fill-rect
+                #:canvas-rgb565-hash-words
                 #:evdev-next-touch
                 #:evdev-touch-close
                 #:evdev-touch-dispatch
@@ -74,6 +76,10 @@
            #:*dashboard-built-in-applications*
            #:*dashboard-controller-burst-limit*
            #:*dashboard-cover-directory*
+           #:*dashboard-credits-archive-path*
+           #:*dashboard-credits-geometry*
+           #:*dashboard-credits-labels*
+           #:*dashboard-credits-path*
            #:*dashboard-executables*
            #:*dashboard-menu-geometry*
            #:*dashboard-palette*
@@ -89,8 +95,10 @@
            #:*menu-sound-input-tail-ms*
            #:apply-dashboard-touch
            #:bitmap-text-width
+           #:canvas-rgb565-hash
            #:clear-canvas
            #:clear-dashboard-raster-cache
+           #:clear-credits-text-mask-cache
            #:clear-text-mask-cache
            #:configure-text-projection
            #:close-evdev-touch
@@ -98,8 +106,13 @@
            #:close-wayland
            #:current-fbdev-size
            #:current-wayland-size
+           #:credits-initial-state
+           #:credits-target-at
+           #:credits-touch-transition
            #:dashboard-application
            #:dashboard-color
+           #:dashboard-credits-geometry
+           #:dashboard-credits-label
            #:dashboard-executable
            #:dashboard-initial-state
            #:dashboard-launch-plan
@@ -124,8 +137,10 @@
            #:fit-text-width
            #:load-cover-raster
            #:load-png-raster
+           #:load-project-credits
            #:load-text-mask
            #:main
+           #:make-project-credits-crawl
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
            #:menu-sound-notes
@@ -136,6 +151,7 @@
            #:open-wayland-widget
            #:play-menu-sound
            #:prepare-dashboard-rasters
+           #:prepare-project-credits-crawl
            #:present-fbdev-canvas
            #:present-fbdev-solid
            #:present-wayland-canvas
@@ -143,13 +159,14 @@
            #:read-bounded-regular-file
            #:reboot-confirmation-active-p
            #:render-dashboard
+           #:render-project-credits
            #:stop-menu-sound
            #:stroke-canvas-rect
            #:wayland-shutdown-requested-p))
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 9)
+(defconstant +native-abi-version+ 10)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -212,6 +229,17 @@
   (check-type color (integer 0 16777215))
   (= (canvas-clear color) 1))
 
+(defun canvas-rgb565-hash ()
+  (let ((words (canvas-rgb565-hash-words)))
+    (unless (= (length words) 4)
+      (error "Native canvas hash is unavailable"))
+    (reduce (lambda (value word) (logior (ash value 16) word))
+            words :initial-value 0)))
+
+(defun native-unsigned-64-hex (value)
+  (check-type value (integer 0 9223372036854775807))
+  (coerce (format nil "~16,'0X" value) 'base-string))
+
 (defun draw-canvas-glyph (x y character-code scale color)
   (check-type x (and fixnum (signed-byte 32)))
   (check-type y (and fixnum (signed-byte 32)))
@@ -252,7 +280,7 @@
     (elapsed-ms speed-numerator speed-denominator cycle camera-distance
      maximum-depth horizon-y clip-top fade-invisible-y fade-opaque-y bottom-y
      color)
-  (check-type elapsed-ms (and fixnum (integer 0 *)))
+  (check-type elapsed-ms (integer 0 9223372036854775807))
   (dolist (value (list speed-numerator speed-denominator cycle camera-distance
                        maximum-depth))
     (check-type value (and fixnum (unsigned-byte 32))))
@@ -261,7 +289,8 @@
     (check-type value (and fixnum (signed-byte 32))))
   (check-type color (integer 0 16777215))
   (= (canvas-configure-projection
-      elapsed-ms speed-numerator speed-denominator cycle camera-distance
+      (native-unsigned-64-hex elapsed-ms)
+      speed-numerator speed-denominator cycle camera-distance
       maximum-depth horizon-y clip-top fade-invisible-y fade-opaque-y bottom-y
       color)
      1))
@@ -369,6 +398,7 @@
 (let ((startup *load-truename*))
   (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
+  (load (merge-pathnames "credits.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "dashboard.lisp" startup) :verbose nil :print nil)
   (let ((local (merge-pathnames "local.lisp" startup)))
     (when (probe-file local)

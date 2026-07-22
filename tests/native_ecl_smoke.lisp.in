@@ -3,7 +3,7 @@
 (in-package #:retrodeck)
 
 (defun main ()
-  (unless (= (retrodeck.native:abi-version) 9)
+  (unless (= (retrodeck.native:abi-version) 10)
     (error "Native ABI mismatch"))
   (unless (= (retrodeck.native:canvas-clear #x121212) 1)
     (error "Canvas clear callback did not accept one argument"))
@@ -44,6 +44,23 @@
       (error "Projected text mask cache did not clear"))
     (unless (zerop (retrodeck.native:canvas-draw-projected-text 1 0))
       (error "Cleared projected text mask remained available"))
+    (let* ((credits (load-project-credits "@credits@"))
+           (crawl (make-project-credits-crawl credits)))
+      (prepare-project-credits-crawl crawl)
+      (dolist (fixture '((nil 0 #x94ebf079be6e596b)
+                         (nil 2000 #x1f14f6b786549363)
+                         (nil 20000 #x6267b51f6f787c83)
+                         (nil 600000000 #xf62d9d0147c7461a)
+                         (t 0 #x9a44bcef4a13dde3)
+                         (t 60000 #x9a44bcef4a13dde3)))
+        (destructuring-bind (reduced-motion elapsed-ms expected) fixture
+          (unless (equal (render-project-credits
+                          crawl reduced-motion elapsed-ms)
+                         '(:close (1212 12 56 56)))
+            (error "Credits layout crossed the native boundary incorrectly"))
+          (unless (= (canvas-rgb565-hash) expected)
+            (error "Credits frame mismatch at ~D ms" elapsed-ms))))
+      (clear-credits-text-mask-cache))
     (let ((icon (load-png-raster "@settings_icon@" 23 23)))
       (unless icon
         (error "PNG raster callback did not load the settings asset"))

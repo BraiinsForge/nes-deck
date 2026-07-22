@@ -115,6 +115,8 @@ int main(int argc, char **argv) {
   assert(reference_hash(false, 0) == UINT64_C(0x94ebf079be6e596b));
   assert(reference_hash(false, 2000) == UINT64_C(0x1f14f6b786549363));
   assert(reference_hash(false, 20000) == UINT64_C(0x6267b51f6f787c83));
+  assert(reference_hash(false, 600000000) ==
+         UINT64_C(0xf62d9d0147c7461a));
   assert(reference_hash(true, 0) == UINT64_C(0x9a44bcef4a13dde3));
   assert(reference_hash(true, 60000) == UINT64_C(0x9a44bcef4a13dde3));
 

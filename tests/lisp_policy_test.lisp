@@ -12,6 +12,7 @@
 (defparameter *finish-count* 0)
 (defparameter *canvas-clear-status* 1)
 (defparameter *canvas-clear-color* nil)
+(defparameter *canvas-hash-words* '(1 2 3 4))
 (defparameter *canvas-glyph-status* 1)
 (defparameter *canvas-glyph-arguments* nil)
 (defparameter *canvas-glyph-calls* nil)
@@ -21,8 +22,10 @@
 (defparameter *projection-arguments* nil)
 (defparameter *projected-text-status* 1)
 (defparameter *projected-text-arguments* nil)
+(defparameter *projected-text-calls* nil)
 (defparameter *text-mask-result* 0)
 (defparameter *text-mask-arguments* nil)
+(defparameter *text-mask-calls* nil)
 (defparameter *text-mask-clear-count* 0)
 (defparameter *regular-file-result* nil)
 (defparameter *regular-file-arguments* nil)
@@ -69,6 +72,7 @@
            #:canvas-draw-projected-text
            #:canvas-draw-raster
            #:canvas-fill-rect
+           #:canvas-rgb565-hash-words
            #:evdev-next-touch
            #:evdev-touch-close
            #:evdev-touch-dispatch
@@ -97,7 +101,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 9)
+      (lambda () 10)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -116,7 +120,10 @@
         (when *record-interaction*
           (push :render *interaction-trace*))
         *canvas-clear-status*)
-      (symbol-function (find-symbol "CANVAS-CONFIGURE-PROJECTION"
+      (symbol-function (find-symbol "CANVAS-RGB565-HASH-WORDS"
+                                    "RETRODECK.NATIVE"))
+       (lambda () *canvas-hash-words*)
+       (symbol-function (find-symbol "CANVAS-CONFIGURE-PROJECTION"
                                     "RETRODECK.NATIVE"))
        (lambda (&rest arguments)
          (setf *projection-arguments* arguments)
@@ -125,6 +132,7 @@
                                     "RETRODECK.NATIVE"))
        (lambda (&rest arguments)
          (setf *projected-text-arguments* arguments)
+         (push arguments *projected-text-calls*)
          *projected-text-status*)
        (symbol-function (find-symbol "CANVAS-DRAW-GLYPH" "RETRODECK.NATIVE"))
       (lambda (&rest arguments)
@@ -162,6 +170,7 @@
         (symbol-function (find-symbol "TEXT-MASK-LOAD" "RETRODECK.NATIVE"))
         (lambda (&rest arguments)
           (setf *text-mask-arguments* arguments)
+          (push arguments *text-mask-calls*)
           *text-mask-result*)
         (symbol-function (find-symbol "EVDEV-TOUCH-OPEN" "RETRODECK.NATIVE"))
          (lambda () *evdev-open-status*)
@@ -213,6 +222,21 @@
   (handler-case
       (progn (funcall function) nil)
     (type-error () t)))
+
+(defun signals-error-p (function)
+  (handler-case
+      (progn (funcall function) nil)
+    (error () t)))
+
+(defun test-file-string (path)
+  (with-open-file (input path)
+    (let ((contents (make-string (file-length input))))
+      (read-sequence contents input)
+      contents)))
+
+(defun decode-native-unsigned-64 (text)
+  (assert (= (length text) 16))
+  (parse-integer text :radix 16))
 
 (assert (equal (retrodeck:menu-sound-notes :volume)
                '((660 60) (880 60))))
@@ -275,6 +299,7 @@
 
 (assert (retrodeck:clear-canvas #x121212))
 (assert (= *canvas-clear-color* #x121212))
+(assert (= (retrodeck:canvas-rgb565-hash) #x0001000200030004))
 (assert (retrodeck:draw-canvas-glyph -4 8 65 2 #xfe6c27))
 (assert (equal *canvas-glyph-arguments* '(-4 8 65 2 #xfe6c27)))
 (assert (retrodeck:draw-canvas-glyph 0 0 0 1 0))
@@ -315,8 +340,14 @@
 (assert (equal *text-mask-arguments* '("HH" 4)))
 (assert (retrodeck:configure-text-projection
          2000 1 20 8044 420 4000 56 72 104 210 480 #xffffaf))
-(assert (equal *projection-arguments*
-               '(2000 1 20 8044 420 4000 56 72 104 210 480 #xffffaf)))
+(assert (= (decode-native-unsigned-64 (first *projection-arguments*))
+           2000))
+(assert (equal (rest *projection-arguments*)
+               '(1 20 8044 420 4000 56 72 104 210 480 #xffffaf)))
+(assert (retrodeck:configure-text-projection
+         600000000 1 20 8044 420 4000 56 72 104 210 480 #xffffaf))
+(assert (= (decode-native-unsigned-64 (first *projection-arguments*))
+           600000000))
 (assert (retrodeck:draw-projected-text 17 44))
 (assert (equal *projected-text-arguments* '(17 44)))
 (assert (retrodeck:clear-text-mask-cache))
@@ -395,6 +426,104 @@
                  (100 104 20 12 #xfe6c27)
                  (108 104 4 12 #x121212)
                  (104 108 12 4 #x121212))))
+
+(let* ((credits-path
+         (truename (merge-pathnames "../deploy/menu/credits.tsv"
+                                    *load-truename*)))
+       (*regular-file-result* (test-file-string credits-path))
+       (credits (retrodeck:load-project-credits credits-path))
+       (crawl (retrodeck:make-project-credits-crawl credits)))
+  (assert (= (length credits) 32))
+  (assert (string= (getf (first credits) :project) "FCEUmm"))
+  (assert (string= (getf (car (last credits)) :project)
+                   "OpenGameArt contributors"))
+  (assert (= (length (getf crawl :lines)) 101))
+  (assert (= (length (getf crawl :static-lines)) 32))
+  (assert (= (getf crawl :content-height) 5396))
+  (assert (equal (first (getf crawl :lines))
+                 '(:text "RETRO DECK" :source-y 0
+                   :source-width 236 :source-height 28)))
+  (assert (equal (car (last (getf crawl :lines)))
+                 '(:text "THANK YOU" :source-y 5352
+                   :source-width 212 :source-height 28)))
+  (assert (every (lambda (line)
+                   (and (<= (getf line :source-width) 1040)
+                        (= (getf line :source-height) 28)))
+                 (getf crawl :lines)))
+
+  (assert (retrodeck:clear-credits-text-mask-cache))
+  (setf *text-mask-result* 17
+        *text-mask-calls* nil
+        *projected-text-calls* nil
+        *projection-arguments* nil
+        *canvas-fill-calls* nil
+        *canvas-glyph-calls* nil)
+  (assert (equal (retrodeck:render-project-credits crawl nil 2000)
+                 '(:close (1212 12 56 56))))
+  (assert (= *canvas-clear-color* #x000000))
+  (assert (= (decode-native-unsigned-64 (first *projection-arguments*))
+             2000))
+  (assert (equal (rest *projection-arguments*)
+                 '(1 20 9396 420 4000 56 72 104 210 480 #xffffac)))
+  (let ((projected (nreverse *projected-text-calls*)))
+    (assert (= (length projected) 101))
+    (assert (equal (first projected) '(17 0)))
+    (assert (equal (car (last projected)) '(17 5352))))
+  (assert (= (length *canvas-fill-calls*) 96))
+  (assert (null *canvas-glyph-calls*))
+  (assert (<= (length *text-mask-calls*) 101))
+  (assert (> (length *text-mask-calls*) 70))
+
+  (setf *canvas-fill-calls* nil
+        *canvas-glyph-calls* nil
+        *projected-text-calls* nil
+        *projection-arguments* nil)
+  (retrodeck:render-project-credits crawl t 0)
+  (let ((first-fills (reverse *canvas-fill-calls*))
+        (first-glyphs (reverse *canvas-glyph-calls*)))
+    (assert (= (length first-fills) 14))
+    (assert (null *projected-text-calls*))
+    (assert (null *projection-arguments*))
+    (assert (member '(20 20 70 2 #xffffac) first-glyphs :test #'equal))
+    (assert (member '(20 458 47 1 #x949594) first-glyphs :test #'equal))
+    (setf *canvas-fill-calls* nil
+          *canvas-glyph-calls* nil)
+    (retrodeck:render-project-credits crawl t 60000)
+    (assert (equal (reverse *canvas-fill-calls*) first-fills))
+    (assert (equal (reverse *canvas-glyph-calls*) first-glyphs)))
+
+  (let ((layout '(:close (1212 12 56 56))))
+    (assert (eq (retrodeck:credits-target-at layout 1212 12) :close))
+    (assert (eq (retrodeck:credits-target-at layout 1267 67) :close))
+    (assert (null (retrodeck:credits-target-at layout 1268 67)))
+    (multiple-value-bind (pressed effect)
+        (retrodeck:credits-touch-transition
+         (retrodeck:credits-initial-state) layout '(1240 40 t t nil))
+      (assert (null effect))
+      (multiple-value-bind (released release-effect)
+          (retrodeck:credits-touch-transition
+           pressed layout '(1240 40 nil nil t))
+        (assert (null (getf released :pressed-target)))
+        (assert (equal release-effect '(:close t :cue :back))))))
+
+  (setf *regular-file-result* nil)
+  (assert (signals-error-p
+           (lambda () (retrodeck:load-project-credits "/tmp/missing.tsv"))))
+  (assert (signals-error-p
+           (lambda () (retrodeck:load-project-credits "relative.tsv"))))
+  (dolist (contents
+           (list "# only a comment\n"
+                 "bad\trow\n"
+                 "same\trole\tMIT\nsame\trole\tMIT\n"
+                 (format nil "~A\trole\tMIT\n" (make-string 49
+                                                          :initial-element #\A))
+                 (with-output-to-string (output)
+                   (dotimes (index 65)
+                     (format output "project-~D\trole\tMIT~%" index)))))
+    (setf *regular-file-result* contents)
+    (assert (signals-error-p
+             (lambda ()
+               (retrodeck:load-project-credits "/tmp/invalid.tsv"))))))
 
 (let* ((games '((:id "alpha" :title "ALPHA" :system :nes :color #x5f87ff)
                 (:id "beta" :title "BETA" :system :nes :color #xafd75f)

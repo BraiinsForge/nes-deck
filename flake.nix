@@ -893,6 +893,7 @@
           cp ${./lisp/startup.lisp} startup.lisp
           cp ${./lisp/ui.lisp} ui.lisp
           cp ${./lisp/policy.lisp} policy.lisp
+          cp ${./lisp/credits.lisp} credits.lisp
           cp ${./lisp/dashboard.lisp} dashboard.lisp
           cp ${./assets/settings-cog/gear-knekko-09.png} settings-icon.png
           substitute ${./tests/native_ecl_smoke.lisp.in} smoke.lisp \
