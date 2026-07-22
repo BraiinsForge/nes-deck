@@ -1,5 +1,7 @@
+use retrodeck_native::audio;
 use std::env;
 use std::ffi::{CString, c_char, c_int, c_void};
+use std::mem;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -7,11 +9,14 @@ use std::ptr;
 
 type ClObject = *mut c_void;
 type ClFixnum = isize;
+type EclFixedFunction = unsafe extern "C" fn() -> ClObject;
+type EclFiveArgumentFunction =
+    unsafe extern "C" fn(ClObject, ClObject, ClObject, ClObject, ClObject) -> ClObject;
 
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 1;
+const ABI_VERSION: ClFixnum = 2;
 
 const LOAD_STARTUP: &str = r#"
 (handler-case
@@ -38,11 +43,7 @@ unsafe extern "C" {
     fn cl_boot(argc: c_int, argv: *mut *mut c_char) -> c_int;
     fn cl_shutdown();
     fn ecl_make_symbol(name: *const c_char, package: *const c_char) -> ClObject;
-    fn ecl_def_c_function(
-        symbol: ClObject,
-        function: unsafe extern "C" fn() -> ClObject,
-        arguments: c_int,
-    );
+    fn ecl_def_c_function(symbol: ClObject, function: EclFixedFunction, arguments: c_int);
     fn ecl_make_integer(value: ClFixnum) -> ClObject;
     fn ecl_make_simple_base_string(value: *const c_char, length: ClFixnum) -> ClObject;
     fn ecl_find_package(name: *const c_char) -> ClObject;
@@ -85,9 +86,28 @@ impl Ecl {
             unsafe { ecl_make_package(name, ECL_NIL, ECL_NIL, ECL_NIL) };
         }
 
-        let symbol_name = c_string("ABI-VERSION")?;
-        let symbol = unsafe { ecl_make_symbol(symbol_name.as_ptr(), package_name.as_ptr()) };
-        unsafe { ecl_def_c_function(symbol, native_abi_version, 0) };
+        let abi_name = c_string("ABI-VERSION")?;
+        let abi = unsafe { ecl_make_symbol(abi_name.as_ptr(), package_name.as_ptr()) };
+        unsafe { ecl_def_c_function(abi, native_abi_version, 0) };
+
+        let play_name = c_string("PLAY-TONES")?;
+        let play = unsafe { ecl_make_symbol(play_name.as_ptr(), package_name.as_ptr()) };
+        // ECL 26.5.5 defines cl_objectfn_fixed as the C old-style
+        // cl_object (*)(), then dispatches the argument count registered here.
+        let callback = unsafe {
+            mem::transmute::<EclFiveArgumentFunction, EclFixedFunction>(native_play_tones)
+        };
+        unsafe { ecl_def_c_function(play, callback, 5) };
+
+        for (name, function) in [
+            ("AUDIO-ACTIVE-P", native_audio_active as EclFixedFunction),
+            ("STOP-AUDIO", native_stop_audio as EclFixedFunction),
+            ("FINISH-AUDIO", native_finish_audio as EclFixedFunction),
+        ] {
+            let name = c_string(name)?;
+            let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
+            unsafe { ecl_def_c_function(symbol, function, 0) };
+        }
         Ok(())
     }
 
@@ -128,16 +148,64 @@ unsafe extern "C" fn native_abi_version() -> ClObject {
     unsafe { ecl_make_integer(ABI_VERSION) }
 }
 
+unsafe extern "C" fn native_play_tones(
+    first_frequency: ClObject,
+    first_duration_ms: ClObject,
+    second_frequency: ClObject,
+    second_duration_ms: ClObject,
+    volume_percent: ClObject,
+) -> ClObject {
+    let result = (|| {
+        audio::play_tones(
+            decode_i32(first_frequency, "first tone frequency")?,
+            decode_i32(first_duration_ms, "first tone duration")?,
+            decode_i32(second_frequency, "second tone frequency")?,
+            decode_i32(second_duration_ms, "second tone duration")?,
+            decode_i32(volume_percent, "menu sound volume")?,
+        )
+    })();
+    let status = match result {
+        Ok(audio::PlayOutcome::Started) => 1,
+        Ok(audio::PlayOutcome::Busy) => 2,
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            0
+        }
+    };
+    unsafe { ecl_make_integer(status) }
+}
+
+unsafe extern "C" fn native_audio_active() -> ClObject {
+    unsafe { ecl_make_integer(if audio::active() { 1 } else { 0 }) }
+}
+
+unsafe extern "C" fn native_stop_audio() -> ClObject {
+    audio::stop();
+    unsafe { ecl_make_integer(0) }
+}
+
+unsafe extern "C" fn native_finish_audio() -> ClObject {
+    audio::finish();
+    unsafe { ecl_make_integer(0) }
+}
+
 fn c_string(value: &str) -> Result<CString, String> {
     CString::new(value).map_err(|_| "an internal ECL name contains NUL".to_owned())
 }
 
-fn decode_exit_code(object: ClObject) -> Result<u8, String> {
+fn decode_fixnum(object: ClObject) -> Option<ClFixnum> {
     let tagged = object as usize;
-    if tagged & 3 != FIXNUM_TAG {
-        return Err("RETRODECK:MAIN must return an integer exit status".to_owned());
-    }
-    let value = (tagged as isize) >> 2;
+    (tagged & 3 == FIXNUM_TAG).then_some((tagged as isize) >> 2)
+}
+
+fn decode_i32(object: ClObject, name: &str) -> Result<c_int, String> {
+    let value = decode_fixnum(object).ok_or_else(|| format!("{name} must be an integer"))?;
+    c_int::try_from(value).map_err(|_| format!("{name} is out of range"))
+}
+
+fn decode_exit_code(object: ClObject) -> Result<u8, String> {
+    let value = decode_fixnum(object)
+        .ok_or_else(|| "RETRODECK:MAIN must return an integer exit status".to_owned())?;
     u8::try_from(value).map_err(|_| "RETRODECK:MAIN returned an invalid exit status".to_owned())
 }
 
@@ -156,7 +224,9 @@ fn run() -> Result<u8, String> {
     let ecl = Ecl::boot()?;
     ecl.register_primitives()?;
     ecl.load(&startup)?;
-    ecl.run()
+    let result = ecl.run();
+    audio::stop();
+    result
 }
 
 fn main() -> ExitCode {
