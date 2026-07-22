@@ -240,6 +240,36 @@ production lines, including the existing catalog compiler, and 3,407 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Bitmap UI checkpoint
+
+Native ABI 6 adds the exact reference 5x7 bitmap font as one clipped, scaled
+glyph operation. Its 95 printable ASCII mappings, punctuation, lowercase forms,
+and unknown-byte fallback match `menu_ui.cpp` row for row. Lisp remains
+responsible for UTF-8-to-ASCII display fallback, glyph advance, text width,
+scale selection, ellipsis fitting, centering, straight borders, 4-pixel cut
+rectangles, and panel composition. One native call per glyph avoids the original
+per-pixel ECL crossing cost while leaving labels and layout directly editable in
+`lisp/ui.lisp`.
+
+A complete font hash protects every byte mapping. A deterministic 1280x480
+fixture exercises policy colors, a cut-corner panel, a straight outline,
+centered text, fitted ellipsis, and non-ASCII `?` fallback. The C++ reference and
+Rust canvas independently produce RGB565 FNV-1a hash `414079453e1344d5`, while
+Lisp tests protect the exact primitive sequence and coordinates. Deployment now
+installs and health-checks `startup.lisp`, `ui.lisp`, and `policy.lisp` while
+continuing to preserve optional `local.lisp`.
+
+On the development Deck, the same high-level Lisp fixture rendered through ABI
+6 and fbdev, yielding a 1,638,400-byte stride-aware capture that matched the C++
+reference hash after all 614,400 logical pixels were unrotated. The supervised
+smoke then restored a healthy C++ dashboard. Physical Wayland presentation
+remains blocked by the missing compositor firmware.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 3,017
+production lines, including the existing catalog compiler, and 3,897 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:
