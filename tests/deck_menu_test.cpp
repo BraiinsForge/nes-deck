@@ -1208,6 +1208,28 @@ int main() {
   expect(canvas_hash(canvas) == UINT64_C(0x773a6a165672bd8b),
          "small settings footer fixture keeps the complete reference frame");
 
+  WifiState wifi_frame_state;
+  WifiLayout wifi_frame_layout;
+  render_wifi(wifi_frame_state, network_status, &canvas, &wifi_frame_layout);
+  // Shared with the Lisp Wi-Fi composition smoke.
+  expect(canvas_hash(canvas) == UINT64_C(0xd6be2f43c4faf0e6),
+         "lowercase WiFi fixture keeps the complete reference frame");
+  wifi_frame_state.uppercase = true;
+  render_wifi(wifi_frame_state, network_status, &canvas, &wifi_frame_layout);
+  expect(canvas_hash(canvas) == UINT64_C(0x7682dc83b0062730),
+         "uppercase WiFi fixture keeps the complete reference frame");
+  wifi_frame_state.field = WifiPassphrase;
+  wifi_frame_state.ssid = "NETWORK";
+  wifi_frame_state.passphrase = "password";
+  render_wifi(wifi_frame_state, network_status, &canvas, &wifi_frame_layout);
+  expect(canvas_hash(canvas) == UINT64_C(0xa5c18f4c41654088),
+         "password WiFi fixture keeps the complete reference frame");
+  wifi_frame_state.symbols = true;
+  wifi_frame_state.uppercase = false;
+  render_wifi(wifi_frame_state, network_status, &canvas, &wifi_frame_layout);
+  expect(canvas_hash(canvas) == UINT64_C(0xf919741f85fe2c31),
+         "symbol WiFi fixture keeps the complete reference frame");
+
   WifiState wifi_state;
   WifiLayout wifi_layout;
   render_wifi(wifi_state, network_status, &canvas, &wifi_layout);
