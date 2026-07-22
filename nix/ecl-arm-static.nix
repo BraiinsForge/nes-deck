@@ -63,6 +63,7 @@ assert pkgs.lib.assertMsg (version == "26.5.5")
   "ecl-arm-static.nix expects ECL 26.5.5 from nixpkgs ${nixpkgsRev}";
 pkgs.runCommand "ecl-arm-static-runtime-${version}" {
   inherit version;
+  outputs = [ "out" "dev" ];
   nativeBuildInputs = [
     pkgs.nukeReferences
     pkgs.gnutar
@@ -90,6 +91,11 @@ pkgs.runCommand "ecl-arm-static-runtime-${version}" {
   install -Dm755 ${eclStatic}/bin/ecl $out/bin/ecl.bin
   install -Dm444 ${eclStatic}/lib/ecl-${version}/help.doc \
     $out/lib/ecl/help.doc
+
+  install -Dm444 ${eclStatic}/lib/libecl.a $dev/lib/libecl.a
+  install -Dm444 ${eclStatic}/lib/libeclgc.a $dev/lib/libeclgc.a
+  install -Dm444 ${gmpStatic}/lib/libgmp.a $dev/lib/libgmp.a
+  nuke-refs $dev/lib/libecl.a $dev/lib/libeclgc.a $dev/lib/libgmp.a
 
   licenses=$out/share/licenses/ecl-deck
   mkdir -p "$licenses"
