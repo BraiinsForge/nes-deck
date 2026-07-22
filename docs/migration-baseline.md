@@ -300,6 +300,38 @@ production lines, including the existing catalog compiler, and 4,282 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Dashboard raster checkpoint
+
+Native ABI 7 adds three small process-local raster operations: load a cover,
+load a dimension-checked PNG, and draw a cached handle. Rust uses the maintained
+`png` 0.18 decoder and retains the authoritative P6 PPM fallback rather than
+introducing an image framework. Common Lisp owns the editable cover directory
+and settings-icon path, preloads assets before interaction, caches handles, and
+chooses their exact dashboard placement. Clearing the Lisp cache also releases
+the corresponding native raster storage.
+
+Cover intake preserves PNG priority, PPM fallback only when PNG is absent,
+regular-file byte bounds, 1..2048 PNG dimensions, aspect-preserving nearest
+reduction to 600x378, alpha flattening against each game's policy color, and
+xterm-256 quantization. Drawing preserves the centered square crop and nearest
+sampling into the 200x200 card art region. The approved 23x23 settings PNG keeps
+its original alpha and the reference RGB565 blend while scaling to the centered
+50x50 control image. Missing or invalid images retain the established fallback
+art.
+
+A deterministic full-frame fixture uses the approved gear PNG both as the
+settings asset and as the selected cover. The C++ reference pins its logical
+RGB565 FNV-1a hash at `5c932dc59681241e`. On the development Deck, the installed
+ABI 7 Lisp/native fixture produced a 1,638,400-byte stride-aware capture with
+the same hash after all 614,400 logical pixels were unrotated. The supervised
+fixture then restored a healthy C++ dashboard. Physical Wayland presentation
+remains blocked by the missing compositor firmware.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 4,087
+production lines, including the existing catalog compiler, and 5,251 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:
@@ -310,6 +342,7 @@ Established on 2026-07-22:
 - Static ARM build and complete deployment: passed
 - Development Deck health check: passed
 - Static Lisp dashboard framebuffer hash matched the complete C++ reference
+- Raster fixture hash matched C++ at `5c932dc59681241e` on the Deck
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
