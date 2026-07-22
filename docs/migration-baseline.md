@@ -408,6 +408,56 @@ production lines, including the existing catalog compiler, and 7,306 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Dashboard settings checkpoint
+
+Startup-loaded `settings.lisp` now owns the exact settings labels, geometry,
+state paths, selection order, rendering, and action sequencing. It reproduces
+the network summary, volume, brightness, terminal, keymap, close control, and
+status footer, including the reduced footer scale for long messages. All eight
+half-open touch targets require press and release over the same target.
+Controller previous/next selection wraps in the original order, confirm
+activates the selection, and back produces the close plan.
+
+Lisp also owns volume decrement, mute, last-audible restore, brightness
+clamping, US/CZ keymap toggling, persistence plans, completion state, and menu
+cue effects. Volume stop or confirmation audio is emitted only after its state
+write succeeds; failed volume writes emit no audio, and a failed confirmation
+tone preserves the successful value while showing the original failure status.
+Brightness and keymap cues remain unconditional, matching the C++ sequence.
+Wi-Fi editing and terminal launch remain later integration slices. The working
+C++ dashboard is still authoritative and deployed, and native ABI 10 is
+unchanged.
+
+The authoritative C++ renderer and ARM/ECL smoke test pin these frames:
+
+| Fixture | RGB565 FNV-1a hash |
+| --- | --- |
+| volume 42, brightness 60, US, volume-down selected | `46d1527abb9f2bcb` |
+| muted volume, brightness 60, US, volume-up selected | `c2c55ee7eb47608b` |
+| volume 42, maximum brightness, US, brightness-up selected | `6e348df7ca27725f` |
+| volume 42, brightness 60, CZ, keymap selected | `99ed5871b55b5f6b` |
+| volume 42, brightness 60, US, Wi-Fi selected | `65f7d573c69bccbb` |
+| volume 42, brightness 60, US, terminal selected | `9cabcc3df5188ce3` |
+| confirmation-tone failure status | `05a5652bb03e0b8b` |
+| reduced-scale long status | `773a6a165672bd8b` |
+
+Host policy and C++ fixture tests, `nix flake check`, static ARM verification,
+complete deployment, and the Deck health check passed. With the C++ dashboard
+stopped under an automatic restore trap, each installed Lisp/native fixture
+validated its in-memory canvas hash, presented through fbdev, and produced a
+1,638,400-byte stride-aware capture. Unrotating all 614,400 logical RGB565
+pixels with `physical-row = 1279 - logical-x` and `physical-column = logical-y`
+reproduced all eight hashes. The selected controls, mute, maximum brightness,
+CZ keymap, Wi-Fi, terminal, tone-failure status, and reduced-scale status
+captures were inspected visually. The normal C++ dashboard was then restored
+healthy. Physical Wayland presentation remains blocked by the missing
+compositor firmware.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 6,037
+production lines, including the existing catalog compiler, and 8,013 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:
@@ -423,6 +473,8 @@ Established on 2026-07-22:
   `0ef078d4dc7a53bd` through fbdev
 - ABI 10 matched all six animated and reduced-motion credits frame hashes
   through the installed ARM/ECL and physical fbdev paths
+- ABI 10 matched all eight dashboard settings frame hashes through the
+  installed ARM/ECL and physical fbdev paths
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 

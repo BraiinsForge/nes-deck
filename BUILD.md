@@ -95,12 +95,13 @@ argument it loads `/mnt/data/nes-deck/lisp/startup.lisp`; one alternate startup
 path may be supplied for development and smoke tests.
 
 `lisp/startup.lisp` validates the native ABI, then loads `ui.lisp`,
-`policy.lisp`, `credits.lisp`, and `dashboard.lisp`. These editable files own
-bitmap UI composition, systems, labels, colors, applications, launch plans,
-timing, credits content and sequencing, dashboard geometry, and touch policy.
-Startup finally loads an optional `local.lisp` beside them for device-local
-overrides without a Rust rebuild. Deployment updates the five standard Lisp
-files but leaves an existing `local.lisp` untouched.
+`policy.lisp`, `settings.lisp`, `credits.lisp`, and `dashboard.lisp`. These
+editable files own bitmap UI composition, systems, labels, colors,
+applications, launch plans, timing, settings state and actions, credits content
+and sequencing, dashboard geometry, and touch policy. Startup finally loads an
+optional `local.lisp` beside them for device-local overrides without a Rust
+rebuild. Deployment updates the six standard Lisp files but leaves an existing
+`local.lisp` untouched.
 
 Native ABI 10 retains the widget-side Wayland and direct-fbdev primitives and
 adds only narrow canvas, raster, projected-text, evdev, regular-file, audio, and
