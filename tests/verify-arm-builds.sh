@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Build and inspect every deployable ARM runtime.
+# Build, smoke-test, and inspect every deployable ARM runtime.
 
 set -euo pipefail
 
@@ -65,6 +65,8 @@ verify_package() {
 }
 
 verify_package retrodeck-native bin/retrodeck-native
+build_flake .#checks.x86_64-linux.retrodeck-native-smoke >/dev/null
+echo "retrodeck-native-smoke: OK"
 verify_package nes-deck bin/nes-deck
 verify_package gb-deck bin/gb-deck
 verify_package zx-deck bin/zx-deck

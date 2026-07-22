@@ -10,7 +10,9 @@ cd "$repo_root"
 
 cxx=${CXX:-g++}
 cc=${CC:-cc}
-for command in "$cxx" "$cc" montage nix pkg-config; do
+cargo=${CARGO:-cargo}
+sbcl=${SBCL:-sbcl}
+for command in "$cxx" "$cc" "$cargo" "$sbcl" montage nix pkg-config; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -27,6 +29,10 @@ pkg-config --exists wayland-client || {
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/nes-deck-tests.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM HUP
+
+CARGO_TARGET_DIR="$work/cargo-target" \
+  "$cargo" test --manifest-path native/Cargo.toml --locked --lib
+"$sbcl" --noinform --disable-debugger --script tests/lisp_policy_test.lisp
 
 compile_cpp_test() {
   local source=$1

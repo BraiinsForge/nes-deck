@@ -880,6 +880,17 @@
         default = self.packages.${system}.nes-deck;
       };
 
+      checks.${system}.retrodeck-native-smoke =
+        pkgs.runCommand "retrodeck-native-smoke" { } ''
+          substitute ${./tests/native_ecl_smoke.lisp.in} smoke.lisp \
+            --subst-var-by startup ${./lisp/startup.lisp}
+          ECLDIR=${eclArm}/lib/ecl/ \
+            ${pkgs.qemu-user}/bin/qemu-arm \
+            ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \
+            smoke.lisp
+          touch $out
+        '';
+
       devShells.${system}.default = pkgs.mkShell {
         nativeBuildInputs = [
           pkgsCross.stdenv.cc
