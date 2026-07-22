@@ -94,22 +94,21 @@ uses the integer returned by `RETRODECK:MAIN` as its process status. With no
 argument it loads `/mnt/data/nes-deck/lisp/startup.lisp`; one alternate startup
 path may be supplied for development and smoke tests.
 
-`lisp/startup.lisp` validates the native ABI and loads `policy.lisp` before
-entering the orchestrator. The policy file owns the dashboard systems, labels,
-colors, built-in applications, launch plans, and timing values. Startup then
-loads an optional `local.lisp` beside it for device-local overrides without a
-Rust rebuild. Deployment updates `startup.lisp` and `policy.lisp` but leaves an
-existing `local.lisp` untouched.
+`lisp/startup.lisp` validates the native ABI, then loads `ui.lisp`,
+`policy.lisp`, `credits.lisp`, and `dashboard.lisp`. These editable files own
+bitmap UI composition, systems, labels, colors, applications, launch plans,
+timing, credits content and sequencing, dashboard geometry, and touch policy.
+Startup finally loads an optional `local.lisp` beside them for device-local
+overrides without a Rust rebuild. Deployment updates the five standard Lisp
+files but leaves an existing `local.lisp` untouched.
 
-Native ABI 4 retains the widget-side Wayland primitives for presentation,
-event dispatch, touch, size, and shutdown state. It also exposes direct-fbdev
-open, close, logical-size, and solid-frame presentation through `OPEN-FBDEV`,
-`CLOSE-FBDEV`, `CURRENT-FBDEV-SIZE`, and `PRESENT-FBDEV-SOLID`. The fbdev
-mechanism validates the device-reported 600x1280 RGB565 geometry and stride,
-stages the complete rotated 1280x480 canvas in ordinary RAM, and then publishes
-finished rows. Startup opens neither backend automatically, so the Rust host
-remains harmless beside the working C++ dashboard until Lisp rendering reaches
-parity.
+Native ABI 10 retains the widget-side Wayland and direct-fbdev primitives and
+adds only narrow canvas, raster, projected-text, evdev, regular-file, audio, and
+process-facing mechanisms for Lisp to orchestrate. The fbdev path validates the
+device-reported 600x1280 RGB565 geometry and stride, rotates the complete
+1280x480 logical canvas in ordinary RAM, and publishes finished rows. Startup
+opens neither display backend automatically, so the Rust host remains harmless
+beside the working C++ dashboard until Lisp rendering reaches full parity.
 
 Build the host and run its focused mechanism tests with:
 
@@ -145,8 +144,8 @@ tests/verify-arm-builds.sh
 This rejects a missing executable, a non-ARM or dynamically linked binary, a
 Nix store reference, an incomplete ECL or fbterm runtime, and a changed CC0
 music payload. It also runs the ARM host under QEMU to exercise the embedded
-ECL callbacks, including the one-argument Wayland boundary, and audio-worker
-lifecycle.
+ECL callbacks, including Wayland and fbdev boundaries, projected credits frames,
+large elapsed times, and the audio-worker lifecycle.
 
 ## Run the host test suite
 

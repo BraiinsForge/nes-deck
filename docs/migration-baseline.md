@@ -373,6 +373,41 @@ production lines, including the existing catalog compiler, and 6,034 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Dashboard credits checkpoint
+
+Startup-loaded `credits.lisp` now owns the exact credits TSV contract, labels,
+archive path, wrapping, crawl construction, source positions, starfield,
+perspective geometry, speed and cycle timing, reduced-motion columns,
+unavailable state, close control, and same-target close touch transition. The
+working C++ dashboard remains authoritative and deployed; this slice adds no
+new production service or replacement menu loop.
+
+Native ABI 9 added bounded descriptor-based regular-file reads plus cached
+bitmap text masks and exact projected-text drawing on the existing canvas. Rust
+preserves the C++ perspective equations, floor/ceiling sampling, clipping, fade,
+and RGB565 alpha-256 blend while Lisp supplies all content, geometry, colors,
+and timing. ABI 10 adds a four-word RGB565 canvas hash for parity fixtures and
+transports elapsed time as 16 ASCII hexadecimal digits, preserving signed
+64-bit timing beyond the ARM ECL fixnum range without moving timing policy into
+Rust.
+
+The authoritative C++ renderer pins animated full frames at 0, 2,000, 20,000,
+and 600,000,000 ms to `94ebf079be6e596b`, `1f14f6b786549363`,
+`6267b51f6f787c83`, and `f62d9d0147c7461a`. Reduced-motion frames at 0 and
+60,000 ms both pin to `9a44bcef4a13dde3`. Host tests, `nix flake check`, static
+ARM verification, and complete deployment passed. On the development Deck, all
+six installed Lisp/native frames produced 1,638,400-byte stride-aware captures
+with those same hashes after all 614,400 logical RGB565 pixels were unrotated by
+`physical-row = 1279 - logical-x` and `physical-column = logical-y`. Animated
+and reduced-motion captures were also inspected visually, then the normal C++
+dashboard was restored healthy. Physical Wayland presentation remains blocked
+by the missing compositor firmware.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 5,551
+production lines, including the existing catalog compiler, and 7,306 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:
@@ -386,6 +421,8 @@ Established on 2026-07-22:
 - Raster fixture hash matched C++ at `5c932dc59681241e` on the Deck
 - ABI 8 opened the physical Goodix device and matched navigation fixture hash
   `0ef078d4dc7a53bd` through fbdev
+- ABI 10 matched all six animated and reduced-motion credits frame hashes
+  through the installed ARM/ECL and physical fbdev paths
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
