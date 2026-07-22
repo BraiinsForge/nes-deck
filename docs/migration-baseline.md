@@ -145,6 +145,27 @@ remain responsive while a cue plays. Controller quarantine remains unchanged.
 The migration must preserve the cue waveform and trigger timing while keeping
 audio work and waits out of the Wayland/input event path.
 
+## Native host checkpoint
+
+Native ABI 3 now provides the first dashboard-side Wayland mechanism without
+replacing the working dashboard. Rust binds `wl_compositor`, `wl_shm`,
+`wl_seat`, and `deck_widget_manager_v1`; creates and configures the widget
+surface; manages three XRGB8888 shared-memory buffers with release backpressure;
+and queues the existing clamped down, motion, up, and cancel touch reports.
+Common Lisp decides whether to open, dispatch, present, consume touch, close, or
+honor shutdown. Default startup deliberately leaves the display closed.
+
+Host tests cover frame geometry, touch clamping, Lisp policy conversions, the
+ECL boundary, generated protocol bindings, and static ARM linkage. The allocated
+Deck cannot advertise the custom protocol because its firmware has no BMC
+compositor, so actual wire events, scene lifecycle, compositor hit testing, and
+physical Wayland touch remain acceptance work rather than inferred parity.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 1,868
+production lines, including the existing catalog compiler, and 2,149 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:

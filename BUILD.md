@@ -99,6 +99,15 @@ It also loads an optional `local.lisp` beside itself, allowing device-local
 policy changes without rebuilding Rust. Deployment updates `startup.lisp` but
 leaves an existing `local.lisp` untouched.
 
+Native ABI 3 adds widget-side Wayland primitives for opening and closing the
+custom Deck surface, presenting a solid XRGB8888 frame, bounded event dispatch,
+configured size, queued touch reports, and shutdown state. Lisp wraps these as
+`OPEN-WAYLAND-WIDGET`, `CLOSE-WAYLAND`, `PRESENT-WAYLAND-SOLID`,
+`DISPATCH-WAYLAND`, `CURRENT-WAYLAND-SIZE`, `NEXT-WAYLAND-TOUCH`, and
+`WAYLAND-SHUTDOWN-REQUESTED-P`. Startup does not open the display automatically,
+so firmware without the BMC compositor continues to run the host as a harmless
+sidecar beside the working fbdev dashboard.
+
 Build the host and run its focused mechanism tests with:
 
 ```sh
@@ -133,7 +142,8 @@ tests/verify-arm-builds.sh
 This rejects a missing executable, a non-ARM or dynamically linked binary, a
 Nix store reference, an incomplete ECL or fbterm runtime, and a changed CC0
 music payload. It also runs the ARM host under QEMU to exercise the embedded
-ECL callback and audio-worker lifecycle.
+ECL callbacks, including the one-argument Wayland boundary, and audio-worker
+lifecycle.
 
 ## Run the host test suite
 
