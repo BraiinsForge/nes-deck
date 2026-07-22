@@ -214,6 +214,32 @@ production lines, including the existing catalog compiler, and 3,084 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Native canvas checkpoint
+
+Native ABI 5 adds one startup-owned 1280x480 RGBA canvas backed by pinned
+`tiny-skia` 0.12 with only its `std` feature. Rust exposes solid clear and clipped,
+non-antialiased integer rectangle fills, then presents the same completed canvas
+through either the existing triple-buffered Wayland path or the rotated fbdev
+path. Common Lisp owns colors and composition calls. Its wrappers reject values
+that cannot cross the fixnum, signed-coordinate, or unsigned-dimension boundary.
+Default startup still leaves both displays closed.
+
+Focused tests cover opaque channel order, exact clipping, RGBA-to-XRGB8888 and
+RGB565 conversion, rotation, stride padding, ECL callback arity, Lisp wrappers,
+and static ARM linkage. On the development Deck, a supervised Lisp smoke cleared
+to policy `:background` and drew 320x120 policy-colored rectangles in all four
+logical corners: `:accent`, `:selected`, `:wifi-focus`, and `:title`. The smoke
+captured all 1,638,400 stride-aware framebuffer bytes and verified every one of
+the 614,400 logical pixels through `physical-row = 1279 - logical-x` and
+`physical-column = logical-y`, with zero mismatches. It then restored a healthy
+C++ dashboard. Physical Wayland presentation remains blocked by the Deck
+firmware's missing compositor.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 2,709
+production lines, including the existing catalog compiler, and 3,407 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Established on 2026-07-22:
