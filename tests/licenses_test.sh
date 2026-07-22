@@ -20,7 +20,7 @@ require_notice() {
 }
 
 for name in \
-  Go-LICENSE Nixpkgs-COPYING Wayland-COPYING \
+  Go-LICENSE Nixpkgs-COPYING Rust-crates-NOTICES.txt Wayland-COPYING \
   glibc-COPYING.LIB libffi-LICENSE libpng-LICENSE \
   wlr-layer-shell-LICENSE zlib-LICENSE; do
   require_notice "$runtime/share/licenses/runtime/$name"
@@ -42,5 +42,11 @@ grep -Fq 'either version 3 of the License' \
   "$ecl/share/licenses/ecl-deck/GMP-README"
 grep -Fq 'version 2.1 of the License' \
   "$ecl/share/licenses/ecl-deck/ECL-LICENSE"
+grep -Fq '===== rustix-1.1.4/LICENSE-MIT =====' \
+  "$runtime/share/licenses/runtime/Rust-crates-NOTICES.txt"
+grep -Fq '===== wayland-client-0.31.14/LICENSE.txt =====' \
+  "$runtime/share/licenses/runtime/Rust-crates-NOTICES.txt"
+grep -Fq '===== unicode-ident-1.0.24/LICENSE-UNICODE =====' \
+  "$runtime/share/licenses/runtime/Rust-crates-NOTICES.txt"
 
 echo "licenses_test: OK"

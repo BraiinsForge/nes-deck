@@ -130,7 +130,7 @@
           -o wlr-layer-shell-unstable-v1-protocol.o
       '';
       runtimeLicenses = import ./nix/runtime-licenses.nix {
-        inherit pkgs pkgsCross staticCross;
+        inherit pkgs pkgsCross staticCross nativeCargoDeps;
         nixpkgsSource = nixpkgs.outPath;
       };
 

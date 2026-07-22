@@ -83,10 +83,12 @@ verify_package rom-uploader bin/rom-uploader
 
 runtime_licenses=$(build_flake .#runtime-licenses)
 verify_closure_free runtime-licenses "$runtime_licenses"
-[[ -s $runtime_licenses/share/licenses/runtime/Wayland-COPYING ]] || {
-  echo "runtime-licenses is missing the Wayland notice" >&2
-  exit 1
-}
+for notice in Wayland-COPYING Rust-crates-NOTICES.txt; do
+  [[ -s $runtime_licenses/share/licenses/runtime/$notice ]] || {
+    echo "runtime-licenses is missing $notice" >&2
+    exit 1
+  }
+done
 echo "runtime-licenses: OK"
 
 ecl=$(nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix |
