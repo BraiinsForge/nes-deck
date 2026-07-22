@@ -48,6 +48,7 @@ of `flake.nix`; do not add the complete `src/` directory as a build input.
 Use `--no-link` to avoid leaving `result-*` symlinks in the repository:
 
 ```sh
+nix build --no-link --print-out-paths .#retrodeck-native
 nix build --no-link --print-out-paths .#nes-deck
 nix build --no-link --print-out-paths .#gb-deck
 nix build --no-link --print-out-paths .#zx-deck
@@ -67,6 +68,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 
 | Package | Main output |
 | --- | --- |
+| `retrodeck-native` | `bin/retrodeck-native` |
 | `nes-deck` | `bin/nes-deck` |
 | `gb-deck` | `bin/gb-deck` |
 | `zx-deck` | `bin/zx-deck` |
@@ -82,6 +84,33 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `rom-uploader` | `bin/rom-uploader` |
 | `runtime-licenses` | Shared runtime and asset notices |
 | ECL expression | `bin/ecl.bin`, runtime library, and notices |
+
+### Native orchestrator
+
+`native/` contains `retrodeck-native`, the static ARM Rust/ECL host. It boots
+ECL, registers the small `RETRODECK.NATIVE` interface, loads Common Lisp, and
+uses the integer returned by `RETRODECK:MAIN` as its process status. With no
+argument it loads `/mnt/data/nes-deck/lisp/startup.lisp`; one alternate startup
+path may be supplied for development and smoke tests.
+
+`lisp/startup.lisp` validates the native ABI before entering the orchestrator.
+It also loads an optional `local.lisp` beside itself, allowing device-local
+policy changes without rebuilding Rust. Deployment updates `startup.lisp` but
+leaves an existing `local.lisp` untouched.
+
+Build the host with:
+
+```sh
+nix build --no-link --print-out-paths .#retrodeck-native
+```
+
+After installation, run the same ARM smoke test used during activation with:
+
+```sh
+ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/ \
+  /mnt/data/nes-deck/retrodeck-native \
+  /mnt/data/nes-deck/lisp/startup.lisp
+```
 
 Check that a package has no Nix runtime references before deploying it:
 
@@ -237,6 +266,8 @@ retrodeck/
 │   ├── terminal/               fbterm wrapper, fontconfig, and keymaps
 │   ├── uploader/               uploader service and credential plumbing
 │   └── widget/                 BMC manifest, launcher, and scene installer
+├── lisp/                       startup-loaded orchestration and policy
+├── native/                     thin Rust/ECL native mechanism host
 ├── nix/                        ECL and runtime-specific Nix expressions
 ├── ops/
 │   ├── bmc/                    external BMC patch application
