@@ -506,9 +506,54 @@ production lines, including the existing catalog compiler, and 8,641 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Settings terminal process checkpoint
+
+Startup-loaded `process.lisp` now owns terminal titles, the exact starting and
+return statuses, native-result validation, launch-plan validation, and the
+required menu-audio finish before process handoff. It consumes the existing
+Lisp launch policy unchanged: executable, one mode argument, the selected
+`RETRO_DECK_KEYMAP`, label, touch supervision, and console mirroring remain
+editable without rebuilding Rust. The exact shell results are preserved:
+`TERMINAL ERROR - CHECK LOG`, `TERMINAL DID NOT START`, `RETURNED FROM
+TERMINAL`, `TERMINAL EXITED`, nonzero status, signal, and generic stopped
+variants.
+
+Native ABI 11 adds only the four-argument `RUN-TERMINAL` mechanism and a fixed
+five-field result. The Rust supervisor closes direct fbdev while retaining an
+open Wayland widget, snapshots `/dev/tty0`, starts a separate child process
+group with default TERM/INT/HUP/PIPE handling, and distinguishes exec failure.
+It polls in 40 ms slices, retries fbdev touch discovery at most once per second,
+requires an uninterrupted full-screen two-second hold, sends process-group
+SIGTERM, escalates to SIGKILL after four seconds, and restores keyboard mode,
+termios, cursor, wake, and blanking state. On Wayland it samples `/dev/fb0`
+every 100 ms, applies the authoritative RGB565 scanout rotation, and presents
+through the existing triple-SHM widget buffers.
+
+The C++ dashboard remains authoritative and deployed. `RETRODECK:MAIN` still
+does not enter the replacement dashboard loop, so this callable Lisp slice
+cannot alter the working menu before the remaining input and return-loop slices
+reach parity.
+
+Host tests and `nix flake check` passed. The static ARM/ECL smoke exercised the
+real callback under QEMU with exact mode/keymap propagation, clean exit,
+nonzero exit, signal exit, and exec failure. ABI 11 and all editable Lisp files
+were installed on the ARMv7 Deck. An installed harmless fixture received
+exactly `shell` and `cz`, returned `TERMINAL EXITED`, and left the C++ dashboard
+healthy. A second physical fixture ignored SIGTERM in both parent and
+grandchild; terminating the native host caused process-group SIGTERM and the
+four-second SIGKILL escalation, returned signal 9, removed the group, and again
+left the dashboard healthy. The Deck health check passed. Current fbdev-only
+firmware cannot physically exercise Wayland console mirroring, and an operator
+is still required for an actual two-second Goodix touch-return acceptance.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 7,137
+production lines, including the existing catalog compiler, and 9,552 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
-Established on 2026-07-22:
+Updated on 2026-07-23:
 
 - `./tests/run-host-tests.sh`: passed
 - `./tests/verify-arm-builds.sh`: passed
@@ -525,6 +570,9 @@ Established on 2026-07-22:
   installed ARM/ECL and physical fbdev paths
 - ABI 10 matched all four dashboard Wi-Fi editor frame hashes through the
   installed ARM/ECL and physical fbdev paths
+- ABI 11 launched exact terminal fixtures through ARM/ECL, classified clean,
+  nonzero, signal, and exec-failure results, and physically verified process-
+  group TERM/KILL supervision on the Deck
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
@@ -539,6 +587,7 @@ Still require physical acceptance for:
 - controller and keyboard behavior
 - exact borders, colors, animation, and transition timing
 - every external emulator, save path, and return flow
+- the terminal's physical two-second Goodix touch-return hold
 - Wayland widget movement and game layer surfaces
 - chiptune and timer behavior
 - uploader and palette editing
