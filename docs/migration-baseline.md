@@ -756,6 +756,35 @@ production lines, including the existing catalog compiler, and 14,573 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Dashboard runtime coordinator checkpoint
+
+The startup-loaded Lisp runtime now exposes one compact callable iteration. It
+reads the monotonic clock before pre-poll recovery, runs the existing reducer
+effects, selects the editable main or animated timeout from current state,
+performs the aggregate native input poll, consumes the post-poll timestamp and
+normalized reports, dispatches timers and input, and returns the updated state,
+runtime, and combined effect trace. Native shutdown in the returned snapshot
+still performs the existing idempotent runtime cleanup.
+
+This coordinator adds no Rust policy or service boundary. It only joins the
+already verified initialization, reducer, timeout, polling, dispatch, and
+shutdown adapters, and `RETRODECK:MAIN` remains unchanged. Focused tests cover
+the 250 ms dashboard policy, 40 ms animated-credits policy, ordered effect
+traces, returned runtime identity, post-poll clock ownership, and native
+shutdown cleanup.
+
+Host tests, fresh and persistent SBCL runs, `nix flake check`, and the complete
+ARM/ECL matrix passed. The updated startup and dashboard files were installed on
+the Deck with matching hashes. A harmless installed fixture ran one complete
+closed-input iteration at times 1001/1002 with trace `((:REAP-SOUND))`, then
+shut down only its in-memory adapter state. The C++ dashboard retained PID 17517
+and the Deck health check remained healthy.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 9,821
+production lines, including the existing catalog compiler, and 14,647 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
@@ -791,6 +820,9 @@ Updated on 2026-07-24:
 - ABI 14 matched the authoritative wlan0/wg0/SSID/selector semantics through
   ARM/ECL and the installed concrete Lisp runtime effect while C++ retained PID
   17517
+- The one-iteration Lisp runtime coordinator selected both policy timeouts,
+  preserved effect ordering and post-poll time, and completed an installed
+  closed-input Deck fixture while C++ retained PID 17517
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 

@@ -124,9 +124,13 @@ process group, restores console state, accepts the original two-second touch
 return hold, and mirrors RGB565 console scanout only when the Wayland widget is
 open. The fbdev path validates the device-reported 600x1280 RGB565 geometry and
 stride, rotates the complete 1280x480 logical canvas in ordinary RAM, and
-publishes finished rows. Startup opens neither display backend automatically,
-so the Rust host remains harmless beside the working C++ dashboard until Lisp
-rendering reaches full parity.
+publishes finished rows. The Lisp runtime adapter now exposes initialization, a
+single-iteration coordinator, and shutdown: Lisp reads the pre-poll clock,
+runs recovery and timers, chooses the policy timeout, invokes the aggregate
+native poll, dispatches the normalized snapshot, and preserves the combined
+effect trace. Startup opens neither display backend automatically, so the Rust
+host remains harmless beside the working C++ dashboard until Lisp rendering
+reaches full parity.
 
 Build the host and run its focused mechanism tests with:
 
