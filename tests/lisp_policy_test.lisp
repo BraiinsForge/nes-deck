@@ -2060,7 +2060,7 @@ secret!9
                        :keyboard-actions nil :layout deck-layout :now 4999
                        :controller-quarantined-p nil))
         (assert (equal (getf confirmed :pending-launch)
-                       '(:kind :reboot :game-index 2)))
+                       '(:kind :reboot :game-index 2 :touch-batch nil)))
         (assert (zerop (getf confirmed :reboot-deadline)))
         (assert (equal confirm-effects
                        '((:discard-touch) (:cue :confirm)))))
@@ -2085,7 +2085,171 @@ secret!9
                  :keyboard-actions nil :layout nes-layout :now 1300
                  :controller-quarantined-p nil))
         (assert (equal (getf requested :pending-launch)
-                       '(:kind :game :game-index 0)))
+                       '(:kind :game :game-index 0 :touch-batch nil)))
         (assert (equal effects '((:discard-touch) (:cue :confirm))))))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+       (layout (retrodeck:render-dashboard games :nes 0 ""))
+       (state (retrodeck:dashboard-loop-initial-state games :now 100)))
+  (assert (= (retrodeck:dashboard-loop-poll-timeout state) 250))
+  (assert
+   (signals-error-p
+    (lambda ()
+      (retrodeck:dashboard-reduce state '(:prepare-launch)))))
+  (multiple-value-bind (touch-pressed ignored)
+      (retrodeck:dashboard-reduce
+       state (list :touch :report '(640 286 t t nil)
+                   :layout layout :now 90))
+    (declare (ignore ignored))
+    (multiple-value-bind (touch-requested touch-effects)
+        (retrodeck:dashboard-reduce
+         touch-pressed (list :touch :report '(640 286 nil nil t)
+                             :layout layout :now 91))
+      (assert (getf (getf touch-requested :pending-launch) :touch-batch))
+      (assert (equal touch-effects '((:cue :confirm))))
+      (multiple-value-bind (continued effects)
+          (retrodeck:dashboard-reduce
+           touch-requested
+           (list :touch :report '(-1 -1 nil nil t)
+                 :layout layout :now 92))
+        (assert (getf continued :pending-launch))
+        (assert (null effects)))))
+  (multiple-value-bind (settings ignored)
+      (retrodeck:dashboard-reduce
+       state (list :controls :gamepad-actions '(:settings)
+                   :keyboard-actions nil :layout layout :now 101
+                   :controller-quarantined-p nil))
+    (declare (ignore ignored))
+    (multiple-value-bind (early effects)
+        (retrodeck:dashboard-reduce settings '(:tick :now 2099))
+      (assert (null effects))
+      (multiple-value-bind (refresh refresh-effects)
+          (retrodeck:dashboard-reduce early '(:tick :now 2100))
+        (assert (= (getf refresh :network-refreshed-at) 2100))
+        (assert (getf refresh :pending-network))
+        (assert (equal refresh-effects '((:network-action))))
+        (assert
+         (signals-error-p
+          (lambda ()
+            (retrodeck:dashboard-reduce refresh '(:tick :now 2101)))))
+        (multiple-value-bind (unchanged unchanged-effects)
+            (retrodeck:dashboard-reduce
+             refresh '(:network-result :network nil))
+          (assert (null unchanged-effects))
+          (multiple-value-bind (again again-effects)
+              (retrodeck:dashboard-reduce unchanged '(:tick :now 4100))
+            (assert (equal again-effects '((:network-action))))
+            (multiple-value-bind (changed changed-effects)
+                (retrodeck:dashboard-reduce
+                 again '(:network-result :network (:wifi "NEW")))
+              (assert (equal (getf changed :network) '(:wifi "NEW")))
+              (assert (equal changed-effects '((:render) (:present))))))))))
+
+  (multiple-value-bind (lost effects)
+      (retrodeck:dashboard-reduce state '(:touch-lost))
+    (assert (string= (getf (getf lost :dashboard) :status)
+                     "WAITING FOR TOUCHSCREEN"))
+    (assert (equal effects '((:render) (:present))))
+    (multiple-value-bind (restored restored-effects)
+        (retrodeck:dashboard-reduce lost '(:touch-reconnected))
+      (assert (string= (getf (getf restored :dashboard) :status)
+                       "TOUCHSCREEN RECONNECTED"))
+      (assert (equal restored-effects '((:render) (:present))))))
+
+  (let ((credits (copy-list state)))
+    (setf (getf credits :view) :credits)
+    (assert (= (retrodeck:dashboard-loop-poll-timeout credits) 40))
+    (multiple-value-bind (animated effects)
+        (retrodeck:dashboard-reduce credits '(:tick :now 200))
+      (declare (ignore animated))
+      (assert (equal effects '((:render) (:present))))))
+  (let ((credits (retrodeck:dashboard-loop-initial-state
+                  games :reduced-motion t)))
+    (setf (getf credits :view) :credits)
+    (assert (= (retrodeck:dashboard-loop-poll-timeout credits) 250))
+    (multiple-value-bind (static effects)
+        (retrodeck:dashboard-reduce credits '(:tick :now 200))
+      (declare (ignore static))
+      (assert (null effects))))
+
+  (multiple-value-bind (requested request-effects)
+      (retrodeck:dashboard-reduce
+       state (list :controls :gamepad-actions '(:confirm)
+                   :keyboard-actions nil :layout layout :now 500
+                   :controller-quarantined-p nil))
+    (assert (equal request-effects '((:discard-touch) (:cue :confirm))))
+    (assert
+     (signals-error-p
+      (lambda ()
+        (retrodeck:dashboard-reduce requested '(:tick :now 501)))))
+    (multiple-value-bind (launching launch-effects)
+        (retrodeck:dashboard-reduce
+         requested '(:prepare-launch :wayland t
+                     :volume-state "/tmp/volume.state"))
+      (let* ((launch (getf launching :active-launch))
+             (plan (getf launch :plan)))
+        (assert (eq (getf launch :kind) :game))
+        (assert (string= (getf (getf launching :dashboard) :status)
+                         "STARTING ALPHA"))
+        (assert (equal launch-effects
+                       (list '(:render) '(:present) '(:finish-sound)
+                             '(:close-controls) (list :launch plan))))
+        (assert (equal (cdr (assoc "RETRO_DECK_PRESENTATION"
+                                   (getf plan :environment) :test #'string=))
+                       "layer-shell"))
+        (assert
+         (signals-error-p
+          (lambda ()
+            (retrodeck:dashboard-reduce
+             launching
+             (list :controls :gamepad-actions nil :keyboard-actions '(:right)
+                   :layout layout :now 501
+                   :controller-quarantined-p nil)))))
+        (multiple-value-bind (returned-child recovery-effects)
+            (retrodeck:dashboard-reduce
+             launching
+             '(:child-returned
+               :result (:started t :exited-for-touch t
+                        :exit-code nil :signal nil :error nil)))
+          (assert (equal recovery-effects '((:scan-controls :force t))))
+          (multiple-value-bind (scanned scan-effects)
+              (retrodeck:dashboard-reduce
+               returned-child '(:controls-rescanned :now 600))
+            (assert (equal scan-effects '((:open-presentation))))
+            (multiple-value-bind (opened open-effects)
+                (retrodeck:dashboard-reduce scanned '(:presentation-opened))
+              (assert (equal open-effects '((:reload-volume))))
+              (multiple-value-bind (returned return-effects)
+                  (retrodeck:dashboard-reduce
+                   opened '(:child-complete :volume 55))
+                (assert (null (getf returned :active-launch)))
+                (assert (= (getf (getf returned :settings) :volume) 55))
+                (assert (= (getf (getf returned :settings)
+                                 :last-audible-volume) 55))
+                (assert (string= (getf (getf returned :dashboard) :status)
+                                 "RETURNED FROM ALPHA"))
+                (assert (equal return-effects
+                               '((:render) (:present))))))))
+        (let ((recovering (copy-list launching)))
+          (setf (getf recovering :pending-child-result)
+                '(:started t :exited-for-touch nil
+                  :exit-code 7 :signal nil :error nil)
+                (getf recovering :child-return-stage) :volume)
+          (multiple-value-bind (failed ignored)
+              (retrodeck:dashboard-reduce recovering '(:child-complete))
+            (declare (ignore ignored))
+            (assert (string= (getf (getf failed :dashboard) :status)
+                             "ALPHA EXITED (STATUS 7)"))))
+        (let ((recovering (copy-list launching)))
+          (setf (getf recovering :pending-child-result)
+                '(:started t :exited-for-touch nil
+                  :exit-code nil :signal 15 :error nil)
+                (getf recovering :child-return-stage) :volume)
+          (multiple-value-bind (stopped ignored)
+              (retrodeck:dashboard-reduce recovering '(:child-complete))
+            (declare (ignore ignored))
+            (assert (string= (getf (getf stopped :dashboard) :status)
+                             "ALPHA STOPPED (SIGNAL 15)"))))))))
 
 (format t "Lisp policy tests passed.~%")

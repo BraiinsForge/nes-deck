@@ -487,7 +487,11 @@
           :pending-launch nil
           :pending-settings-plan nil
           :pending-volume-tone nil
-          :pending-wifi-plan nil)))
+          :pending-wifi-plan nil
+          :pending-network nil
+          :active-launch nil
+          :pending-child-result nil
+          :child-return-stage nil)))
 
 (defun dashboard-loop-set-global-status (state status)
   (check-type status string)
@@ -539,7 +543,7 @@
             (and (getf effect :cue)
                  (list (list :cue (getf effect :cue)))))))
 
-(defun dashboard-loop-request-game (state game-index now)
+(defun dashboard-loop-request-game (state game-index now &key touch-batch)
   (check-type game-index (integer 0 *))
   (check-type now (integer 0 *))
   (let ((games (getf state :games)))
@@ -555,7 +559,8 @@
          (setf next (copy-list next)
                (getf next :pending-launch)
                (list :kind :terminal :game-index game-index
-                     :mode terminal-mode))
+                     :mode terminal-mode
+                     :touch-batch (not (null touch-batch))))
          (values next nil))
         (reboot
          (if (reboot-confirmation-active-p
@@ -564,7 +569,8 @@
                (setf next (copy-list next)
                      (getf next :reboot-deadline) 0
                      (getf next :pending-launch)
-                     (list :kind :reboot :game-index game-index))
+                     (list :kind :reboot :game-index game-index
+                           :touch-batch (not (null touch-batch))))
                (values next nil))
              (progn
                (setf next (copy-list next)
@@ -577,10 +583,12 @@
         (t
          (setf next (copy-list next)
                (getf next :pending-launch)
-               (list :kind :game :game-index game-index))
+               (list :kind :game :game-index game-index
+                     :touch-batch (not (null touch-batch))))
          (values next nil))))))
 
-(defun dashboard-loop-apply-settings-plan (state settings plan)
+(defun dashboard-loop-apply-settings-plan
+    (state settings plan &key touch-batch)
   (let ((next (copy-list state)))
     (setf (getf next :settings) settings)
     (case (getf plan :action)
@@ -593,7 +601,8 @@
        (values next (list (list :settings-action (copy-tree plan)))))
       (:terminal
        (setf (getf next :pending-launch)
-             (list :kind :terminal :mode (getf plan :mode)))
+             (list :kind :terminal :mode (getf plan :mode)
+                   :touch-batch (not (null touch-batch))))
        (values next (list (list :cue (getf plan :cue)))))
       (:wifi
        (setf (getf next :wifi) (wifi-open-state (getf next :wifi))
@@ -734,7 +743,39 @@
             (setf next (dashboard-loop-set-global-status next "")
                   effects (append effects
                                   (dashboard-loop-screen-effects)))))
+        (when (and (member (getf next :view) '(:settings :wifi))
+                   (>= (- now (getf next :network-refreshed-at))
+                       (dashboard-timing :network-refresh-ms)))
+          (setf (getf next :network-refreshed-at) now
+                (getf next :pending-network) t
+                effects (append effects '((:network-action)))))
+        (when (and (eq (getf next :view) :credits)
+                   (not (getf next :reduced-motion)))
+          (setf effects (append effects (dashboard-loop-screen-effects))))
         (values next effects)))))
+
+(defun dashboard-loop-poll-timeout (state)
+  (if (and (eq (getf state :view) :credits)
+           (not (getf state :reduced-motion)))
+      (dashboard-timing :animated-poll-ms)
+      (dashboard-timing :main-poll-ms)))
+
+(defun dashboard-reduce-network-result (state event)
+  (let* ((network (copy-tree (getf (rest event) :network)))
+         (changed (not (equal network (getf state :network))))
+         (next (copy-list state)))
+    (setf (getf next :network) network
+          (getf next :pending-network) nil)
+    (values next (and changed (dashboard-loop-screen-effects)))))
+
+(defun dashboard-reduce-touch-status (state status)
+  (let ((next (dashboard-loop-clear-pressed-targets state)))
+    (if (eq (getf next :view) :wifi)
+        (let ((wifi (copy-list (getf next :wifi))))
+          (setf (getf wifi :status) status
+                (getf next :wifi) wifi))
+        (setf next (dashboard-loop-set-global-status next status)))
+    (values next (dashboard-loop-screen-effects))))
 
 (defun dashboard-loop-released-reboot-p (state target)
   (and (consp target)
@@ -792,7 +833,8 @@
                    next (copy-list next)
                    (getf next :dashboard) next-dashboard)
              (multiple-value-bind (requested effects)
-                 (dashboard-loop-request-game next (second target) now)
+                 (dashboard-loop-request-game
+                    next (second target) now :touch-batch t)
                (values requested (append effects '((:cue :confirm)))))))
           (t
            (multiple-value-bind (next-dashboard effect)
@@ -806,7 +848,8 @@
   (multiple-value-bind (settings plan)
       (settings-touch-transition (getf state :settings) layout report)
     (if plan
-        (dashboard-loop-apply-settings-plan state settings plan)
+        (dashboard-loop-apply-settings-plan
+         state settings plan :touch-batch t)
         (let ((next (copy-list state)))
           (setf (getf next :settings) settings)
           (values next nil)))))
@@ -935,23 +978,182 @@
         (values next
                 (dashboard-loop-wifi-screen-effects (getf effect :cue)))))))
 
+(defun dashboard-loop-pending-application (state pending)
+  (let ((game-index (getf pending :game-index)))
+    (copy-tree
+     (if game-index
+         (nth game-index (getf state :games))
+         (dashboard-application "terminal")))))
+
+(defun dashboard-reduce-prepare-launch (state event)
+  (let ((pending (getf state :pending-launch)))
+    (unless pending
+      (error "Dashboard has no pending launch"))
+    (let* ((arguments (rest event))
+           (application (dashboard-loop-pending-application state pending))
+           (mode (getf pending :mode))
+           (settings (getf state :settings)))
+      (when mode
+        (setf (getf application :terminal-mode) mode))
+      (let* ((plan
+               (dashboard-launch-plan
+                application (getf settings :volume)
+                :keymap (getf settings :keymap)
+                :wayland (not (null (getf arguments :wayland)))
+                :volume-state (getf arguments :volume-state)))
+             (kind (getf pending :kind))
+             (status
+               (case kind
+                 (:terminal (dashboard-terminal-starting-status plan))
+                 (:reboot (dashboard-loop-label :rebooting))
+                 (otherwise
+                  (format nil "STARTING ~A" (getf application :title)))))
+             (next (dashboard-loop-set-global-status state status)))
+        (setf next (copy-list next)
+              (getf next :pending-launch) nil
+              (getf next :active-launch)
+              (append (copy-list pending)
+                      (list :application application :plan plan)))
+        (values next
+                (append (dashboard-loop-screen-effects)
+                        (list '(:finish-sound)
+                              '(:close-controls)
+                              (list :launch plan))))))))
+
+(defun dashboard-loop-child-status (launch result)
+  (if (eq (getf launch :kind) :terminal)
+      (dashboard-terminal-result-status (getf launch :plan) result)
+      (let* ((reboot (eq (getf launch :kind) :reboot))
+             (application (getf launch :application))
+             (title (getf application :title))
+             (error (getf result :error))
+             (exit-code (getf result :exit-code))
+             (signal (getf result :signal)))
+        (cond
+          ((and error (plusp (length error)))
+           (dashboard-loop-label (if reboot :reboot-error :game-error)))
+          ((not (getf result :started))
+           (dashboard-loop-label
+            (if reboot :reboot-not-started :game-not-started)))
+          ((getf result :exited-for-touch)
+           (if reboot
+               (dashboard-loop-label :reboot-cancelled)
+               (format nil "RETURNED FROM ~A" title)))
+          ((eql exit-code 0)
+           (if reboot
+               (dashboard-loop-label :reboot-exited)
+               (format nil "~A EXITED" title)))
+          (exit-code
+           (if reboot
+               (format nil "REBOOT FAILED (STATUS ~D)" exit-code)
+               (format nil "~A EXITED (STATUS ~D)" title exit-code)))
+          (signal
+           (if reboot
+               (format nil "REBOOT STOPPED (SIGNAL ~D)" signal)
+               (format nil "~A STOPPED (SIGNAL ~D)" title signal)))
+          (t
+           (if reboot "REBOOT STOPPED" (format nil "~A STOPPED" title)))))))
+
+(defun dashboard-reduce-child-returned (state event)
+  (unless (getf state :active-launch)
+    (error "Dashboard has no active launch"))
+  (let* ((arguments (rest event))
+         (result (getf arguments :result))
+         (next (dashboard-loop-clear-pressed-targets state)))
+    (check-type result list)
+    (when (getf arguments :shutdown)
+      (setf next (copy-list next)
+            (getf next :active-launch) nil)
+      (return-from dashboard-reduce-child-returned
+        (values next '((:stop-loop)))))
+    (setf next (copy-list next)
+          (getf next :pending-child-result) (copy-tree result)
+          (getf next :child-return-stage) :controls)
+    (values next '((:scan-controls :force t)))))
+
+(defun dashboard-reduce-controls-rescanned (state event)
+  (let ((next (copy-list state))
+        (now (getf (rest event) :now)))
+    (when now
+      (check-type now (integer 0 *))
+      (setf (getf next :last-control-scan-ms) now))
+    (setf (getf next :child-return-stage) :presentation)
+    (values next '((:open-presentation)))))
+
+(defun dashboard-reduce-presentation-opened (state)
+  (let ((next (copy-list state)))
+    (setf (getf next :child-return-stage) :volume)
+    (values next '((:reload-volume)))))
+
+(defun dashboard-reduce-child-complete (state event)
+  (let ((launch (getf state :active-launch))
+        (result (getf state :pending-child-result)))
+    (unless (and launch result)
+      (error "Dashboard has no recovering child"))
+    (let* ((volume (getf (rest event) :volume))
+           (next (copy-list state)))
+      (setf (getf next :active-launch) nil
+            (getf next :pending-child-result) nil
+            (getf next :child-return-stage) nil)
+      (when volume
+        (check-type volume (integer 0 100))
+        (let ((settings (copy-list (getf next :settings))))
+          (setf (getf settings :volume) volume)
+          (when (plusp volume)
+            (setf (getf settings :last-audible-volume) volume))
+          (setf (getf next :settings) settings)))
+      (setf next
+            (dashboard-loop-set-global-status
+             next (dashboard-loop-child-status launch result)))
+      (values next (dashboard-loop-screen-effects)))))
+
 (defun dashboard-loop-check-pending-event (state event)
-  (let ((expected
-          (cond ((getf state :pending-settings-plan) :settings-result)
-                ((getf state :pending-volume-tone) :volume-tone-result)
-                ((getf state :pending-wifi-plan) :wifi-result))))
-    (when (and expected (not (eq (first event) expected)))
-      (error "Dashboard expects ~S before ~S" expected (first event)))))
+  (let* ((kind (first event))
+         (pending-launch (getf state :pending-launch))
+         (expected
+           (cond
+             ((getf state :pending-child-result)
+              (case (getf state :child-return-stage)
+                (:controls :controls-rescanned)
+                (:presentation :presentation-opened)
+                (:volume :child-complete)
+                (otherwise
+                 (error "Unknown dashboard child return stage ~S"
+                        (getf state :child-return-stage)))))
+             ((getf state :active-launch) :child-returned)
+             ((getf state :pending-settings-plan) :settings-result)
+             ((getf state :pending-volume-tone) :volume-tone-result)
+             ((getf state :pending-wifi-plan) :wifi-result)
+             ((getf state :pending-network) :network-result)
+             (pending-launch :prepare-launch))))
+    (when (and expected
+               (not (eq kind expected))
+               (not (and pending-launch
+                         (getf pending-launch :touch-batch)
+                         (eq kind :touch))))
+      (error "Dashboard expects ~S before ~S" expected kind))))
 
 (defun dashboard-reduce (state event)
   (check-type state list)
   (check-type event list)
   (dashboard-loop-check-pending-event state event)
   (case (first event)
+    (:child-complete (dashboard-reduce-child-complete state event))
+    (:child-returned (dashboard-reduce-child-returned state event))
     (:controls (dashboard-reduce-controls state event))
+    (:controls-rescanned (dashboard-reduce-controls-rescanned state event))
+    (:network-result (dashboard-reduce-network-result state event))
+    (:prepare-launch (dashboard-reduce-prepare-launch state event))
+    (:presentation-opened (dashboard-reduce-presentation-opened state))
     (:settings-result (dashboard-reduce-settings-result state event))
     (:tick (dashboard-reduce-tick state event))
     (:touch (dashboard-reduce-touch state event))
+    (:touch-lost
+     (dashboard-reduce-touch-status
+      state (dashboard-loop-label :touch-waiting)))
+    (:touch-reconnected
+     (dashboard-reduce-touch-status
+      state (dashboard-loop-label :touch-reconnected)))
     (:volume-tone-result (dashboard-reduce-volume-tone-result state event))
     (:wifi-result (dashboard-reduce-wifi-result state event))
     (otherwise (error "Unknown dashboard event ~S" event))))

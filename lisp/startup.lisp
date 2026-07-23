@@ -87,6 +87,7 @@
            #:*dashboard-controller-burst-limit*
            #:*dashboard-gamepad-controls*
            #:*dashboard-keyboard-controls*
+           #:*dashboard-loop-labels*
            #:*dashboard-cover-directory*
            #:*dashboard-credits-archive-path*
            #:*dashboard-credits-geometry*
@@ -155,6 +156,8 @@
            #:dashboard-initial-state
            #:dashboard-launch-plan
            #:dashboard-loop-initial-state
+           #:dashboard-loop-label
+           #:dashboard-loop-poll-timeout
            #:dashboard-reduce
            #:dashboard-menu-geometry
            #:dashboard-system-label

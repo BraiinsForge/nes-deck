@@ -241,6 +241,16 @@
 
 (defparameter *dashboard-reboot-confirmation-text*
   "PRESS A OR TAP AGAIN TO REBOOT")
+(defparameter *dashboard-loop-labels*
+  '(:touch-waiting "WAITING FOR TOUCHSCREEN"
+    :touch-reconnected "TOUCHSCREEN RECONNECTED"
+    :rebooting "REBOOTING"
+    :reboot-error "REBOOT ERROR - CHECK LOG"
+    :reboot-not-started "REBOOT DID NOT START"
+    :reboot-cancelled "REBOOT CANCELLED"
+    :reboot-exited "REBOOT COMMAND EXITED"
+    :game-error "GAME ERROR - CHECK LOG"
+    :game-not-started "GAME DID NOT START"))
 (defparameter *dashboard-terminal-login-shell* "/BIN/ASH")
 (defparameter *dashboard-reduced-motion-environment*
   "RETRO_DECK_REDUCED_MOTION")
@@ -266,6 +276,12 @@
     (if entry
         (cdr entry)
         (error "Unknown dashboard color role ~S" role))))
+
+(defun dashboard-loop-label (name)
+  (let ((value (getf *dashboard-loop-labels* name)))
+    (if value
+        value
+        (error "Unknown dashboard loop label ~S" name))))
 
 (defun dashboard-timing (name)
   (let ((entry (assoc name *dashboard-timings* :test #'eq)))
