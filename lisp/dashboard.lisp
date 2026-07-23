@@ -1664,6 +1664,22 @@
       (when (getf input :shutdown-p)
         (dashboard-runtime-shutdown runtime)))))
 
+(defun dashboard-runtime-run-iteration (state runtime)
+  (check-type state list)
+  (check-type runtime list)
+  (multiple-value-bind (after-begin begin-trace)
+      (dashboard-runtime-begin-iteration
+       state runtime (list :now (dashboard-runtime-read-clock runtime)))
+    (if (not (dashboard-runtime-running-p runtime))
+        (values after-begin runtime begin-trace)
+        (let ((input
+                (dashboard-runtime-poll-input
+                 runtime (dashboard-loop-poll-timeout after-begin))))
+          (multiple-value-bind (after-input input-trace)
+              (dashboard-runtime-dispatch-input after-begin runtime input)
+            (values after-input runtime
+                    (append begin-trace input-trace)))))))
+
 (defun apply-dashboard-touch (games state layout report volume-percent presenter)
   (check-type games list)
   (check-type volume-percent (integer 0 100))

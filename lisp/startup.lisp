@@ -171,6 +171,7 @@
            #:dashboard-runtime-dispatch-input
            #:dashboard-runtime-initialize
            #:dashboard-runtime-poll-input
+           #:dashboard-runtime-run-iteration
            #:dashboard-runtime-running-p
            #:dashboard-runtime-shutdown
            #:dashboard-menu-geometry
