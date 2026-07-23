@@ -551,6 +551,52 @@ production lines, including the existing catalog compiler, and 9,552 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Dashboard keyboard and controller boundary checkpoint
+
+Native ABI 12 adds four narrow evdev control primitives: scan, close, dispatch,
+and next report. Rust scans only numeric `/dev/input/eventN` nodes, opens them
+read-only, nonblocking, and close-on-exec, retains at most two exact
+vendor `1c59` product `0026` THEGamepads ordered by physical path and at most
+four complete keyboards ordered by event path, and attempts keyboard grabs
+without making grab failure fatal. Keyboard snapshots reconstruct both Shift
+keys. THEGamepad snapshots reconstruct all eight raw buttons and both axes, use
+the authoritative inclusive one-third thresholds, and emit only rising edges at
+`SYN_REPORT`. Both readers ignore stale input after `SYN_DROPPED` until the next
+report boundary, then resynchronize without inventing an edge. Device loss
+closes only the failed descriptor and requests a rescan. A bounded native batch
+coalesces gamepad edges and duplicate keyboard reports before Lisp receives
+raw mechanism data.
+
+Startup-loaded `policy.lisp` owns the editable keyboard and THEGamepad maps,
+Shift-Tab behavior, dashboard command priority, modal and settings routing,
+once-per-second scan schedule, immediate loss rescan, the exact twelve-edge
+one-second burst guard, and one-second quiet recovery. The existing menu-sound
+policy still counts a gamepad edge before quarantine, blocks only controller
+commands while a cue is active, and leaves keyboard and touch input responsive.
+No dashboard action names, modal knowledge, burst timing, or audio policy moved
+into Rust.
+
+The C++ dashboard remains authoritative and deployed. `RETRODECK:MAIN` still
+does not enter the replacement loop, so this callable boundary cannot alter the
+working menu before the remaining orchestration and return-loop slices reach
+parity.
+
+All host tests, `nix flake check`, and the complete static ARM verification
+passed. The real ARM/ECL smoke exercised ABI 12, empty-device dispatch, scan
+failure, editable mappings, modal priority, scan timing, and guard state under
+QEMU. ABI 12 and all eight Lisp files were installed on the ARMv7 Deck. Its only
+physical evdev node was the Goodix touchscreen; the installed fixture correctly
+reported zero gamepads and zero keyboards without grabbing or misclassifying
+Goodix, and the Deck health check left the C++ dashboard healthy. Connected
+keyboard and THEGamepad hot-plug, repeat, Shift-Tab, axis, button, disconnect,
+and resynchronization acceptance remain blocked until those physical devices
+are attached.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 8,032
+production lines, including the existing catalog compiler, and 11,018 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-23:
@@ -573,6 +619,8 @@ Updated on 2026-07-23:
 - ABI 11 launched exact terminal fixtures through ARM/ECL, classified clean,
   nonzero, signal, and exec-failure results, and physically verified process-
   group TERM/KILL supervision on the Deck
+- ABI 12 decoded keyboard and THEGamepad policy through ARM/ECL and physically
+  rejected the Goodix-only Deck as zero keyboards and zero controllers
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
@@ -584,7 +632,7 @@ image before claiming Wayland parity.
 Still require physical acceptance for:
 
 - touch responsiveness while every menu cue plays
-- controller and keyboard behavior
+- connected keyboard and THEGamepad hot-plug, repeat, mapping, and recovery
 - exact borders, colors, animation, and transition timing
 - every external emulator, save path, and return flow
 - the terminal's physical two-second Goodix touch-return hold

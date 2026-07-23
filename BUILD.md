@@ -99,21 +99,26 @@ path may be supplied for development and smoke tests.
 and `dashboard.lisp`. These editable files own bitmap UI composition, systems,
 labels, colors, applications, launch plans, terminal status and sequencing,
 timing, settings and Wi-Fi editor state and actions, credits content and
-sequencing, dashboard geometry, and touch policy. Startup finally loads an
-optional `local.lisp` beside them for device-local overrides without a Rust
+sequencing, dashboard geometry, touch policy, keyboard and THEGamepad mapping,
+modal command priority, controller burst recovery, and input scan timing.
+Startup finally loads an optional `local.lisp` beside them for device-local
+overrides without a Rust
 rebuild. Deployment updates the eight standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
-Native ABI 11 retains the widget-side Wayland and direct-fbdev primitives and
+Native ABI 12 retains the widget-side Wayland and direct-fbdev primitives and
 adds only narrow canvas, raster, projected-text, evdev, regular-file, audio, and
-process-facing mechanisms for Lisp to orchestrate. The terminal primitive
-supervises one child process group, restores console state, accepts the original
-two-second touch return hold, and mirrors RGB565 console scanout only when the
-Wayland widget is open. The fbdev path validates the device-reported 600x1280
-RGB565 geometry and stride, rotates the complete
-1280x480 logical canvas in ordinary RAM, and publishes finished rows. Startup
-opens neither display backend automatically, so the Rust host remains harmless
-beside the working C++ dashboard until Lisp rendering reaches full parity.
+process-facing mechanisms for Lisp to orchestrate. The control boundary scans
+numeric evdev nodes, keeps at most two exact THEGamepads and four complete
+keyboards in stable order, decodes resynchronization and rising edges, and
+returns raw reports for Lisp policy. The terminal primitive supervises one child
+process group, restores console state, accepts the original two-second touch
+return hold, and mirrors RGB565 console scanout only when the Wayland widget is
+open. The fbdev path validates the device-reported 600x1280 RGB565 geometry and
+stride, rotates the complete 1280x480 logical canvas in ordinary RAM, and
+publishes finished rows. Startup opens neither display backend automatically,
+so the Rust host remains harmless beside the working C++ dashboard until Lisp
+rendering reaches full parity.
 
 Build the host and run its focused mechanism tests with:
 
