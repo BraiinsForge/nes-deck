@@ -85,6 +85,8 @@
            #:*dashboard-brightness-step*
            #:*dashboard-built-in-applications*
            #:*dashboard-controller-burst-limit*
+           #:*dashboard-gamepad-controls*
+           #:*dashboard-keyboard-controls*
            #:*dashboard-cover-directory*
            #:*dashboard-credits-archive-path*
            #:*dashboard-credits-geometry*
@@ -119,6 +121,7 @@
            #:clear-dashboard-raster-cache
            #:clear-credits-text-mask-cache
            #:clear-text-mask-cache
+           #:collect-dashboard-control-actions
            #:configure-text-projection
            #:close-evdev-controls
            #:close-evdev-touch
@@ -131,6 +134,13 @@
            #:credits-touch-transition
            #:dashboard-application
            #:dashboard-color
+           #:dashboard-control-actions
+           #:dashboard-controller-command
+           #:dashboard-controller-guard-accept-edge
+           #:dashboard-controller-guard-initial-state
+           #:dashboard-controller-guard-recover-if-quiet
+           #:dashboard-controller-input-actions
+           #:dashboard-controller-scan-due-p
            #:dashboard-credits-geometry
            #:dashboard-credits-label
            #:dashboard-executable

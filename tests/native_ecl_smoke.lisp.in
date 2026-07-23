@@ -198,6 +198,24 @@
                      (<= 0 (second counts) 4))
           (error "Evdev control scan crossed the native boundary incorrectly"))))
     (retrodeck.native:evdev-controls-close)
+    (unless (and (equal (dashboard-control-actions
+                         '(:kind :keyboard :code 15
+                           :shift t :repeat nil))
+                        '(:system-previous))
+                 (equal (dashboard-control-actions
+                         '(:kind :gamepad :edges #x244))
+                        '(:confirm :system-next :right))
+                 (eq (dashboard-controller-command
+                      '(:system-next :confirm) nil nil)
+                     :system-next)
+                 (dashboard-controller-scan-due-p 0 999))
+      (error "Controller policy failed under target ECL"))
+    (multiple-value-bind (guard accepted suspended)
+        (dashboard-controller-guard-accept-edge
+         (dashboard-controller-guard-initial-state) 10)
+      (unless (and accepted (not suspended)
+                   (equal (getf guard :edge-times) '(10)))
+        (error "Controller guard failed under target ECL")))
     (unless (and (null (retrodeck.native:evdev-next-touch))
                  (= (retrodeck.native:evdev-touch-dispatch 0) -1))
       (error "Closed evdev touch state crossed the native boundary incorrectly"))

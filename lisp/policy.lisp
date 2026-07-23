@@ -94,6 +94,7 @@
     (:reboot-confirm-ms . 4000)
     (:controller-burst-window-ms . 1000)
     (:controller-quiet-reset-ms . 1000)
+    (:controller-scan-ms . 1000)
     (:main-poll-ms . 250)
     (:animated-poll-ms . 40)
     (:network-refresh-ms . 2000)
@@ -104,6 +105,138 @@
 (defparameter *dashboard-brightness-minimum* 10)
 (defparameter *dashboard-brightness-step* 10)
 (defparameter *dashboard-controller-burst-limit* 12)
+
+(defparameter *dashboard-keyboard-controls*
+  '((1 :back)
+    (15 :system-next :system-previous)
+    (28 :confirm)
+    (96 :confirm)
+    (103 :up)
+    (105 :left)
+    (106 :right)
+    (108 :down)))
+
+(defparameter *dashboard-gamepad-controls*
+  '((#x001 . :back)
+    (#x002 . :back)
+    (#x004 . :confirm)
+    (#x008 . :confirm)
+    (#x010 . :system-previous)
+    (#x020 . :system-next)
+    (#x040 . :settings)
+    (#x100 . :left)
+    (#x200 . :right)
+    (#x400 . :up)
+    (#x800 . :down)))
+
+(defun dashboard-control-actions (report)
+  (check-type report list)
+  (case (getf report :kind)
+    (:keyboard
+     (let* ((definition (assoc (getf report :code)
+                               *dashboard-keyboard-controls* :test #'=))
+            (action (and definition
+                         (if (and (getf report :shift) (third definition))
+                             (third definition)
+                             (second definition)))))
+       (and action (list action))))
+    (:gamepad
+     (let ((edges (getf report :edges)))
+       (check-type edges (integer 1 4095))
+       (remove-duplicates
+        (loop for (mask . action) in *dashboard-gamepad-controls*
+              when (logtest mask edges)
+                collect action)
+        :test #'eq)))
+    (otherwise
+     (error "Unknown dashboard control report ~S" report))))
+
+(defun collect-dashboard-control-actions ()
+  (let ((gamepad nil)
+        (keyboard nil))
+    (loop for report = (next-evdev-control)
+          while report
+          do (dolist (action (dashboard-control-actions report))
+               (if (eq (getf report :kind) :gamepad)
+                   (pushnew action gamepad :test #'eq)
+                   (pushnew action keyboard :test #'eq))))
+    (values gamepad keyboard)))
+
+(defun dashboard-controller-guard-initial-state ()
+  (list :edge-times nil :suspended nil :last-edge-at nil))
+
+(defun dashboard-controller-guard-accept-edge (state now)
+  (check-type state list)
+  (check-type now (integer 0 *))
+  (let ((next (copy-list state)))
+    (setf (getf next :last-edge-at) now)
+    (when (getf next :suspended)
+      (return-from dashboard-controller-guard-accept-edge
+        (values next nil nil)))
+    (let* ((window (dashboard-timing :controller-burst-window-ms))
+           (edge-times
+             (remove-if (lambda (time) (>= (- now time) window))
+                        (getf next :edge-times)))
+           (updated (append edge-times (list now))))
+      (setf (getf next :edge-times) updated)
+      (if (<= (length updated) *dashboard-controller-burst-limit*)
+          (values next t nil)
+          (progn
+            (setf (getf next :suspended) t)
+            (values next nil t))))))
+
+(defun dashboard-controller-guard-recover-if-quiet (state now)
+  (check-type state list)
+  (check-type now (integer 0 *))
+  (let ((last-edge-at (getf state :last-edge-at)))
+    (if (and (getf state :suspended)
+             (integerp last-edge-at)
+             (>= (- now last-edge-at)
+                 (dashboard-timing :controller-quiet-reset-ms)))
+        (values (dashboard-controller-guard-initial-state) t)
+        (values (copy-list state) nil))))
+
+(defun dashboard-controller-scan-due-p (last-scan-ms now
+                                         &key force rescan)
+  (check-type last-scan-ms (or null (integer 0 *)))
+  (check-type now (integer 0 *))
+  (or force rescan (null last-scan-ms) (zerop last-scan-ms)
+      (>= (- now last-scan-ms) (dashboard-timing :controller-scan-ms))))
+
+(defun dashboard-controller-input-actions
+    (gamepad-actions keyboard-actions guard now)
+  (check-type gamepad-actions list)
+  (check-type keyboard-actions list)
+  (let ((next-guard guard)
+        (accepted-gamepad gamepad-actions)
+        (newly-suspended nil))
+    (when gamepad-actions
+      (multiple-value-bind (updated accepted suspended)
+          (dashboard-controller-guard-accept-edge guard now)
+        (setf next-guard updated
+              newly-suspended suspended)
+        (unless accepted
+          (setf accepted-gamepad nil))))
+    (when (menu-sound-blocks-input-p :controller now)
+      (setf accepted-gamepad nil))
+    (values (remove-duplicates
+             (append accepted-gamepad keyboard-actions) :test #'eq)
+            next-guard newly-suspended)))
+
+(defun dashboard-controller-command (actions modal-view settings-view)
+  (check-type actions list)
+  (cond
+    ((and (or modal-view settings-view) (member :back actions)) :back)
+    (modal-view nil)
+    ((member :settings actions) :settings)
+    ((and (not settings-view) (member :system-previous actions))
+     :system-previous)
+    ((and (not settings-view) (member :system-next actions)) :system-next)
+    ((or (member :left actions) (member :up actions)) :previous)
+    ((or (member :right actions) (member :down actions)) :next)
+    ((member :confirm actions) :confirm)
+    (t nil)))
+
 (defparameter *dashboard-reboot-confirmation-text*
   "PRESS A OR TAP AGAIN TO REBOOT")
 (defparameter *dashboard-terminal-login-shell* "/BIN/ASH")
