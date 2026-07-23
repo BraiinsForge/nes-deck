@@ -8,6 +8,7 @@
 (defparameter *record-interaction* nil)
 (defparameter *interaction-trace* nil)
 (defparameter *active-status* 0)
+(defparameter *active-count* 0)
 (defparameter *stop-count* 0)
 (defparameter *finish-count* 0)
 (defparameter *canvas-clear-status* 1)
@@ -41,23 +42,28 @@
 (defparameter *raster-png-arguments* nil)
 (defparameter *raster-png-calls* nil)
 (defparameter *evdev-controls-scan-result* '(0 0))
+(defparameter *evdev-controls-scan-count* 0)
 (defparameter *evdev-controls-close-count* 0)
 (defparameter *evdev-controls-dispatch-result* '(0 0))
 (defparameter *evdev-controls-dispatch-timeout* nil)
 (defparameter *evdev-controls* nil)
 (defparameter *evdev-open-status* 1)
+(defparameter *evdev-open-count* 0)
 (defparameter *evdev-close-count* 0)
 (defparameter *evdev-dispatch-result* 0)
 (defparameter *evdev-dispatch-timeout* nil)
 (defparameter *evdev-touch* nil)
 (defparameter *fbdev-open-status* 1)
+(defparameter *fbdev-open-count* 0)
 (defparameter *fbdev-close-count* 0)
 (defparameter *fbdev-canvas-status* 1)
+(defparameter *fbdev-canvas-count* 0)
 (defparameter *fbdev-present-status* 1)
 (defparameter *fbdev-present-color* nil)
 (defparameter *fbdev-size* nil)
 (defparameter *wayland-open-status* 1)
 (defparameter *wayland-close-count* 0)
+(defparameter *wayland-canvas-count* 0)
 (defparameter *wayland-canvas-status* 1)
 (defparameter *wayland-present-status* 1)
 (defparameter *wayland-present-color* nil)
@@ -115,7 +121,7 @@
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
       (lambda () 12)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
-      (lambda () *active-status*)
+      (lambda () (incf *active-count*) *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
       (lambda (&rest arguments)
         (setf *play-arguments* arguments)
@@ -189,7 +195,9 @@
           (push arguments *text-mask-calls*)
           *text-mask-result*)
         (symbol-function (find-symbol "EVDEV-CONTROLS-SCAN" "RETRODECK.NATIVE"))
-         (lambda () *evdev-controls-scan-result*)
+         (lambda ()
+             (incf *evdev-controls-scan-count*)
+             *evdev-controls-scan-result*)
          (symbol-function (find-symbol "EVDEV-CONTROLS-CLOSE" "RETRODECK.NATIVE"))
          (lambda () (incf *evdev-controls-close-count*) 0)
          (symbol-function (find-symbol "EVDEV-CONTROLS-DISPATCH"
@@ -200,9 +208,13 @@
          (symbol-function (find-symbol "EVDEV-NEXT-CONTROL" "RETRODECK.NATIVE"))
          (lambda () (pop *evdev-controls*))
          (symbol-function (find-symbol "EVDEV-TOUCH-OPEN" "RETRODECK.NATIVE"))
-         (lambda () *evdev-open-status*)
+         (lambda () (incf *evdev-open-count*) *evdev-open-status*)
          (symbol-function (find-symbol "EVDEV-TOUCH-CLOSE" "RETRODECK.NATIVE"))
-         (lambda () (incf *evdev-close-count*) 0)
+         (lambda ()
+             (incf *evdev-close-count*)
+             (when *record-interaction*
+               (push :touch-close *interaction-trace*))
+             0)
          (symbol-function (find-symbol "EVDEV-TOUCH-DISPATCH" "RETRODECK.NATIVE"))
          (lambda (timeout-ms)
            (setf *evdev-dispatch-timeout* timeout-ms)
@@ -210,11 +222,15 @@
          (symbol-function (find-symbol "EVDEV-NEXT-TOUCH" "RETRODECK.NATIVE"))
          (lambda () *evdev-touch*)
          (symbol-function (find-symbol "FBDEV-OPEN" "RETRODECK.NATIVE"))
-      (lambda () *fbdev-open-status*)
+      (lambda () (incf *fbdev-open-count*) *fbdev-open-status*)
       (symbol-function (find-symbol "FBDEV-CLOSE" "RETRODECK.NATIVE"))
       (lambda () (incf *fbdev-close-count*) 0)
       (symbol-function (find-symbol "FBDEV-PRESENT-CANVAS" "RETRODECK.NATIVE"))
-      (lambda () *fbdev-canvas-status*)
+      (lambda ()
+          (incf *fbdev-canvas-count*)
+          (when *record-interaction*
+            (push :present *interaction-trace*))
+          *fbdev-canvas-status*)
       (symbol-function (find-symbol "FBDEV-PRESENT-SOLID" "RETRODECK.NATIVE"))
       (lambda (color)
         (setf *fbdev-present-color* color)
@@ -226,7 +242,11 @@
       (symbol-function (find-symbol "WAYLAND-CLOSE" "RETRODECK.NATIVE"))
       (lambda () (incf *wayland-close-count*) 0)
       (symbol-function (find-symbol "WAYLAND-PRESENT-CANVAS" "RETRODECK.NATIVE"))
-      (lambda () *wayland-canvas-status*)
+      (lambda ()
+          (incf *wayland-canvas-count*)
+          (when *record-interaction*
+            (push :present *interaction-trace*))
+          *wayland-canvas-status*)
       (symbol-function (find-symbol "WAYLAND-PRESENT-SOLID" "RETRODECK.NATIVE"))
       (lambda (color)
         (setf *wayland-present-color* color)
@@ -279,7 +299,10 @@
 
 (let ((before (retrodeck::monotonic-ms)))
   (setf *play-status* 1)
-  (assert (retrodeck:play-menu-sound :confirm 42))
+  (multiple-value-bind (succeeded started)
+      (retrodeck:play-menu-sound :confirm 42)
+    (assert succeeded)
+    (assert started))
   (let ((after (retrodeck::monotonic-ms)))
     (assert (<= (+ before 115)
                 retrodeck::*menu-sound-input-until-ms*
@@ -292,7 +315,10 @@
 
 (setf retrodeck::*menu-sound-input-until-ms* 77
       *play-status* 2)
-(assert (retrodeck:play-menu-sound :next 42))
+(multiple-value-bind (succeeded started)
+    (retrodeck:play-menu-sound :next 42)
+  (assert succeeded)
+  (assert (not started)))
 (assert (= retrodeck::*menu-sound-input-until-ms* 77))
 
 (setf *play-status* 0)
@@ -2595,5 +2621,663 @@ secret!9
     (assert (eq (getf animated :view) :credits))
     (assert (zerop layout-reads))
     (assert (equal trace '((:render) (:present))))))
+
+(setf *fbdev-size* nil
+      *wayland-size* nil)
+
+(let ((state (retrodeck:dashboard-loop-initial-state nil :now 1))
+      (runtime (retrodeck:make-dashboard-runtime)))
+  (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:dashboard-runtime-begin-iteration
+              state runtime '(:now 1)))))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:dashboard-runtime-dispatch-input
+              state runtime '(:now 1 :poll-ready-p nil))))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 10))
+       (runtime (retrodeck:make-dashboard-runtime))
+       (*fbdev-open-status* 1)
+       (*fbdev-open-count* 0)
+       (*fbdev-close-count* 0)
+       (*evdev-open-status* 0)
+       (*evdev-open-count* 0)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-count* 0)
+       (*evdev-controls-close-count* 0)
+       (*fbdev-canvas-count* 0))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:dashboard-runtime-initialize state runtime 10))))
+  (assert (= *fbdev-open-count* 1))
+  (assert (= *fbdev-close-count* 1))
+  (assert (= *evdev-open-count* 1))
+  (assert (zerop *evdev-close-count*))
+  (assert (zerop *evdev-controls-scan-count*))
+  (assert (zerop *evdev-controls-close-count*))
+  (assert (zerop *fbdev-canvas-count*))
+  (assert (null (getf runtime :layout)))
+  (assert (not (getf runtime :initialized-p)))
+  (assert (not (retrodeck:dashboard-runtime-running-p runtime))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 20))
+       (runtime (retrodeck:make-dashboard-runtime))
+       (*fbdev-open-status* 1)
+       (*fbdev-open-count* 0)
+       (*fbdev-close-count* 0)
+       (*evdev-open-status* 1)
+       (*evdev-open-count* 0)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-result* '(3 0))
+       (*evdev-controls-scan-count* 0)
+       (*evdev-controls-close-count* 0)
+       (*fbdev-canvas-count* 0))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:dashboard-runtime-initialize state runtime 20))))
+  (assert (= *fbdev-open-count* 1))
+  (assert (= *fbdev-close-count* 1))
+  (assert (= *evdev-open-count* 1))
+  (assert (= *evdev-close-count* 1))
+  (assert (= *evdev-controls-scan-count* 1))
+  (assert (= *evdev-controls-close-count* 1))
+  (assert (zerop *fbdev-canvas-count*))
+  (assert (null (getf runtime :layout))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 30))
+       (runtime (retrodeck:make-dashboard-runtime :wayland t))
+       (*wayland-size* nil)
+       (*wayland-open-status* 1)
+       (*wayland-close-count* 0)
+       (*wayland-canvas-status* 0)
+       (*wayland-canvas-count* 0)
+       (*evdev-open-count* 0)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-scan-count* 0)
+       (*evdev-controls-close-count* 0))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:dashboard-runtime-initialize state runtime 30))))
+  (assert (= *wayland-canvas-count* 1))
+  (assert (= *wayland-close-count* 1))
+  (assert (zerop *evdev-open-count*))
+  (assert (zerop *evdev-close-count*))
+  (assert (= *evdev-controls-scan-count* 1))
+  (assert (= *evdev-controls-close-count* 1))
+  (assert (null (getf runtime :layout))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state
+               nil :now 40))
+       (runtime (retrodeck:make-dashboard-runtime))
+       (*fbdev-size* '(1280 480))
+       (*fbdev-open-count* 0)
+       (*fbdev-close-count* 0)
+       (*fbdev-canvas-status* 0)
+       (*fbdev-canvas-count* 0)
+       (*evdev-open-status* 1)
+       (*evdev-open-count* 0)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-scan-count* 0)
+       (*evdev-controls-close-count* 0))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:dashboard-runtime-initialize state runtime 40))))
+  (assert (zerop *fbdev-open-count*))
+  (assert (zerop *fbdev-close-count*))
+  (assert (= *fbdev-canvas-count* 1))
+  (assert (= *evdev-open-count* 1))
+  (assert (= *evdev-close-count* 1))
+  (assert (= *evdev-controls-scan-count* 1))
+  (assert (= *evdev-controls-close-count* 1))
+  (assert (not (getf runtime :presentation-owned-p))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 50))
+       (runtime (retrodeck:make-dashboard-runtime :wayland t))
+       (*wayland-size* '(1280 480))
+       (*wayland-close-count* 0)
+       (*wayland-canvas-status* 0)
+       (*wayland-canvas-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-scan-count* 0)
+       (*evdev-controls-close-count* 0))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:dashboard-runtime-initialize state runtime 50))))
+  (assert (= *wayland-canvas-count* 1))
+  (assert (zerop *wayland-close-count*))
+  (assert (= *evdev-controls-scan-count* 1))
+  (assert (= *evdev-controls-close-count* 1))
+  (assert (not (getf runtime :presentation-owned-p))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state
+               nil :now 55))
+       (external-calls 0)
+       (runtime
+         (retrodeck:make-dashboard-runtime
+          :external-effect-handler
+          (lambda (effect current)
+            (declare (ignore current))
+            (case (first effect)
+              (:network-action '(:network-result :network nil))
+              (otherwise (incf external-calls))))))
+       (*fbdev-size* '(1280 480))
+       (*fbdev-open-count* 0)
+       (*fbdev-close-count* 0)
+       (*fbdev-canvas-status* 1)
+       (*evdev-open-status* 1)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-close-count* 0))
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 55)
+    (declare (ignore ignored-runtime))
+    (assert (not (getf runtime :presentation-owned-p)))
+    (assert (signals-error-p
+             (lambda ()
+               (retrodeck::dashboard-runtime-handle-effect
+                runtime '(:launch (:executable "/tmp/noop")) initialized))))
+    (assert (zerop external-calls))
+    (retrodeck:dashboard-runtime-shutdown runtime)
+    (assert (zerop *fbdev-open-count*))
+    (assert (zerop *fbdev-close-count*))
+    (assert (= *evdev-close-count* 1))
+    (assert (= *evdev-controls-close-count* 1))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 56))
+       (runtime (retrodeck:make-dashboard-runtime :adopt-presentation t))
+       (*fbdev-size* '(1280 480))
+       (*fbdev-open-count* 0)
+       (*fbdev-close-count* 0)
+       (*fbdev-canvas-status* 1)
+       (*evdev-open-status* 1)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-close-count* 0))
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 56)
+    (declare (ignore ignored-runtime))
+    (assert (getf runtime :presentation-owned-p))
+    (assert (retrodeck:dashboard-runtime-running-p runtime))
+    (assert (signals-error-p
+             (lambda ()
+               (retrodeck:dashboard-runtime-initialize initialized runtime 57))))
+    (assert (getf runtime :presentation-owned-p))
+    (retrodeck:dashboard-runtime-shutdown runtime)
+    (assert (zerop *fbdev-open-count*))
+    (assert (= *fbdev-close-count* 1))
+    (assert (= *evdev-close-count* 1))
+    (assert (= *evdev-controls-close-count* 1))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state
+               nil :now 58))
+       (runtime (retrodeck:make-dashboard-runtime :wayland t))
+       (*wayland-size* '(1280 480))
+       (*wayland-close-count* 0)
+       (*wayland-canvas-status* 1)
+       (*active-status* 1)
+       (*active-count* 0)
+       (*play-status* 2)
+       (*stop-count* 0)
+       (*finish-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-close-count* 0)
+       (retrodeck::*menu-sound-input-until-ms* 0))
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 58)
+    (declare (ignore ignored-runtime))
+    (multiple-value-bind (begun trace)
+        (retrodeck:dashboard-runtime-begin-iteration
+         initialized runtime '(:now 59))
+      (assert (equal trace '((:reap-sound))))
+      (assert (= *active-count* 1))
+      (assert (getf runtime :sound-active-p))
+      (assert (not (getf runtime :audio-owned-p)))
+      (assert (null
+               (retrodeck::dashboard-runtime-handle-effect
+                runtime '(:cue :next) begun)))
+      (assert (getf runtime :sound-active-p))
+      (assert (not (getf runtime :audio-owned-p)))
+      (retrodeck::dashboard-runtime-handle-effect
+       runtime '(:stop-sound) begun)
+      (retrodeck::dashboard-runtime-handle-effect
+       runtime '(:finish-sound) begun)
+      (assert (zerop *stop-count*))
+      (assert (zerop *finish-count*))
+      (assert (getf runtime :sound-active-p))
+      (retrodeck:dashboard-runtime-shutdown runtime)
+      (assert (zerop *stop-count*))
+      (assert (zerop *finish-count*))
+      (assert (zerop *wayland-close-count*))
+      (assert (= *evdev-controls-close-count* 1)))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state
+               nil :now 0 :touch-connected-p nil))
+       (runtime (retrodeck:make-dashboard-runtime))
+       (*active-status* 0)
+       (*fbdev-open-status* 1)
+       (*fbdev-open-count* 0)
+       (*fbdev-canvas-status* 1)
+       (*fbdev-canvas-count* 0)
+       (*evdev-open-status* 1)
+       (*evdev-open-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-scan-count* 0)
+       (retrodeck::*menu-sound-input-until-ms* 0))
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 5000)
+    (declare (ignore ignored-runtime))
+    (assert (getf initialized :touch-connected-p))
+    (assert (= *evdev-open-count* 1))
+    (multiple-value-bind (begun trace)
+        (retrodeck:dashboard-runtime-begin-iteration
+         initialized runtime '(:now 5001))
+      (assert (getf begun :touch-connected-p))
+      (assert (string= (getf (getf begun :dashboard) :status) ""))
+      (assert (= *evdev-open-count* 1))
+      (assert (equal trace '((:reap-sound)))))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+       (startup-network '(:ssid "OLD" :wlan-ipv4 "10.0.0.1"
+                          :wireguard-ipv4 "" :selector "0"))
+       (network '(:ssid "LAB" :wlan-ipv4 "10.0.0.2"
+                  :wireguard-ipv4 "10.8.0.2" :selector "1"))
+       (network-reads 0)
+       (state (retrodeck:dashboard-loop-initial-state games :now 5000))
+       (settings (copy-list (getf state :settings)))
+       (runtime
+         (retrodeck:make-dashboard-runtime
+          :external-effect-handler
+          (lambda (effect current)
+            (declare (ignore current))
+            (case (first effect)
+              (:network-action
+               (incf network-reads)
+               (push :network-action *interaction-trace*)
+               (list :network-result :network
+                     (if (= network-reads 1) startup-network network)))
+              (otherwise (error "Unexpected external effect ~S" effect))))))
+       (*active-status* 0)
+       (*record-interaction* t)
+       (*interaction-trace* nil)
+       (*fbdev-open-status* 1)
+       (*fbdev-canvas-status* 1)
+       (*evdev-open-status* 1)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (retrodeck::*menu-sound-input-until-ms* 0))
+  (setf (getf state :view) :settings
+        (getf settings :open) t
+        (getf state :settings) settings)
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 5000)
+    (declare (ignore ignored-runtime))
+    (assert (equal (getf initialized :network) startup-network))
+    (assert (= (getf initialized :network-refreshed-at) 5000))
+    (assert (= network-reads 1))
+    (assert (equal (nreverse *interaction-trace*)
+                   '(:network-action :render :present)))
+    (setf *interaction-trace* nil)
+    (multiple-value-bind (lost trace)
+        (retrodeck:dashboard-runtime-dispatch-input
+         initialized runtime
+         '(:gamepad-actions nil :keyboard-actions nil :touch-reports nil
+           :touch-lost-p t :tick-now 7000 :now 7001))
+      (assert (equal (getf lost :network) network))
+      (assert (= network-reads 2))
+      (assert (not (getf lost :touch-connected-p)))
+      (assert (= *evdev-close-count* 1))
+      (assert (equal trace
+                     '((:network-action) (:render) (:present)
+                       (:render) (:present))))
+      (assert (equal (nreverse *interaction-trace*)
+                     '(:network-action :render :present :touch-close
+                       :render :present))))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 60))
+       (runtime (retrodeck:make-dashboard-runtime :wayland t))
+       (*wayland-size* '(1280 480))
+       (*wayland-close-count* 0)
+       (*wayland-canvas-status* 1)
+       (*wayland-canvas-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-scan-count* 0)
+       (*evdev-controls-close-count* 0))
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 60)
+    (declare (ignore initialized ignored-runtime))
+    (assert (not (getf runtime :presentation-owned-p)))
+    (assert (getf runtime :controls-owned-p))
+    (retrodeck:dashboard-runtime-shutdown runtime)
+    (assert (zerop *wayland-close-count*))
+    (assert (= *wayland-canvas-count* 1))
+    (assert (= *evdev-controls-scan-count* 1))
+    (assert (= *evdev-controls-close-count* 1))
+    (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
+    (retrodeck:dashboard-runtime-shutdown runtime)
+    (assert (zerop *wayland-close-count*))
+    (assert (= *evdev-controls-close-count* 1))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")
+                (:id "beta" :title "BETA" :system :nes
+                 :color #xafd75f :rom "/tmp/beta.nes")))
+       (state (retrodeck:dashboard-loop-initial-state games :now 70))
+       (runtime (retrodeck:make-dashboard-runtime))
+       (*active-status* 0)
+       (*play-status* 1)
+       (*stop-count* 0)
+       (*fbdev-size* nil)
+       (*fbdev-open-status* 1)
+       (*fbdev-close-count* 0)
+       (*fbdev-canvas-status* 1)
+       (*evdev-open-status* 1)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-close-count* 0)
+       (retrodeck::*menu-sound-input-until-ms* 0))
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 70)
+    (declare (ignore ignored-runtime))
+    (multiple-value-bind (moved ignored-trace)
+        (retrodeck:dashboard-runtime-dispatch-input
+         initialized runtime
+         '(:gamepad-actions nil :keyboard-actions (:right)
+           :touch-reports nil :now 71))
+      (declare (ignore ignored-trace))
+      (assert (getf runtime :audio-owned-p))
+      (setf retrodeck::*menu-sound-input-until-ms* 1000)
+      (multiple-value-bind (reaped reap-trace)
+          (retrodeck:dashboard-runtime-begin-iteration
+           moved runtime '(:now 72))
+        (assert (equal reap-trace '((:reap-sound))))
+        (assert (not (getf runtime :sound-active-p)))
+        (assert (getf runtime :audio-owned-p))
+        (multiple-value-bind (stopped trace)
+            (retrodeck:dashboard-runtime-dispatch-input
+             reaped runtime '(:now 73 :poll-ready-p nil :shutdown-p t))
+          (declare (ignore stopped))
+          (assert (null trace))
+          (assert (= *stop-count* 1))
+          (assert (zerop retrodeck::*menu-sound-input-until-ms*))
+          (assert (= *evdev-controls-close-count* 1))
+          (assert (= *evdev-close-count* 1))
+          (assert (= *fbdev-close-count* 1))
+          (assert (null (getf runtime :layout)))
+          (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
+          (retrodeck:dashboard-runtime-shutdown runtime)
+          (assert (= *stop-count* 1))
+          (assert (= *evdev-controls-close-count* 1))
+          (assert (= *evdev-close-count* 1))
+          (assert (= *fbdev-close-count* 1)))))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+       (runtime
+         (retrodeck:make-dashboard-runtime
+          :external-effect-handler
+          (lambda (effect current)
+            (declare (ignore current))
+            (case (first effect)
+              (:network-action '(:network-result :network nil))
+              (:launch
+               '(:child-returned :shutdown t
+                 :result (:started t :exited-for-touch nil
+                          :exit-code nil :signal nil :error nil)))
+              (otherwise (error "Unexpected external effect ~S" effect))))))
+       (state (retrodeck:dashboard-loop-initial-state games :now 80))
+       (*active-status* 0)
+       (*play-status* 1)
+       (*stop-count* 0)
+       (*finish-count* 0)
+       (*fbdev-size* nil)
+       (*fbdev-open-status* 1)
+       (*fbdev-close-count* 0)
+       (*fbdev-canvas-status* 1)
+       (*evdev-open-status* 1)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-scan-count* 0)
+       (*evdev-controls-close-count* 0)
+       (retrodeck::*menu-sound-input-until-ms* 0))
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 80)
+    (declare (ignore ignored-runtime))
+    (multiple-value-bind (stopped trace)
+        (retrodeck:dashboard-runtime-dispatch-input
+         initialized runtime
+         '(:gamepad-actions nil :keyboard-actions (:confirm)
+           :touch-reports nil :now 81))
+      (assert (null (getf stopped :active-launch)))
+      (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
+      (assert (= *finish-count* 1))
+      (assert (zerop *stop-count*))
+      (assert (= *evdev-controls-scan-count* 1))
+      (assert (= *evdev-controls-close-count* 1))
+      (assert (= *evdev-close-count* 1))
+      (assert (= *fbdev-close-count* 1))
+      (assert (equal (mapcar #'first trace)
+                     '(:discard-touch :cue :render :present :finish-sound
+                       :close-controls :launch :stop-loop))))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")
+                (:id "beta" :title "BETA" :system :nes
+                 :color #xafd75f :rom "/tmp/beta.nes")))
+       (state (retrodeck:dashboard-loop-initial-state games :now 100))
+       (runtime (retrodeck:make-dashboard-runtime
+                 :volume-state "/tmp/volume.state")))
+  (setf *active-status* 1
+        *active-count* 0
+        *play-status* 1
+        *evdev-controls-scan-count* 0
+        *evdev-open-count* 0
+        *fbdev-open-count* 0
+        *fbdev-canvas-count* 0
+        retrodeck::*menu-sound-input-until-ms* 0)
+  (multiple-value-bind (initialized returned-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 100)
+    (assert (eq returned-runtime runtime))
+    (assert (= *fbdev-open-count* 1))
+    (assert (= *evdev-open-count* 1))
+    (assert (= *evdev-controls-scan-count* 1))
+    (assert (= *fbdev-canvas-count* 1))
+    (assert (= (getf initialized :last-control-scan-ms) 100))
+    (multiple-value-bind (begun begin-trace)
+        (retrodeck:dashboard-runtime-begin-iteration
+         initialized runtime '(:now 150))
+      (assert (equal begin-trace '((:reap-sound))))
+      (assert (= *active-count* 1))
+      (assert (retrodeck:dashboard-runtime-controller-quarantined-p
+               runtime 151))
+      (multiple-value-bind (blocked blocked-trace)
+          (retrodeck:dashboard-runtime-dispatch-input
+           begun runtime
+           '(:gamepad-actions (:right) :keyboard-actions nil
+             :touch-reports nil :now 151))
+        (assert (null blocked-trace))
+        (assert (zerop (getf (getf blocked :dashboard) :game-position)))
+        (assert (= *active-count* 1))
+        (multiple-value-bind (moved move-trace)
+            (retrodeck:dashboard-runtime-dispatch-input
+             blocked runtime
+             '(:gamepad-actions nil :keyboard-actions (:right)
+               :touch-reports nil :rescan-controls-p t :now 152))
+          (assert (= (getf (getf moved :dashboard) :game-position) 1))
+          (assert (= *active-count* 1))
+          (assert (= *fbdev-canvas-count* 2))
+          (assert (equal move-trace
+                         '((:discard-touch) (:render) (:present)
+                           (:cue :next))))
+          (setf *active-status* 0)
+          (multiple-value-bind (rescanned rescan-trace)
+              (retrodeck:dashboard-runtime-begin-iteration
+               moved runtime '(:now 153))
+            (assert (= (getf rescanned :last-control-scan-ms) 153))
+            (assert (= *active-count* 2))
+            (assert (= *evdev-controls-scan-count* 2))
+            (assert (equal rescan-trace
+                           '((:reap-sound)
+                             (:scan-controls :force t)))))))))
+  (setf *active-status* 0
+        retrodeck::*menu-sound-input-until-ms* 0))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+       (external-trace nil)
+       (clock-now 2002)
+       (runtime
+         (retrodeck:make-dashboard-runtime
+          :volume-state "/tmp/volume.state"
+          :clock (lambda () clock-now)
+          :external-effect-handler
+          (lambda (effect current)
+            (declare (ignore current))
+            (case (first effect)
+              (:network-action '(:network-result :network nil))
+              (:launch
+               (push :launch external-trace)
+               (setf clock-now 5000)
+               '(:child-returned
+                 :result (:started t :exited-for-touch nil
+                          :exit-code 0 :signal nil :error nil)))
+              (:reload-volume
+               (push :reload-volume external-trace)
+               '(:child-complete :volume 47))
+              (otherwise (error "Unexpected external effect ~S" effect))))))
+       (state (retrodeck:dashboard-loop-initial-state games :now 2000)))
+  (setf *active-status* 0
+        *active-count* 0
+        *play-status* 1
+        *finish-count* 0
+        *evdev-controls-close-count* 0
+        *evdev-controls-scan-count* 0
+        *evdev-open-count* 0
+        *fbdev-open-count* 0
+        *fbdev-canvas-count* 0
+        retrodeck::*menu-sound-input-until-ms* 0)
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 2000)
+    (declare (ignore ignored-runtime))
+    (multiple-value-bind (begun begin-trace)
+        (retrodeck:dashboard-runtime-begin-iteration
+         initialized runtime '(:now 2001))
+      (assert (equal begin-trace '((:reap-sound))))
+      (multiple-value-bind (finished trace)
+          (retrodeck:dashboard-runtime-dispatch-input
+           begun runtime
+           '(:gamepad-actions (:confirm) :keyboard-actions nil
+             :touch-reports nil :now 2002))
+        (assert (null (getf finished :active-launch)))
+        (assert (= (getf finished :last-control-scan-ms) 5000))
+        (assert (= (getf (getf finished :settings) :volume) 47))
+        (assert (string= (getf (getf finished :dashboard) :status)
+                         "ALPHA EXITED"))
+        (assert (equal (nreverse external-trace)
+                       '(:launch :reload-volume)))
+        (assert (= *finish-count* 1))
+        (assert (= *evdev-controls-close-count* 1))
+        (assert (= *evdev-controls-scan-count* 2))
+        (assert (= *fbdev-open-count* 2))
+        (assert (= *fbdev-canvas-count* 3))
+        (assert (not (retrodeck:dashboard-runtime-controller-quarantined-p
+                      runtime 2002)))
+        (assert (equal (mapcar #'first trace)
+                       '(:discard-touch :cue :render :present :finish-sound
+                         :close-controls :launch :scan-controls
+                         :open-presentation :reload-volume
+                         :render :present)))
+        (multiple-value-bind (post-launch post-trace)
+            (retrodeck:dashboard-runtime-begin-iteration
+             finished runtime '(:now 5001))
+          (assert (= (getf post-launch :last-control-scan-ms) 5000))
+          (assert (equal post-trace '((:reap-sound))))
+          (assert (= *evdev-controls-scan-count* 2))))))
+  (setf retrodeck::*menu-sound-input-until-ms* 0))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+       (external-trace nil)
+       (runtime
+         (retrodeck:make-dashboard-runtime
+          :external-effect-handler
+          (lambda (effect current)
+            (declare (ignore current))
+            (case (first effect)
+              (:network-action '(:network-result :network nil))
+              (:settings-action
+               (push :settings-action external-trace)
+               '(:settings-result :succeeded-p t))
+              (otherwise (error "Unexpected external effect ~S" effect))))))
+       (state (retrodeck:dashboard-loop-initial-state games :now 3000))
+       (settings (copy-list (getf state :settings))))
+  (setf (getf state :view) :settings
+        (getf settings :open) t
+        (getf state :settings) settings
+        *active-status* 0
+        *play-status* 0
+        *fbdev-canvas-count* 0
+        retrodeck::*menu-sound-input-until-ms* 0)
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 3000)
+    (declare (ignore ignored-runtime))
+    (multiple-value-bind (begun ignored-trace)
+        (retrodeck:dashboard-runtime-begin-iteration
+         initialized runtime '(:now 3001))
+      (declare (ignore ignored-trace))
+      (multiple-value-bind (failed trace)
+          (retrodeck:dashboard-runtime-dispatch-input
+           begun runtime
+           '(:gamepad-actions (:confirm) :keyboard-actions nil
+             :touch-reports nil :now 3002))
+        (assert (= (getf (getf failed :settings) :volume) 37))
+        (assert (string= (getf (getf failed :settings) :status)
+                         "VOLUME SAVED; CONFIRMATION TONE FAILED"))
+        (assert (equal (nreverse external-trace) '(:settings-action)))
+        (assert (= *fbdev-canvas-count* 3))
+        (assert (equal (mapcar #'first trace)
+                       '(:discard-touch :settings-action :render :present
+                         :cue :render :present))))))
+  (setf *play-status* 1))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+       (runtime (retrodeck:make-dashboard-runtime))
+       (state (retrodeck:dashboard-loop-initial-state games :now 4000)))
+  (setf *active-status* 0
+        *active-count* 0
+        *evdev-open-count* 0
+        *evdev-close-count* 0
+        *fbdev-canvas-count* 0
+        retrodeck::*menu-sound-input-until-ms* 0)
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 4000)
+    (declare (ignore ignored-runtime))
+    (multiple-value-bind (lost lost-trace)
+        (retrodeck:dashboard-runtime-dispatch-input
+         initialized runtime
+         '(:gamepad-actions nil :keyboard-actions nil
+           :touch-reports nil :touch-lost-p t :now 4001))
+      (assert (not (getf lost :touch-connected-p)))
+      (assert (= *evdev-close-count* 1))
+      (assert (equal lost-trace '((:render) (:present))))
+      (multiple-value-bind (restored reconnect-trace)
+          (retrodeck:dashboard-runtime-begin-iteration
+           lost runtime '(:now 4002))
+        (assert (getf restored :touch-connected-p))
+        (assert (= *evdev-open-count* 2))
+        (assert (equal reconnect-trace
+                       '((:reap-sound) (:reconnect-touch)
+                         (:render) (:present))))
+        (multiple-value-bind (stopped stop-trace)
+            (retrodeck:dashboard-runtime-dispatch-input
+             restored runtime '(:now 4003 :poll-ready-p nil :shutdown-p t))
+          (declare (ignore stopped))
+          (assert (null stop-trace))
+          (assert (not (retrodeck:dashboard-runtime-running-p runtime))))))))
 
 (format t "Lisp policy tests passed.~%")

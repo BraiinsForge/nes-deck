@@ -1254,11 +1254,13 @@
      effect-handler)))
 
 (defun dashboard-loop-dispatch-input
-    (state input layout-reader effect-handler)
+    (state input layout-reader effect-handler &optional touch-loss-handler)
   (check-type state list)
   (check-type input list)
   (check-type layout-reader function)
   (check-type effect-handler function)
+  (when touch-loss-handler
+    (check-type touch-loss-handler function))
   (let* ((now (getf input :now))
          (tick-now (or (getf input :tick-now) now))
          (poll-ready-p (not (null (getf input :poll-ready-p t))))
@@ -1290,6 +1292,8 @@
       (unless poll-ready-p
         (return-from dashboard-loop-dispatch-input (values next trace)))
       (when touch-lost-p
+        (when touch-loss-handler
+          (funcall touch-loss-handler))
         (append-step '(:touch-lost))
         (setf reports nil
               touch-times nil))
@@ -1311,6 +1315,315 @@
                :wayland (not (null (getf input :wayland)))
                :volume-state (getf input :volume-state))))
       (values next trace))))
+
+(defun make-dashboard-runtime
+    (&key wayland
+          adopt-presentation
+          (volume-state (dashboard-settings-path :volume-state))
+          external-effect-handler
+          (clock #'monotonic-ms))
+  (check-type volume-state string)
+  (when external-effect-handler
+    (check-type external-effect-handler function))
+  (check-type clock function)
+  (list :wayland (not (null wayland))
+        :adopt-presentation (not (null adopt-presentation))
+        :volume-state volume-state
+        :external-effect-handler external-effect-handler
+        :clock clock
+        :layout nil
+        :now 0
+        :initialized-p nil
+        :running nil
+        :audio-owned-p nil
+        :sound-active-p nil
+        :presentation-owned-p nil
+        :touch-owned-p nil
+        :controls-owned-p nil
+        :rescan-controls-p nil))
+
+(defun dashboard-runtime-running-p (runtime)
+  (not (null (getf runtime :running))))
+
+(defun dashboard-runtime-controller-quarantined-p (runtime now)
+  (check-type now (integer 0 *))
+  (or (getf runtime :sound-active-p)
+      (< now *menu-sound-input-until-ms*)))
+
+(defun dashboard-runtime-open-presentation (runtime)
+  (let ((current-size
+          (if (getf runtime :wayland)
+              (current-wayland-size)
+              (current-fbdev-size))))
+    (if current-size
+        (values t (getf runtime :adopt-presentation))
+        (let ((opened
+                (if (getf runtime :wayland)
+                    (open-wayland-widget)
+                    (open-fbdev))))
+          (values opened (not (null opened)))))))
+
+(defun dashboard-runtime-close-presentation (runtime)
+  (if (getf runtime :wayland)
+      (close-wayland)
+      (close-fbdev)))
+
+(defun dashboard-runtime-shutdown (runtime)
+  (check-type runtime list)
+  (when (getf runtime :audio-owned-p)
+    (setf (getf runtime :audio-owned-p) nil)
+    (stop-menu-sound))
+  (when (getf runtime :controls-owned-p)
+    (setf (getf runtime :controls-owned-p) nil)
+    (close-evdev-controls))
+  (when (getf runtime :touch-owned-p)
+    (setf (getf runtime :touch-owned-p) nil)
+    (close-evdev-touch))
+  (when (getf runtime :presentation-owned-p)
+    (setf (getf runtime :presentation-owned-p) nil)
+    (dashboard-runtime-close-presentation runtime))
+  (setf (getf runtime :layout) nil
+        (getf runtime :initialized-p) nil
+        (getf runtime :running) nil
+        (getf runtime :sound-active-p) nil
+        (getf runtime :rescan-controls-p) nil)
+  runtime)
+
+(defun dashboard-runtime-present (runtime)
+  (if (getf runtime :wayland)
+      (present-wayland-canvas)
+      (present-fbdev-canvas)))
+
+(defun dashboard-runtime-read-clock (runtime)
+  (let ((now (funcall (getf runtime :clock))))
+    (check-type now (integer 0 *))
+    now))
+
+(defun dashboard-runtime-external-effect (runtime effect state)
+  (let ((handler (getf runtime :external-effect-handler)))
+    (unless handler
+      (error "Dashboard runtime cannot handle effect ~S" effect))
+    (funcall handler effect state)))
+
+(defun dashboard-runtime-handle-effect (runtime effect state)
+  (check-type runtime list)
+  (check-type effect list)
+  (check-type state list)
+  (case (first effect)
+    (:render
+     (setf (getf runtime :layout)
+           (render-dashboard-loop-state state (getf runtime :now)))
+     nil)
+    (:present
+     (unless (dashboard-runtime-present runtime)
+       (error "Dashboard presentation failed"))
+     nil)
+    (:cue
+     (let ((volume (getf (getf state :settings) :volume)))
+       (multiple-value-bind (succeeded started)
+           (play-menu-sound (second effect) volume)
+         (when (and succeeded (plusp volume))
+           (setf (getf runtime :sound-active-p) t)
+           (when started
+             (setf (getf runtime :audio-owned-p) t)))
+         (and (getf (cddr effect) :report-result)
+              (list :volume-tone-result
+                    :succeeded-p (not (null succeeded)))))))
+    (:stop-sound
+     (when (getf runtime :audio-owned-p)
+       (stop-menu-sound)
+       (setf (getf runtime :audio-owned-p) nil
+             (getf runtime :sound-active-p) nil))
+     nil)
+    (:finish-sound
+     (when (getf runtime :audio-owned-p)
+       (finish-menu-sound)
+       (setf (getf runtime :audio-owned-p) nil
+             (getf runtime :sound-active-p) nil))
+     nil)
+    (:reap-sound
+     (let ((active (= (audio-active-p) 1)))
+       (setf (getf runtime :sound-active-p) active)
+       (when (and (not active)
+                  (>= (getf runtime :now) *menu-sound-input-until-ms*))
+         (setf (getf runtime :audio-owned-p) nil)))
+     nil)
+    (:scan-controls
+     (scan-evdev-controls)
+     (setf (getf runtime :controls-owned-p) t)
+     (list :controls-rescanned :now (getf runtime :now)))
+    (:close-controls
+     (close-evdev-controls)
+     (setf (getf runtime :controls-owned-p) nil)
+     nil)
+    (:reconnect-touch
+     (when (open-evdev-touch)
+       (setf (getf runtime :touch-owned-p) t)
+       '(:touch-reconnected)))
+    (:open-presentation
+     (multiple-value-bind (opened owned)
+         (dashboard-runtime-open-presentation runtime)
+       (unless opened
+         (error "Dashboard presentation did not reopen"))
+       (when owned
+         (setf (getf runtime :presentation-owned-p) t))
+       '(:presentation-opened)))
+    (:discard-touch nil)
+    (:controller-suspended
+     (format *error-output*
+             "retrodeck: controller input suspended after burst; waiting for quiet~%")
+     (finish-output *error-output*)
+     nil)
+    (:controller-resumed
+     (format *error-output*
+             "retrodeck: controller input resumed after quiet period~%")
+     (finish-output *error-output*)
+     nil)
+    (:stop-loop
+     (dashboard-runtime-shutdown runtime)
+     nil)
+    (:launch
+     (when (and (not (getf runtime :wayland))
+                (not (getf runtime :presentation-owned-p)))
+       (error "Dashboard runtime cannot launch with a borrowed fbdev presentation; use :ADOPT-PRESENTATION T"))
+     (let ((completion (dashboard-runtime-external-effect runtime effect state)))
+       (setf (getf runtime :now) (dashboard-runtime-read-clock runtime))
+       completion))
+    ((:settings-action :wifi-action :network-action :reload-volume)
+     (dashboard-runtime-external-effect runtime effect state))
+    (otherwise (error "Unknown dashboard runtime effect ~S" effect))))
+
+(defun dashboard-runtime-initialize-network (state runtime now)
+  (let ((next (copy-list state)))
+    (setf (getf next :network-refreshed-at) now)
+    (if (not (getf runtime :external-effect-handler))
+        next
+        (let ((pending (copy-list next)))
+          (setf (getf pending :pending-network) t)
+          (let ((completion
+                  (dashboard-runtime-external-effect
+                   runtime '(:network-action) pending)))
+            (unless completion
+              (error "Dashboard startup network read returned no result"))
+            (multiple-value-bind (refreshed effects)
+                (dashboard-reduce pending completion)
+              (declare (ignore effects))
+              refreshed))))))
+
+(defun dashboard-runtime-initialize (state runtime now)
+  (check-type state list)
+  (check-type runtime list)
+  (check-type now (integer 0 *))
+  (when (getf runtime :initialized-p)
+    (error "Dashboard runtime is already initialized"))
+  (let ((current state)
+        (presentation-owned-p nil)
+        (touch-open-p nil)
+        (controls-open-p nil)
+        (initialized-p nil))
+    (setf (getf runtime :now) now)
+    (unwind-protect
+        (progn
+          (multiple-value-bind (opened owned)
+              (dashboard-runtime-open-presentation runtime)
+            (unless opened
+              (error "Dashboard presentation did not open"))
+            (setf presentation-owned-p owned
+                  (getf runtime :presentation-owned-p) owned))
+          (unless (getf runtime :wayland)
+            (unless (open-evdev-touch)
+              (error "Dashboard touchscreen did not open"))
+            (setf touch-open-p t
+                  (getf runtime :touch-owned-p) t)
+            (unless (getf current :touch-connected-p)
+              (setf current (copy-list current))
+              (setf (getf current :touch-connected-p) t)))
+          (let* ((handler
+                   (lambda (effect active)
+                     (dashboard-runtime-handle-effect runtime effect active)))
+                 (completion
+                   (progn
+                     (setf controls-open-p t)
+                     (funcall handler '(:scan-controls :force t) current))))
+            (multiple-value-bind (next effects)
+                (dashboard-reduce current completion)
+              (when effects
+                (error "Unexpected dashboard startup scan effects ~S" effects))
+              (let ((ready
+                      (dashboard-runtime-initialize-network next runtime now)))
+                (funcall handler '(:render) ready)
+                (funcall handler '(:present) ready)
+                (setf (getf runtime :rescan-controls-p) nil
+                      (getf runtime :initialized-p) t
+                      (getf runtime :running) t
+                      initialized-p t)
+                (values ready runtime)))))
+      (unless initialized-p
+        (when controls-open-p
+          (close-evdev-controls))
+        (when touch-open-p
+          (close-evdev-touch))
+        (when presentation-owned-p
+          (dashboard-runtime-close-presentation runtime))
+        (setf (getf runtime :layout) nil
+              (getf runtime :initialized-p) nil
+              (getf runtime :running) nil
+              (getf runtime :presentation-owned-p) nil
+              (getf runtime :touch-owned-p) nil
+              (getf runtime :controls-owned-p) nil)))))
+
+(defun dashboard-runtime-begin-iteration (state runtime context)
+  (check-type state list)
+  (check-type runtime list)
+  (check-type context list)
+  (unless (getf runtime :initialized-p)
+    (error "Dashboard runtime is not initialized"))
+  (let ((effective (copy-list context))
+        (now (getf context :now)))
+    (check-type now (integer 0 *))
+    (setf (getf runtime :now) now
+          (getf effective :wayland) (getf runtime :wayland)
+          (getf effective :rescan-controls-p)
+          (or (getf effective :rescan-controls-p)
+              (getf runtime :rescan-controls-p)))
+    (multiple-value-prog1
+        (dashboard-loop-begin-iteration
+         state effective
+         (lambda (effect current)
+           (dashboard-runtime-handle-effect runtime effect current)))
+      (setf (getf runtime :rescan-controls-p) nil))))
+
+(defun dashboard-runtime-dispatch-input (state runtime input)
+  (check-type state list)
+  (check-type runtime list)
+  (check-type input list)
+  (unless (getf runtime :initialized-p)
+    (error "Dashboard runtime is not initialized"))
+  (let* ((normalized (copy-list input))
+         (now (getf input :now)))
+    (check-type now (integer 0 *))
+    (setf (getf runtime :now) now)
+    (when (getf input :rescan-controls-p)
+      (setf (getf runtime :rescan-controls-p) t))
+    (setf (getf normalized :controller-quarantined-p)
+          (dashboard-runtime-controller-quarantined-p runtime now)
+          (getf normalized :wayland) (getf runtime :wayland)
+          (getf normalized :volume-state) (getf runtime :volume-state))
+    (multiple-value-prog1
+        (dashboard-loop-dispatch-input
+         state normalized
+         (lambda ()
+           (or (getf runtime :layout)
+               (error "Dashboard runtime has no rendered layout")))
+         (lambda (effect current)
+           (dashboard-runtime-handle-effect runtime effect current))
+         (and (not (getf runtime :wayland))
+              (lambda ()
+                (when (getf runtime :touch-owned-p)
+                  (setf (getf runtime :touch-owned-p) nil)
+                  (close-evdev-touch)))))
+      (when (getf input :shutdown-p)
+        (dashboard-runtime-shutdown runtime)))))
 
 (defun apply-dashboard-touch (games state layout report volume-percent presenter)
   (check-type games list)

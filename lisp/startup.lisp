@@ -162,6 +162,12 @@
            #:dashboard-loop-poll-timeout
            #:dashboard-loop-step
            #:dashboard-reduce
+           #:dashboard-runtime-begin-iteration
+           #:dashboard-runtime-controller-quarantined-p
+           #:dashboard-runtime-dispatch-input
+           #:dashboard-runtime-initialize
+           #:dashboard-runtime-running-p
+           #:dashboard-runtime-shutdown
            #:dashboard-menu-geometry
            #:dashboard-system-label
            #:dashboard-target-at
@@ -190,6 +196,7 @@
            #:load-project-credits
            #:load-text-mask
            #:main
+           #:make-dashboard-runtime
            #:make-project-credits-crawl
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
@@ -268,7 +275,7 @@
 (defun play-menu-sound (cue volume-percent)
   (check-type volume-percent (integer 0 100))
   (when (zerop volume-percent)
-    (return-from play-menu-sound t))
+    (return-from play-menu-sound (values t nil)))
   (let ((notes (menu-sound-notes cue)))
     (unless (<= 1 (length notes) 2)
       (error "Menu cues need one or two notes"))
@@ -284,7 +291,7 @@
             (setf *menu-sound-input-until-ms*
                   (+ started-at (menu-sound-duration-ms cue)
                      *menu-sound-input-tail-ms*)))
-          (plusp status))))))
+          (values (plusp status) (= status 1)))))))
 
 (defun menu-sound-blocks-input-p (input-kind &optional (now (monotonic-ms)))
   (and (eq input-kind :controller)
