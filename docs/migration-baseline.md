@@ -597,6 +597,52 @@ production lines, including the existing catalog compiler, and 11,018 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Dashboard loop boundary checkpoint
+
+Startup-loaded `dashboard.lisp` now contains a pure, non-authoritative dashboard
+state reducer and two-phase loop boundary. Common Lisp composes the verified
+dashboard, settings, Wi-Fi, credits, touch, keyboard, THEGamepad, audio,
+process, rendering, and timing slices without moving policy into Rust. Ordered
+effects are interpreted recursively, so synchronous settings, network, Wi-Fi,
+volume-tone, launch, control-scan, presentation-open, and volume-reload
+completions occur at the same point as the authoritative C++ operation.
+
+The pre-poll phase reaps menu sound first, recovers the controller burst guard
+only after the required quiet period, retries disconnected fbdev touch at most
+once per second, and performs due, forced, or disconnect-requested control
+scans. The post-poll phase expires reboot confirmation, refreshes network state,
+and animates credits before input. Controller and keyboard commands are reduced
+before touch, a command discards the same poll's touch batch, and touch reports
+are processed serially against freshly rendered layouts. Touch read failure
+clears every pressed target before controls continue. Controller edges are still
+counted before explicit audio quarantine, while keyboard and touch remain
+responsive during cues.
+
+Game, terminal, and reboot requests retain the exact render, present, sound
+finish, control close, and launch order. Child return retains the forced control
+scan, presentation reopen, volume reload, result-status precedence, and final
+render/present sequence. Touch-originated launch requests wait until the complete
+native report batch has been reduced; controller-originated requests discard
+touch and prepare immediately. `RETRODECK:MAIN` remains unchanged, and the C++
+dashboard is still authoritative and deployed.
+
+All host tests, `cargo check`, `cargo test`, `nix flake check`, and complete
+static ARM verification passed. Updated `startup.lisp`, `policy.lisp`, and
+`dashboard.lisp` were installed on the ARMv7 Deck. The normal installed startup
+loaded successfully, then a harmless ARM/ECL fixture exercised pre-poll recovery
+and scanning plus the complete simulated game launch and child-return trace. It
+finished at `ALPHA EXITED`, retained the child-updated volume, and rendered an
+in-memory RGB565 hash of `73c31d7a148f01f5` without opening a display, reading
+input, playing audio, or starting a child. The running C++ dashboard retained
+the same PID and the Deck health check passed afterward. Physical cue-overlap,
+connected keyboard/THEGamepad, terminal-hold, and Wayland acceptance blockers
+remain unchanged.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 8,930
+production lines, including the existing catalog compiler, and 12,763 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-23:
@@ -621,6 +667,8 @@ Updated on 2026-07-23:
   group TERM/KILL supervision on the Deck
 - ABI 12 decoded keyboard and THEGamepad policy through ARM/ECL and physically
   rejected the Goodix-only Deck as zero keyboards and zero controllers
+- The complete non-authoritative dashboard reducer and two-phase loop boundary
+  passed ARM/ECL and an installed in-memory Deck fixture while C++ stayed live
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
