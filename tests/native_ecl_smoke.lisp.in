@@ -203,7 +203,7 @@
                            :shift t :repeat nil))
                         '(:system-previous))
                  (equal (dashboard-control-actions
-                         '(:kind :gamepad :edges #x244))
+                         '(:kind :gamepad :edges #x224))
                         '(:confirm :system-next :right))
                  (eq (dashboard-controller-command
                       '(:system-next :confirm) nil nil)
