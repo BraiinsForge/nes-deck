@@ -4,6 +4,7 @@ pub mod controls;
 pub mod fbdev;
 mod font;
 pub mod input;
+pub mod polling;
 pub mod process;
 mod projection;
 pub mod protocol;

@@ -23,6 +23,7 @@
            #:fbdev-present-solid
            #:fbdev-size
            #:finish-audio
+           #:input-poll
            #:play-tones
            #:raster-clear
            #:raster-load-cover
@@ -67,6 +68,7 @@
                 #:fbdev-present-solid
                 #:fbdev-size
                 #:finish-audio
+                #:input-poll
                 #:play-tones
                 #:read-regular-file
                 #:run-terminal
@@ -166,6 +168,7 @@
            #:dashboard-runtime-controller-quarantined-p
            #:dashboard-runtime-dispatch-input
            #:dashboard-runtime-initialize
+           #:dashboard-runtime-poll-input
            #:dashboard-runtime-running-p
            #:dashboard-runtime-shutdown
            #:dashboard-menu-geometry
@@ -208,6 +211,7 @@
            #:open-fbdev
            #:open-wayland-widget
            #:play-menu-sound
+           #:poll-native-input
            #:prepare-dashboard-rasters
            #:prepare-project-credits-crawl
            #:present-fbdev-canvas
@@ -249,7 +253,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 12)
+(defconstant +native-abi-version+ 13)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -408,6 +412,34 @@
   (when report
     (destructuring-bind (x y down pressed released) report
       (list x y (plusp down) (plusp pressed) (plusp released)))))
+
+(defun poll-native-input (wayland timeout-ms)
+  (check-type timeout-ms (integer 0 4294967295))
+  (let ((result (input-poll (if wayland 1 0) timeout-ms)))
+    (when result
+      (unless (and (listp result)
+                   (= (length result) 6)
+                   (every #'integerp result))
+        (error "Invalid native input poll result ~S" result))
+      (destructuring-bind
+          (ready control-count touch-count touch-lost rescan shutdown) result
+        (unless (and (member ready '(0 1))
+                     (typep control-count '(integer 0 64))
+                     (typep touch-count '(integer 0 *))
+                     (member touch-lost '(0 1))
+                     (member rescan '(0 1))
+                     (member shutdown '(0 1))
+                     (or (plusp ready)
+                         (and (zerop control-count)
+                              (zerop touch-count)
+                              (zerop touch-lost))))
+          (error "Invalid native input poll result ~S" result))
+        (list :poll-ready-p (plusp ready)
+              :control-count control-count
+              :touch-count touch-count
+              :touch-lost-p (plusp touch-lost)
+              :rescan-controls-p (plusp rescan)
+              :shutdown-p (plusp shutdown))))))
 
 (defun scan-evdev-controls ()
   (let ((counts (evdev-controls-scan)))

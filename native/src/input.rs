@@ -1,4 +1,4 @@
-use crate::canvas;
+use crate::{canvas, controls, polling};
 use evdev::raw_stream::RawDevice;
 use evdev::{AbsInfo, AbsoluteAxisCode, EventSummary, InputEvent, KeyCode, SynchronizationCode};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
@@ -280,6 +280,67 @@ pub fn current_touch() -> Option<TouchReport> {
 
 pub fn dispatch_touch(timeout_ms: u32) -> Result<usize, String> {
     with_touch(|touch| touch.dispatch(timeout_ms))
+}
+
+pub(crate) fn dispatch_inputs(timeout_ms: u32) -> Result<polling::InputDispatch, String> {
+    controls::with_controls(|controls| {
+        TOUCH.with(|current| {
+            let mut current = current.borrow_mut();
+            let queued = controls.report_count() > 0
+                || current
+                    .as_ref()
+                    .is_some_and(|touch| !touch.reports.is_empty());
+            let (touch_flags, control_flags) = {
+                let mut descriptors = Vec::new();
+                if let Some(touch) = current.as_ref() {
+                    descriptors.push(PollFd::from_borrowed_fd(
+                        touch.device.as_fd(),
+                        PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
+                    ));
+                }
+                let first_control = descriptors.len();
+                controls.append_poll_descriptors(&mut descriptors);
+                let _ = polling::wait(&mut descriptors, if queued { 0 } else { timeout_ms })?;
+                let ready = descriptors.iter().map(PollFd::revents).collect::<Vec<_>>();
+                (
+                    current
+                        .as_ref()
+                        .and_then(|_| ready.first().copied())
+                        .unwrap_or(PollFlags::empty()),
+                    ready[first_control..].to_vec(),
+                )
+            };
+
+            controls.read_ready(&control_flags);
+            let touch_ready = touch_flags
+                .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP | PollFlags::NVAL);
+            let mut touch_lost = false;
+            if touch_ready {
+                if touch_flags.contains(PollFlags::IN) {
+                    if let Some(touch) = current.as_mut() {
+                        if let Err(error) = touch.read_available() {
+                            eprintln!("retrodeck: {error}");
+                            touch_lost = true;
+                        }
+                    }
+                } else {
+                    eprintln!("retrodeck: touchscreen disconnected");
+                    touch_lost = true;
+                }
+            }
+
+            let touch_count = current.as_ref().map_or(0, |touch| touch.reports.len());
+            let control_count = controls.report_count();
+            Ok(polling::InputDispatch {
+                ready: touch_ready || touch_count > 0 || control_count > 0,
+                control_count,
+                touch_count,
+                touch_lost,
+                rescan: controls.rescan_requested(),
+                shutdown: false,
+            })
+        })
+    })
 }
 
 pub fn next_touch() -> Option<TouchReport> {

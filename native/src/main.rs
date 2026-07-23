@@ -1,4 +1,6 @@
-use retrodeck_native::{audio, canvas, controls, fbdev, input, process, regular_file, wayland};
+use retrodeck_native::{
+    audio, canvas, controls, fbdev, input, polling, process, regular_file, wayland,
+};
 use std::env;
 use std::ffi::{CString, OsStr, c_char, c_int, c_void};
 use std::mem;
@@ -35,7 +37,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 12;
+const ABI_VERSION: ClFixnum = 13;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -164,6 +166,7 @@ impl Ecl {
                 "CANVAS-DRAW-PROJECTED-TEXT",
                 native_canvas_draw_projected_text as EclTwoArgumentFunction,
             ),
+            ("INPUT-POLL", native_input_poll as EclTwoArgumentFunction),
         ] {
             let name = c_string(name)?;
             let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
@@ -614,6 +617,36 @@ unsafe extern "C" fn native_canvas_draw_raster(
         )
     })();
     native_status(result)
+}
+
+unsafe extern "C" fn native_input_poll(
+    wayland_backend: ClObject,
+    timeout_ms: ClObject,
+) -> ClObject {
+    let result = (|| {
+        let wayland_backend = decode_u32(wayland_backend, "input poll backend")?;
+        if wayland_backend > 1 {
+            return Err("input poll backend must be zero or one".to_owned());
+        }
+        polling::dispatch(
+            wayland_backend == 1,
+            decode_u32(timeout_ms, "input poll timeout")?,
+        )
+    })();
+    match result {
+        Ok(dispatch) => make_fixnum_list(&[
+            boolean_fixnum(dispatch.ready),
+            dispatch.control_count as ClFixnum,
+            dispatch.touch_count as ClFixnum,
+            boolean_fixnum(dispatch.touch_lost),
+            boolean_fixnum(dispatch.rescan),
+            boolean_fixnum(dispatch.shutdown),
+        ]),
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            ECL_NIL
+        }
+    }
 }
 
 unsafe extern "C" fn native_evdev_controls_scan() -> ClObject {

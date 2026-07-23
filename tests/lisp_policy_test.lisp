@@ -47,12 +47,15 @@
 (defparameter *evdev-controls-dispatch-result* '(0 0))
 (defparameter *evdev-controls-dispatch-timeout* nil)
 (defparameter *evdev-controls* nil)
+(defparameter *input-poll-result* '(0 0 0 0 0 0))
+(defparameter *input-poll-arguments* nil)
 (defparameter *evdev-open-status* 1)
 (defparameter *evdev-open-count* 0)
 (defparameter *evdev-close-count* 0)
 (defparameter *evdev-dispatch-result* 0)
 (defparameter *evdev-dispatch-timeout* nil)
 (defparameter *evdev-touch* nil)
+(defparameter *evdev-touch-queue* nil)
 (defparameter *fbdev-open-status* 1)
 (defparameter *fbdev-open-count* 0)
 (defparameter *fbdev-close-count* 0)
@@ -70,6 +73,7 @@
 (defparameter *wayland-dispatch-result* 0)
 (defparameter *wayland-dispatch-timeout* nil)
 (defparameter *wayland-touch* nil)
+(defparameter *wayland-touch-queue* nil)
 (defparameter *wayland-size* nil)
 (defparameter *wayland-shutdown-status* 0)
 (defparameter *terminal-result* '(1 0 0 -1 nil))
@@ -100,6 +104,7 @@
            #:fbdev-present-solid
            #:fbdev-size
            #:finish-audio
+           #:input-poll
            #:play-tones
            #:raster-clear
            #:raster-load-cover
@@ -119,7 +124,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 12)
+      (lambda () 13)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () (incf *active-count*) *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -194,6 +199,10 @@
           (setf *text-mask-arguments* arguments)
           (push arguments *text-mask-calls*)
           *text-mask-result*)
+        (symbol-function (find-symbol "INPUT-POLL" "RETRODECK.NATIVE"))
+         (lambda (wayland timeout-ms)
+           (setf *input-poll-arguments* (list wayland timeout-ms))
+           *input-poll-result*)
         (symbol-function (find-symbol "EVDEV-CONTROLS-SCAN" "RETRODECK.NATIVE"))
          (lambda ()
              (incf *evdev-controls-scan-count*)
@@ -220,7 +229,7 @@
            (setf *evdev-dispatch-timeout* timeout-ms)
            *evdev-dispatch-result*)
          (symbol-function (find-symbol "EVDEV-NEXT-TOUCH" "RETRODECK.NATIVE"))
-         (lambda () *evdev-touch*)
+         (lambda () (or (pop *evdev-touch-queue*) *evdev-touch*))
          (symbol-function (find-symbol "FBDEV-OPEN" "RETRODECK.NATIVE"))
       (lambda () (incf *fbdev-open-count*) *fbdev-open-status*)
       (symbol-function (find-symbol "FBDEV-CLOSE" "RETRODECK.NATIVE"))
@@ -256,7 +265,7 @@
         (setf *wayland-dispatch-timeout* timeout-ms)
         *wayland-dispatch-result*)
       (symbol-function (find-symbol "WAYLAND-NEXT-TOUCH" "RETRODECK.NATIVE"))
-      (lambda () *wayland-touch*)
+      (lambda () (or (pop *wayland-touch-queue*) *wayland-touch*))
       (symbol-function (find-symbol "WAYLAND-SIZE" "RETRODECK.NATIVE"))
       (lambda () *wayland-size*)
       (symbol-function (find-symbol "WAYLAND-SHUTDOWN-P" "RETRODECK.NATIVE"))
@@ -1118,6 +1127,30 @@ secret!9
 (assert (null (retrodeck:dispatch-evdev-controls)))
 (assert (signals-type-error-p
          (lambda () (retrodeck:dispatch-evdev-controls #x100000000))))
+
+(setf *input-poll-result* '(1 2 3 1 1 0))
+(assert (equal (retrodeck:poll-native-input nil 25)
+               '(:poll-ready-p t :control-count 2 :touch-count 3
+                 :touch-lost-p t :rescan-controls-p t :shutdown-p nil)))
+(assert (equal *input-poll-arguments* '(0 25)))
+(setf *input-poll-result* '(0 0 0 0 0 1))
+(assert (equal (retrodeck:poll-native-input t 0)
+               '(:poll-ready-p nil :control-count 0 :touch-count 0
+                 :touch-lost-p nil :rescan-controls-p nil :shutdown-p t)))
+(assert (equal *input-poll-arguments* '(1 0)))
+(dolist (invalid '((0 1 0 0 0 0)
+                   (0 0 0 1 0 0)
+                   (2 0 0 0 0 0)
+                   (1 65 0 0 0 0)
+                   (1 0 -1 0 0 0)
+                   (1 0 0 0 0)))
+  (setf *input-poll-result* invalid)
+  (assert (signals-error-p (lambda () (retrodeck:poll-native-input nil 0)))))
+(setf *input-poll-result* nil)
+(assert (null (retrodeck:poll-native-input nil 0)))
+(assert (signals-type-error-p
+         (lambda () (retrodeck:poll-native-input nil #x100000000))))
+(setf *input-poll-result* '(0 0 0 0 0 0))
 
 (assert (equal retrodeck:*dashboard-keyboard-controls*
                '((1 :back)
@@ -2635,7 +2668,114 @@ secret!9
   (assert (signals-error-p
            (lambda ()
              (retrodeck:dashboard-runtime-dispatch-input
-              state runtime '(:now 1 :poll-ready-p nil))))))
+              state runtime '(:now 1 :poll-ready-p nil)))))
+  (assert (signals-error-p
+           (lambda () (retrodeck:dashboard-runtime-poll-input runtime 0)))))
+
+(let* ((times '(101 102 103))
+       (state (retrodeck:dashboard-loop-initial-state nil :now 90))
+       (runtime (retrodeck:make-dashboard-runtime
+                 :clock (lambda () (or (pop times) 999))))
+       (*fbdev-size* nil)
+       (*fbdev-open-status* 1)
+       (*fbdev-open-count* 0)
+       (*fbdev-close-count* 0)
+       (*fbdev-canvas-status* 1)
+       (*fbdev-canvas-count* 0)
+       (*evdev-open-status* 1)
+       (*evdev-open-count* 0)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-scan-count* 0)
+       (*evdev-controls-close-count* 0)
+       (*evdev-controls-dispatch-timeout* :untouched)
+       (*evdev-dispatch-timeout* :untouched)
+       (*evdev-touch* nil)
+       (*evdev-touch-queue* nil)
+       (*input-poll-result* '(1 3 2 1 1 0))
+       (*input-poll-arguments* nil))
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 90)
+    (declare (ignore ignored-runtime))
+    (setf *evdev-controls* '((1 #x224 0) (0 15 1) (0 106 2))
+          *evdev-touch-queue* '((10 20 1 1 0) (11 21 0 0 1)))
+    (let ((snapshot (retrodeck:dashboard-runtime-poll-input runtime 250)))
+      (assert (equal snapshot
+                     '(:now 101 :tick-now 101 :poll-ready-p t
+                       :touch-reports ((10 20 t t nil) (11 21 nil nil t))
+                       :touch-times (101 101) :touch-lost-p t
+                       :gamepad-actions (:right :system-next :confirm)
+                       :keyboard-actions (:right :system-previous)
+                       :rescan-controls-p t :shutdown-p nil)))
+      (assert (equal *input-poll-arguments* '(0 250)))
+      (assert (eq *evdev-controls-dispatch-timeout* :untouched))
+      (assert (eq *evdev-dispatch-timeout* :untouched))
+      (assert (= (getf runtime :now) 101)))
+    (setf *input-poll-result* '(0 0 0 0 1 0)
+          *evdev-controls* nil
+          *evdev-touch-queue* nil)
+    (let ((snapshot (retrodeck:dashboard-runtime-poll-input runtime 40)))
+      (assert (equal snapshot
+                     '(:now 102 :tick-now 102 :poll-ready-p nil
+                       :touch-reports nil :touch-times nil :touch-lost-p nil
+                       :gamepad-actions nil :keyboard-actions nil
+                       :rescan-controls-p t :shutdown-p nil)))
+      (multiple-value-bind (after-timeout trace)
+          (retrodeck:dashboard-runtime-dispatch-input
+           initialized runtime snapshot)
+        (assert (null trace))
+        (assert (getf runtime :rescan-controls-p))
+        (multiple-value-bind (after-scan scan-trace)
+            (retrodeck:dashboard-runtime-begin-iteration
+             after-timeout runtime '(:now 103))
+          (declare (ignore after-scan))
+          (assert (equal scan-trace
+                         '((:reap-sound) (:scan-controls :force t))))
+          (assert (not (getf runtime :rescan-controls-p))))))
+    (setf *input-poll-result* '(1 1 0 0 0 0)
+          *evdev-controls* nil)
+    (assert (signals-error-p
+             (lambda () (retrodeck:dashboard-runtime-poll-input runtime 0))))
+    (setf *input-poll-result* nil)
+    (assert (signals-error-p
+             (lambda () (retrodeck:dashboard-runtime-poll-input runtime 0))))
+    (retrodeck:dashboard-runtime-shutdown runtime)))
+
+(let* ((times '(201))
+       (state (retrodeck:dashboard-loop-initial-state nil :now 190))
+       (runtime (retrodeck:make-dashboard-runtime
+                 :wayland t :clock (lambda () (or (pop times) 999))))
+       (*wayland-size* nil)
+       (*wayland-open-status* 1)
+       (*wayland-close-count* 0)
+       (*wayland-canvas-status* 1)
+       (*wayland-canvas-count* 0)
+       (*wayland-touch* nil)
+       (*wayland-touch-queue* '((33 44 1 1 0)))
+       (*evdev-open-count* 0)
+       (*evdev-close-count* 0)
+       (*evdev-controls-scan-result* '(0 0))
+       (*evdev-controls-scan-count* 0)
+       (*evdev-controls-close-count* 0)
+       (*evdev-controls* '((0 28 0)))
+       (*input-poll-result* '(1 1 1 0 0 1))
+       (*input-poll-arguments* nil))
+  (multiple-value-bind (initialized ignored-runtime)
+      (retrodeck:dashboard-runtime-initialize state runtime 190)
+    (declare (ignore ignored-runtime))
+    (let ((snapshot (retrodeck:dashboard-runtime-poll-input runtime 40)))
+      (assert (equal snapshot
+                     '(:now 201 :tick-now 201 :poll-ready-p t
+                       :touch-reports ((33 44 t t nil)) :touch-times (201)
+                       :touch-lost-p nil :gamepad-actions nil
+                       :keyboard-actions (:confirm)
+                       :rescan-controls-p nil :shutdown-p t)))
+      (assert (equal *input-poll-arguments* '(1 40)))
+      (assert (zerop *evdev-open-count*))
+      (retrodeck:dashboard-runtime-dispatch-input initialized runtime snapshot)
+      (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
+      (assert (= *wayland-close-count* 1))
+      (assert (= *evdev-controls-close-count* 1)))))
 
 (let* ((state (retrodeck:dashboard-loop-initial-state nil :now 10))
        (runtime (retrodeck:make-dashboard-runtime))

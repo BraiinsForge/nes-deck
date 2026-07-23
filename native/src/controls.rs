@@ -363,7 +363,7 @@ impl Drop for KeyboardDevice {
 }
 
 #[derive(Default)]
-struct Controls {
+pub(crate) struct Controls {
     gamepads: Vec<GamepadDevice>,
     keyboards: Vec<KeyboardDevice>,
     reports: VecDeque<ControlReport>,
@@ -430,6 +430,29 @@ impl Controls {
         Ok((self.gamepads.len(), self.keyboards.len()))
     }
 
+    pub(crate) fn report_count(&self) -> usize {
+        self.reports.len()
+    }
+
+    pub(crate) fn rescan_requested(&self) -> bool {
+        self.rescan_requested
+    }
+
+    pub(crate) fn append_poll_descriptors<'a>(&'a self, descriptors: &mut Vec<PollFd<'a>>) {
+        descriptors.extend(self.gamepads.iter().map(|device| {
+            PollFd::from_borrowed_fd(
+                device.device.as_fd(),
+                PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
+            )
+        }));
+        descriptors.extend(self.keyboards.iter().map(|device| {
+            PollFd::from_borrowed_fd(
+                device.device.as_fd(),
+                PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
+            )
+        }));
+    }
+
     fn dispatch(&mut self, timeout_ms: u32) -> Result<(usize, bool), String> {
         if !self.reports.is_empty() || self.gamepads.is_empty() && self.keyboards.is_empty() {
             return Ok((self.reports.len(), self.rescan_requested));
@@ -441,22 +464,8 @@ impl Controls {
                 tv_sec: remaining.as_secs() as i64,
                 tv_nsec: i64::from(remaining.subsec_nanos()),
             };
-            let mut descriptors = self
-                .gamepads
-                .iter()
-                .map(|device| {
-                    PollFd::from_borrowed_fd(
-                        device.device.as_fd(),
-                        PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
-                    )
-                })
-                .chain(self.keyboards.iter().map(|device| {
-                    PollFd::from_borrowed_fd(
-                        device.device.as_fd(),
-                        PollFlags::IN | PollFlags::ERR | PollFlags::HUP,
-                    )
-                }))
-                .collect::<Vec<_>>();
+            let mut descriptors = Vec::with_capacity(self.gamepads.len() + self.keyboards.len());
+            self.append_poll_descriptors(&mut descriptors);
             match poll(&mut descriptors, Some(&timeout)) {
                 Ok(0) => return Ok((self.reports.len(), self.rescan_requested)),
                 Ok(_) => {
@@ -474,7 +483,7 @@ impl Controls {
         }
     }
 
-    fn read_ready(&mut self, ready: &[PollFlags]) {
+    pub(crate) fn read_ready(&mut self, ready: &[PollFlags]) {
         let first_keyboard = self.gamepads.len();
         let mut lost_gamepads = Vec::new();
         for (index, gamepad) in self.gamepads.iter_mut().enumerate() {
@@ -534,8 +543,12 @@ thread_local! {
     static CONTROLS: RefCell<Controls> = RefCell::new(Controls::default());
 }
 
+pub(crate) fn with_controls<T>(function: impl FnOnce(&mut Controls) -> T) -> T {
+    CONTROLS.with(|controls| function(&mut controls.borrow_mut()))
+}
+
 pub fn scan() -> Result<(usize, usize), String> {
-    CONTROLS.with(|controls| controls.borrow_mut().scan())
+    with_controls(Controls::scan)
 }
 
 pub fn close() {

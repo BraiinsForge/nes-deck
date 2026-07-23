@@ -1399,6 +1399,41 @@
     (check-type now (integer 0 *))
     now))
 
+(defun dashboard-runtime-poll-input (runtime timeout-ms)
+  (check-type runtime list)
+  (check-type timeout-ms (integer 0 4294967295))
+  (unless (getf runtime :initialized-p)
+    (error "Dashboard runtime is not initialized"))
+  (let* ((poll (or (poll-native-input (getf runtime :wayland) timeout-ms)
+                   (error "Dashboard native input poll failed")))
+         (now (dashboard-runtime-read-clock runtime))
+         (touch-count (getf poll :touch-count))
+         (touch-reader (if (getf runtime :wayland)
+                           #'next-wayland-touch
+                           #'next-evdev-touch))
+         (touch-reports
+           (loop repeat touch-count
+                 for report = (funcall touch-reader)
+                 unless report
+                   do (error "Dashboard native touch queue ended early")
+                 collect report)))
+    (multiple-value-bind (gamepad-actions keyboard-actions control-count)
+        (collect-dashboard-control-actions)
+      (unless (= control-count (getf poll :control-count))
+        (error "Dashboard native control count changed from ~D to ~D"
+               (getf poll :control-count) control-count))
+      (setf (getf runtime :now) now)
+      (list :now now
+            :tick-now now
+            :poll-ready-p (getf poll :poll-ready-p)
+            :touch-reports touch-reports
+            :touch-times (make-list touch-count :initial-element now)
+            :touch-lost-p (getf poll :touch-lost-p)
+            :gamepad-actions gamepad-actions
+            :keyboard-actions keyboard-actions
+            :rescan-controls-p (getf poll :rescan-controls-p)
+            :shutdown-p (getf poll :shutdown-p)))))
+
 (defun dashboard-runtime-external-effect (runtime effect state)
   (let ((handler (getf runtime :external-effect-handler)))
     (unless handler

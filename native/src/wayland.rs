@@ -1,6 +1,6 @@
-use crate::canvas;
 use crate::input::TouchReport;
 use crate::protocol::deck_widget::{deck_widget_manager_v1, deck_widget_surface_v1};
+use crate::{canvas, controls, polling};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::fs::{MemfdFlags, ftruncate, memfd_create};
 use rustix::mm::{MapFlags, ProtFlags, mmap, munmap};
@@ -254,6 +254,116 @@ impl Widget {
         }
     }
 
+    fn dispatch_queued_inputs(
+        &mut self,
+        controls: &mut controls::Controls,
+    ) -> Result<polling::InputDispatch, String> {
+        let control_flags = {
+            let mut descriptors = Vec::new();
+            controls.append_poll_descriptors(&mut descriptors);
+            let _ = polling::wait(&mut descriptors, 0)?;
+            descriptors.iter().map(PollFd::revents).collect::<Vec<_>>()
+        };
+        controls.read_ready(&control_flags);
+        Ok(self.input_dispatch(controls, true, false))
+    }
+
+    fn dispatch_inputs(
+        &mut self,
+        controls: &mut controls::Controls,
+        timeout_ms: u32,
+    ) -> Result<polling::InputDispatch, String> {
+        let dispatched = self
+            .queue
+            .dispatch_pending(&mut self.state)
+            .map_err(|error| format!("cannot dispatch Wayland events: {error}"))?;
+        if dispatched > 0 || self.state.shutdown || !self.state.touches.is_empty() {
+            return self.dispatch_queued_inputs(controls);
+        }
+        self.flush("cannot flush Wayland display")?;
+
+        let effective_timeout = if controls.report_count() > 0 {
+            0
+        } else {
+            timeout_ms
+        };
+        let deadline = Instant::now() + Duration::from_millis(u64::from(effective_timeout));
+        loop {
+            let Some(guard) = self.queue.prepare_read() else {
+                let dispatched = self
+                    .queue
+                    .dispatch_pending(&mut self.state)
+                    .map_err(|error| format!("cannot dispatch Wayland events: {error}"))?;
+                if dispatched > 0 || self.state.shutdown || !self.state.touches.is_empty() {
+                    return self.dispatch_queued_inputs(controls);
+                }
+                if Instant::now() >= deadline {
+                    return Ok(self.input_dispatch(controls, false, false));
+                }
+                continue;
+            };
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let (touch_flags, control_flags) = {
+                let mut descriptors = vec![PollFd::from_borrowed_fd(
+                    guard.connection_fd(),
+                    PollFlags::IN | PollFlags::ERR,
+                )];
+                controls.append_poll_descriptors(&mut descriptors);
+                let _ = polling::wait_for(&mut descriptors, remaining)?;
+                let ready = descriptors.iter().map(PollFd::revents).collect::<Vec<_>>();
+                (ready[0], ready[1..].to_vec())
+            };
+
+            controls.read_ready(&control_flags);
+            let touch_ready = touch_flags
+                .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP | PollFlags::NVAL);
+            if !touch_ready {
+                drop(guard);
+                return Ok(self.input_dispatch(controls, controls.report_count() > 0, false));
+            }
+            if !touch_flags.contains(PollFlags::IN) {
+                drop(guard);
+                eprintln!("retrodeck: Wayland display disconnected");
+                return Ok(self.input_dispatch(controls, true, true));
+            }
+
+            match guard.read() {
+                Ok(_) => {}
+                Err(WaylandError::Io(error)) if error.kind() == ErrorKind::WouldBlock => {
+                    return Ok(self.input_dispatch(controls, true, false));
+                }
+                Err(error) => {
+                    eprintln!("retrodeck: cannot read Wayland events: {error}");
+                    return Ok(self.input_dispatch(controls, true, true));
+                }
+            }
+            let touch_lost = match self.queue.dispatch_pending(&mut self.state) {
+                Ok(_) => false,
+                Err(error) => {
+                    eprintln!("retrodeck: cannot dispatch Wayland events: {error}");
+                    true
+                }
+            };
+            return Ok(self.input_dispatch(controls, true, touch_lost));
+        }
+    }
+
+    fn input_dispatch(
+        &self,
+        controls: &controls::Controls,
+        ready: bool,
+        touch_lost: bool,
+    ) -> polling::InputDispatch {
+        polling::InputDispatch {
+            ready: ready || controls.report_count() > 0 || !self.state.touches.is_empty(),
+            control_count: controls.report_count(),
+            touch_count: self.state.touches.len(),
+            touch_lost,
+            rescan: controls.rescan_requested(),
+            shutdown: self.state.shutdown,
+        }
+    }
+
     fn flush(&self, context: &str) -> Result<(), String> {
         loop {
             match self.queue.flush() {
@@ -391,6 +501,12 @@ pub fn close() {
 
 pub fn dispatch(timeout_ms: u32) -> Result<usize, String> {
     with_widget(|widget| widget.dispatch(timeout_ms))
+}
+
+pub(crate) fn dispatch_inputs(timeout_ms: u32) -> Result<polling::InputDispatch, String> {
+    controls::with_controls(|controls| {
+        with_widget(|widget| widget.dispatch_inputs(controls, timeout_ms))
+    })
 }
 
 pub fn present_solid(color: u32) -> Result<(), String> {

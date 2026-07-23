@@ -154,14 +154,16 @@
 
 (defun collect-dashboard-control-actions ()
   (let ((gamepad nil)
-        (keyboard nil))
+        (keyboard nil)
+        (report-count 0))
     (loop for report = (next-evdev-control)
           while report
-          do (dolist (action (dashboard-control-actions report))
+          do (incf report-count)
+             (dolist (action (dashboard-control-actions report))
                (if (eq (getf report :kind) :gamepad)
                    (pushnew action gamepad :test #'eq)
                    (pushnew action keyboard :test #'eq))))
-    (values gamepad keyboard)))
+    (values gamepad keyboard report-count)))
 
 (defun dashboard-controller-guard-initial-state ()
   (list :edge-times nil :suspended nil :last-edge-at nil))
