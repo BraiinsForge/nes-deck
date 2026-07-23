@@ -643,6 +643,52 @@ production lines, including the existing catalog compiler, and 12,763 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Dashboard runtime adapter checkpoint
+
+Startup-loaded `dashboard.lisp` now also contains a compact mutable runtime
+adapter for the completed reducer. It remains non-authoritative and does not
+change `RETRODECK:MAIN`. The adapter maps ordered reducer effects onto the
+existing canvas, fbdev or Wayland presentation, evdev touch and controls,
+non-blocking menu audio, settings, Wi-Fi, network, launch, and child-recovery
+boundaries while external handlers continue to supply normalized policy
+completions.
+
+Initialization now preserves the authoritative order: acquire or explicitly
+adopt a presentation, open fbdev touch, force a control scan, obtain startup
+connectivity, then render and present the first frame. Failure unwinds controls,
+touch, and only adapter-owned presentation state. Borrowed fbdev and Wayland
+state is never closed implicitly; fbdev launch requires explicit ownership
+transfer because the child mechanism closes that display. Normal shutdown is
+idempotent and releases owned audio, controls, touch, and presentation state.
+
+The adapter distinguishes a newly started cue from an already-busy native audio
+worker, retains responsibility for its own post-cue controller quarantine after
+the worker exits, and never stops borrowed audio. Input dispatch uses cached
+audio state, completes timer and network effects before closing failed touch,
+and refreshes its monotonic clock immediately after a blocking child returns so
+recovery scans carry the return time rather than the selection time.
+
+All host tests, direct Cargo checks, `nix flake check`, and complete static
+ARM/ECL verification passed. Updated `startup.lisp` and `dashboard.lisp` were
+installed on the ARMv7 Deck. The installed startup loaded successfully, then a
+harmless alternate ARM/ECL fixture exercised startup connectivity, rendering,
+presentation, cue ownership, keyboard launch, post-child control scan,
+presentation reopen, volume reload, final rendering, and owned-resource
+shutdown. It finished at `ALPHA EXITED` with volume 47 and in-memory RGB565 hash
+`37e9949718aa8c45` without opening a display, reading input, playing audio, or
+starting a child. The authoritative C++ dashboard retained PID 17517 and the
+Deck health check passed.
+
+The adapter still accepts normalized input snapshots; unified native polling
+across Wayland or fbdev touch and evdev controls remains a later mechanism
+slice. Physical cue-overlap, connected keyboard/THEGamepad, terminal-hold, and
+Wayland acceptance blockers remain unchanged.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 9,250
+production lines, including the existing catalog compiler, and 13,767 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-23:
@@ -669,6 +715,9 @@ Updated on 2026-07-23:
   rejected the Goodix-only Deck as zero keyboards and zero controllers
 - The complete non-authoritative dashboard reducer and two-phase loop boundary
   passed ARM/ECL and an installed in-memory Deck fixture while C++ stayed live
+- The non-authoritative runtime adapter passed startup, launch/recovery, audio
+  ownership, shutdown, and installed ARM/ECL fixture checks at hash
+  `37e9949718aa8c45` while C++ retained PID 17517
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
