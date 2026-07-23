@@ -484,7 +484,10 @@
           :last-control-scan-ms nil
           :network-refreshed-at now
           :reboot-deadline 0
-          :pending-launch nil)))
+          :pending-launch nil
+          :pending-settings-plan nil
+          :pending-volume-tone nil
+          :pending-wifi-plan nil)))
 
 (defun dashboard-loop-set-global-status (state status)
   (check-type status string)
@@ -536,7 +539,69 @@
             (and (getf effect :cue)
                  (list (list :cue (getf effect :cue)))))))
 
-(defun dashboard-loop-command-transition (state command layout)
+(defun dashboard-loop-request-game (state game-index now)
+  (check-type game-index (integer 0 *))
+  (check-type now (integer 0 *))
+  (let ((games (getf state :games)))
+    (when (>= game-index (length games))
+      (return-from dashboard-loop-request-game
+        (values (copy-list state) nil)))
+    (let* ((game (nth game-index games))
+           (terminal-mode (getf game :terminal-mode))
+           (reboot (dashboard-application-id-p game "reboot"))
+           (next (if reboot state (dashboard-loop-cancel-reboot state))))
+      (cond
+        (terminal-mode
+         (setf next (copy-list next)
+               (getf next :pending-launch)
+               (list :kind :terminal :game-index game-index
+                     :mode terminal-mode))
+         (values next nil))
+        (reboot
+         (if (reboot-confirmation-active-p
+              (getf next :reboot-deadline) now)
+             (progn
+               (setf next (copy-list next)
+                     (getf next :reboot-deadline) 0
+                     (getf next :pending-launch)
+                     (list :kind :reboot :game-index game-index))
+               (values next nil))
+             (progn
+               (setf next (copy-list next)
+                     (getf next :reboot-deadline)
+                     (+ now (dashboard-timing :reboot-confirm-ms)))
+               (setf next
+                     (dashboard-loop-set-global-status
+                      next *dashboard-reboot-confirmation-text*))
+               (values next (dashboard-loop-screen-effects)))))
+        (t
+         (setf next (copy-list next)
+               (getf next :pending-launch)
+               (list :kind :game :game-index game-index))
+         (values next nil))))))
+
+(defun dashboard-loop-apply-settings-plan (state settings plan)
+  (let ((next (copy-list state)))
+    (setf (getf next :settings) settings)
+    (case (getf plan :action)
+      (:close
+       (setf next (dashboard-loop-set-view next :dashboard)
+             next (dashboard-loop-set-global-status next ""))
+       (values next (dashboard-loop-screen-effects :back)))
+      ((:volume :brightness :keymap)
+       (setf (getf next :pending-settings-plan) (copy-tree plan))
+       (values next (list (list :settings-action (copy-tree plan)))))
+      (:terminal
+       (setf (getf next :pending-launch)
+             (list :kind :terminal :mode (getf plan :mode)))
+       (values next (list (list :cue (getf plan :cue)))))
+      (:wifi
+       (setf (getf next :wifi) (wifi-open-state (getf next :wifi))
+             next (dashboard-loop-set-view next :wifi))
+       (values next (dashboard-loop-screen-effects (getf plan :cue))))
+      (otherwise (values next nil)))))
+
+(defun dashboard-loop-command-transition (state command layout now)
   (let ((view (getf state :view)))
     (case command
       (:back
@@ -610,14 +675,12 @@
        (if (eq view :settings)
            (multiple-value-bind (settings plan)
                (settings-controller-transition (getf state :settings) :confirm)
-             (let ((next (copy-list state)))
-               (setf (getf next :settings) settings)
-               (values next (and plan (list (list :settings-action plan))))))
+             (dashboard-loop-apply-settings-plan state settings plan))
            (let ((game-index (getf layout :shown-game-index)))
              (if (< game-index (length (getf state :games)))
-                 (values (copy-list state)
-                         (list (list :request-game game-index)
-                               '(:cue :confirm)))
+                 (multiple-value-bind (next effects)
+                     (dashboard-loop-request-game state game-index now)
+                   (values next (append effects '((:cue :confirm)))))
                  (values (copy-list state) nil)))))
       (otherwise (values (copy-list state) nil)))))
 
@@ -648,7 +711,7 @@
         (if command
             (multiple-value-bind (command-state effects)
                 (dashboard-loop-command-transition
-                 (dashboard-loop-clear-pressed-targets next) command layout)
+                 (dashboard-loop-clear-pressed-targets next) command layout now)
               (values command-state
                       (append prefix '((:discard-touch)) effects)))
             (values next prefix)))))))
@@ -659,31 +722,238 @@
     (multiple-value-bind (guard recovered)
         (dashboard-controller-guard-recover-if-quiet
          (getf state :controller-guard) now)
-      (let ((next (copy-list state)))
+      (let ((next (copy-list state))
+            (effects (and recovered '((:controller-resumed)))))
         (setf (getf next :controller-guard) guard)
-        (values next (and recovered '((:controller-resumed))))))))
+        (when (and (plusp (getf next :reboot-deadline))
+                   (not (reboot-confirmation-active-p
+                         (getf next :reboot-deadline) now)))
+          (setf (getf next :reboot-deadline) 0)
+          (when (string= (getf (getf next :dashboard) :status)
+                         *dashboard-reboot-confirmation-text*)
+            (setf next (dashboard-loop-set-global-status next "")
+                  effects (append effects
+                                  (dashboard-loop-screen-effects)))))
+        (values next effects)))))
+
+(defun dashboard-loop-released-reboot-p (state target)
+  (and (consp target)
+       (eq (first target) :game)
+       (let ((index (second target)))
+         (and (typep index '(integer 0 *))
+              (< index (length (getf state :games)))
+              (dashboard-application-id-p
+               (nth index (getf state :games)) "reboot")))))
+
+(defun dashboard-reduce-dashboard-touch (state report layout now)
+  (destructuring-bind (x y down pressed released) report
+    (declare (ignore down))
+    (let* ((dashboard (getf state :dashboard))
+           (target (dashboard-target-at layout x y))
+           (pressed-target
+             (if pressed target (getf dashboard :pressed-target))))
+      (unless released
+        (multiple-value-bind (next-dashboard effect)
+            (dashboard-touch-transition dashboard layout report)
+          (declare (ignore effect))
+          (let ((next (copy-list state)))
+            (setf (getf next :dashboard) next-dashboard)
+            (return-from dashboard-reduce-dashboard-touch
+              (values next nil)))))
+      (let ((next state))
+        (when (and (plusp (getf state :reboot-deadline))
+                   (not (dashboard-loop-released-reboot-p state target)))
+          (setf next (dashboard-loop-cancel-reboot next)))
+        (cond
+          ((and (eq pressed-target :credits) (eq target :credits))
+           (let ((next-dashboard (copy-list (getf next :dashboard))))
+             (setf (getf next-dashboard :pressed-target) nil
+                   next (copy-list next)
+                   (getf next :dashboard) next-dashboard
+                   (getf next :credits-started-at) now
+                   next (dashboard-loop-set-view next :credits)
+                   next (dashboard-loop-set-global-status next ""))
+             (values next (dashboard-loop-screen-effects :confirm))))
+          ((and (eq pressed-target :settings) (eq target :settings))
+           (let ((next-dashboard (copy-list (getf next :dashboard)))
+                 (settings (copy-list (getf next :settings))))
+             (setf (getf next-dashboard :pressed-target) nil
+                   (getf settings :selected) :volume-down
+                   next (copy-list next)
+                   (getf next :dashboard) next-dashboard
+                   (getf next :settings) settings
+                   next (dashboard-loop-set-view next :settings)
+                   next (dashboard-loop-set-global-status next ""))
+             (values next (dashboard-loop-screen-effects :confirm))))
+          ((and (consp pressed-target) (eq (first pressed-target) :game)
+                (equal pressed-target target))
+           (let ((next-dashboard (copy-list (getf next :dashboard))))
+             (setf (getf next-dashboard :pressed-target) nil
+                   next (copy-list next)
+                   (getf next :dashboard) next-dashboard)
+             (multiple-value-bind (requested effects)
+                 (dashboard-loop-request-game next (second target) now)
+               (values requested (append effects '((:cue :confirm)))))))
+          (t
+           (multiple-value-bind (next-dashboard effect)
+               (dashboard-touch-transition
+                (getf next :dashboard) layout report)
+             (setf next (copy-list next)
+                   (getf next :dashboard) next-dashboard)
+             (values next (dashboard-loop-transition-effects effect)))))))))
+
+(defun dashboard-reduce-settings-touch (state report layout)
+  (multiple-value-bind (settings plan)
+      (settings-touch-transition (getf state :settings) layout report)
+    (if plan
+        (dashboard-loop-apply-settings-plan state settings plan)
+        (let ((next (copy-list state)))
+          (setf (getf next :settings) settings)
+          (values next nil)))))
+
+(defun dashboard-loop-wifi-screen-effects (cue)
+  (append '((:render))
+          (and cue (list (list :cue cue)))
+          '((:present))))
+
+(defun dashboard-reduce-wifi-touch (state report layout)
+  (destructuring-bind (x y down pressed released) report
+    (declare (ignore down))
+    (let* ((target (wifi-target-at layout x y))
+           (pressed-target
+             (if pressed target
+                 (getf (getf state :wifi) :pressed-target)))
+           (matched-release (and released (equal pressed-target target))))
+      (multiple-value-bind (wifi effect)
+          (wifi-touch-transition (getf state :wifi) layout report)
+        (let ((next (copy-list state)))
+          (setf (getf next :wifi) wifi)
+          (case (getf effect :action)
+            (:close
+             (setf next (dashboard-loop-set-view next :settings)
+                   next (dashboard-loop-set-global-status
+                         next (getf effect :dashboard-status)))
+             (values next
+                     (dashboard-loop-wifi-screen-effects (getf effect :cue))))
+            (:save
+             (setf (getf next :pending-wifi-plan) (copy-tree effect))
+             (values next (list (list :wifi-action (copy-tree effect)))))
+            (otherwise
+             (values next
+                     (cond
+                       (effect
+                        (dashboard-loop-wifi-screen-effects
+                         (getf effect :cue)))
+                       (matched-release '((:present)))
+                       (t nil))))))))))
+
+(defun dashboard-reduce-credits-touch (state report layout)
+  (multiple-value-bind (credits effect)
+      (credits-touch-transition (getf state :credits) layout report)
+    (let ((next (copy-list state)))
+      (setf (getf next :credits) credits)
+      (if (getf effect :close)
+          (progn
+            (setf next (dashboard-loop-set-view next :dashboard)
+                  next (dashboard-loop-set-global-status next ""))
+            (values next (dashboard-loop-screen-effects (getf effect :cue))))
+          (values next nil)))))
 
 (defun dashboard-reduce-touch (state event)
   (let* ((arguments (rest event))
          (report (getf arguments :report))
-         (layout (getf arguments :layout)))
+         (layout (getf arguments :layout))
+         (now (getf arguments :now)))
     (check-type report list)
     (check-type layout list)
-    (if (eq (getf state :view) :dashboard)
-        (multiple-value-bind (dashboard effect)
-            (dashboard-touch-transition (getf state :dashboard) layout report)
-          (let ((next (copy-list state)))
-            (setf (getf next :dashboard) dashboard)
-            (values next (dashboard-loop-transition-effects effect))))
-        (values (copy-list state) nil))))
+    (check-type now (integer 0 *))
+    (case (getf state :view)
+      (:dashboard (dashboard-reduce-dashboard-touch state report layout now))
+      (:settings (dashboard-reduce-settings-touch state report layout))
+      (:wifi (dashboard-reduce-wifi-touch state report layout))
+      (:credits (dashboard-reduce-credits-touch state report layout))
+      (otherwise (error "Unknown dashboard view ~S" (getf state :view))))))
+
+(defun dashboard-reduce-settings-result (state event)
+  (let ((plan (getf state :pending-settings-plan)))
+    (unless plan
+      (error "Dashboard has no pending settings action"))
+    (let ((succeeded (not (null (getf (rest event) :succeeded-p)))))
+      (multiple-value-bind (settings effect)
+          (settings-complete-action (getf state :settings) plan succeeded)
+        (let ((next (copy-list state)))
+          (setf (getf next :settings) settings
+                (getf next :pending-settings-plan) nil
+                next (dashboard-loop-set-global-status
+                      next (getf settings :status)))
+          (case (getf plan :action)
+            (:volume
+             (cond
+               ((not succeeded)
+                (values next (dashboard-loop-screen-effects)))
+               ((zerop (getf plan :value))
+                (values next
+                        (append (dashboard-loop-screen-effects)
+                                '((:stop-sound)))))
+               (t
+                (setf (getf next :pending-volume-tone) (copy-tree plan))
+                (values next
+                        (append (dashboard-loop-screen-effects)
+                                (list (list :cue (getf effect :cue)
+                                            :report-result t)))))))
+            (otherwise
+             (values next
+                     (dashboard-loop-screen-effects (getf effect :cue))))))))))
+
+(defun dashboard-reduce-volume-tone-result (state event)
+  (let ((plan (getf state :pending-volume-tone)))
+    (unless plan
+      (error "Dashboard has no pending volume tone"))
+    (let ((next (copy-list state)))
+      (setf (getf next :pending-volume-tone) nil)
+      (if (getf (rest event) :succeeded-p)
+          (values next nil)
+          (let ((settings (copy-list (getf next :settings))))
+            (setf (getf settings :status) (getf plan :tone-failure-status)
+                  (getf next :settings) settings
+                  next (dashboard-loop-set-global-status
+                        next (getf settings :status)))
+            (values next (dashboard-loop-screen-effects)))))))
+
+(defun dashboard-reduce-wifi-result (state event)
+  (let ((plan (getf state :pending-wifi-plan)))
+    (unless plan
+      (error "Dashboard has no pending Wi-Fi action"))
+    (multiple-value-bind (wifi effect)
+        (wifi-complete-save
+         (getf state :wifi) plan
+         (not (null (getf (rest event) :succeeded-p)))
+         :failure-status (getf (rest event) :failure-status))
+      (let ((next (copy-list state)))
+        (setf (getf next :wifi) wifi
+              (getf next :pending-wifi-plan) nil)
+        (values next
+                (dashboard-loop-wifi-screen-effects (getf effect :cue)))))))
+
+(defun dashboard-loop-check-pending-event (state event)
+  (let ((expected
+          (cond ((getf state :pending-settings-plan) :settings-result)
+                ((getf state :pending-volume-tone) :volume-tone-result)
+                ((getf state :pending-wifi-plan) :wifi-result))))
+    (when (and expected (not (eq (first event) expected)))
+      (error "Dashboard expects ~S before ~S" expected (first event)))))
 
 (defun dashboard-reduce (state event)
   (check-type state list)
   (check-type event list)
+  (dashboard-loop-check-pending-event state event)
   (case (first event)
     (:controls (dashboard-reduce-controls state event))
+    (:settings-result (dashboard-reduce-settings-result state event))
     (:tick (dashboard-reduce-tick state event))
     (:touch (dashboard-reduce-touch state event))
+    (:volume-tone-result (dashboard-reduce-volume-tone-result state event))
+    (:wifi-result (dashboard-reduce-wifi-result state event))
     (otherwise (error "Unknown dashboard event ~S" event))))
 
 (defun apply-dashboard-touch (games state layout report volume-percent presenter)

@@ -1882,4 +1882,210 @@ secret!9
       (assert (eq (getf (getf next :credits) :pressed-target) :close))
       (assert (null effects)))))
 
+(labels ((touch-pair (state layout x y now)
+           (multiple-value-bind (pressed press-effects)
+               (retrodeck:dashboard-reduce
+                state (list :touch :report (list x y t t nil)
+                            :layout layout :now now))
+             (assert (null press-effects))
+             (retrodeck:dashboard-reduce
+              pressed (list :touch :report (list x y nil nil t)
+                            :layout layout :now (1+ now))))))
+  (let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                   :color #x5f87ff :rom "/tmp/alpha.nes")))
+         (dashboard-layout (retrodeck:render-dashboard games :nes 0 ""))
+         (state (retrodeck:dashboard-loop-initial-state
+                 games :volume 42 :brightness 60 :keymap "us")))
+    (multiple-value-bind (settings open-effects)
+        (touch-pair state dashboard-layout 1220 420 1000)
+      (assert (eq (getf settings :view) :settings))
+      (assert (eq (getf (getf settings :settings) :selected) :volume-down))
+      (assert (equal open-effects
+                     '((:render) (:present) (:cue :confirm))))
+      (let ((settings-layout
+              (retrodeck:render-dashboard-settings 42 60 "us" :volume-down
+                                                   "" nil)))
+        (multiple-value-bind (requested request-effects)
+            (retrodeck:dashboard-reduce
+             settings
+             (list :controls :gamepad-actions '(:confirm)
+                   :keyboard-actions nil :layout settings-layout :now 1010
+                   :controller-quarantined-p nil))
+          (let ((plan (getf requested :pending-settings-plan)))
+            (assert (eq (getf plan :action) :volume))
+            (assert (= (getf plan :value) 37))
+            (assert (equal request-effects
+                           (list '(:discard-touch)
+                                 (list :settings-action plan))))
+            (assert
+             (signals-error-p
+              (lambda ()
+                (retrodeck:dashboard-reduce
+                 requested
+                 (list :touch :report '(0 0 t t nil)
+                       :layout settings-layout :now 1011)))))
+            (multiple-value-bind (completed complete-effects)
+                (retrodeck:dashboard-reduce
+                 requested '(:settings-result :succeeded-p t))
+              (assert (= (getf (getf completed :settings) :volume) 37))
+              (assert (string= (getf (getf completed :settings) :status)
+                               "GAME VOLUME 37%"))
+              (assert (equal complete-effects
+                             '((:render) (:present)
+                               (:cue :volume :report-result t))))
+              (multiple-value-bind (tone-failed tone-effects)
+                  (retrodeck:dashboard-reduce
+                   completed '(:volume-tone-result :succeeded-p nil))
+                (assert
+                 (string= (getf (getf tone-failed :settings) :status)
+                          "VOLUME SAVED; CONFIRMATION TONE FAILED"))
+                (assert (equal tone-effects '((:render) (:present))))))))
+
+        (multiple-value-bind (wifi open-wifi-effects)
+            (touch-pair settings settings-layout 1000 50 1020)
+          (assert (eq (getf wifi :view) :wifi))
+          (assert (getf (getf wifi :settings) :open))
+          (assert (getf (getf wifi :wifi) :open))
+          (assert (equal open-wifi-effects
+                         '((:render) (:present) (:cue :confirm))))
+          (let ((wifi-layout
+                  (retrodeck:render-dashboard-wifi (getf wifi :wifi) nil)))
+            (multiple-value-bind (focused focus-effects)
+                (touch-pair wifi wifi-layout 340 20 1030)
+              (assert (eq (getf (getf focused :wifi) :field) :ssid))
+              (assert (equal focus-effects
+                             '((:render) (:cue :next) (:present)))))
+            (multiple-value-bind (unchanged blank-effects)
+                (touch-pair wifi wifi-layout -1 -1 1035)
+              (assert (eq (getf unchanged :view) :wifi))
+              (assert (equal blank-effects '((:present)))))
+            (multiple-value-bind (closed close-effects)
+                (touch-pair wifi wifi-layout 20 20 1040)
+              (assert (eq (getf closed :view) :settings))
+              (assert (string= (getf (getf closed :settings) :status)
+                               "WIFI EDITOR CLOSED"))
+              (assert (equal close-effects
+                             '((:render) (:cue :back) (:present))))))))))
+
+  (let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                   :color #x5f87ff)))
+         (dashboard-layout (retrodeck:render-dashboard games :nes 0 ""))
+         (state (retrodeck:dashboard-loop-initial-state
+                 games :wifi-state
+                 (retrodeck:wifi-initial-state
+                  :ssid "DEMO" :passphrase "password"))))
+    (multiple-value-bind (settings ignored)
+        (touch-pair state dashboard-layout 1220 420 1100)
+      (declare (ignore ignored))
+      (let ((settings-layout
+              (retrodeck:render-dashboard-settings
+               42 100 "us" :volume-down "" nil)))
+        (multiple-value-bind (wifi ignored)
+            (touch-pair settings settings-layout 1000 50 1110)
+          (declare (ignore ignored))
+          (let ((wifi-layout
+                  (retrodeck:render-dashboard-wifi (getf wifi :wifi) nil)))
+            (multiple-value-bind (saving save-effects)
+                (touch-pair wifi wifi-layout 1000 20 1120)
+              (let ((plan (getf saving :pending-wifi-plan)))
+                (assert (eq (getf plan :action) :save))
+                (assert (equal save-effects
+                               (list (list :wifi-action plan))))
+                (assert
+                 (signals-error-p
+                  (lambda ()
+                    (retrodeck:dashboard-reduce
+                     saving
+                     (list :touch :report '(20 20 nil nil t)
+                           :layout wifi-layout :now 1122)))))
+                (multiple-value-bind (saved completion-effects)
+                    (retrodeck:dashboard-reduce
+                     saving '(:wifi-result :succeeded-p t))
+                  (assert (string= (getf (getf saved :wifi) :passphrase) ""))
+                  (assert (string= (getf (getf saved :wifi) :status)
+                                   "WIFI SAVED - USED AFTER CURRENT WIFI DISCONNECTS"))
+                  (assert (equal completion-effects
+                                 '((:render) (:cue :confirm) (:present))))))))))))
+
+  (let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                   :color #x5f87ff)))
+         (layout (retrodeck:render-dashboard games :nes 0 ""))
+         (state (retrodeck:dashboard-loop-initial-state games)))
+    (multiple-value-bind (credits open-effects)
+        (touch-pair state layout 20 420 1200)
+      (assert (eq (getf credits :view) :credits))
+      (assert (= (getf credits :credits-started-at) 1201))
+      (assert (equal open-effects
+                     '((:render) (:present) (:cue :confirm))))
+      (multiple-value-bind (closed close-effects)
+          (touch-pair credits '(:close (1212 12 56 56)) 1220 20 1210)
+        (assert (eq (getf closed :view) :dashboard))
+        (assert (equal close-effects
+                       '((:render) (:present) (:cue :back)))))))
+
+  (let* ((games (list '(:id "alpha" :title "ALPHA" :system :nes
+                        :color #x5f87ff :rom "/tmp/alpha.nes")
+                      (retrodeck:dashboard-application "terminal")
+                      (retrodeck:dashboard-application "reboot")))
+         (deck-layout (retrodeck:render-dashboard games :deck 1 ""))
+         (state (retrodeck:dashboard-loop-initial-state games))
+         (dashboard (copy-list (getf state :dashboard))))
+    (setf (getf dashboard :active-system) :deck
+          (getf dashboard :game-position) 1
+          (getf state :dashboard) dashboard)
+    (multiple-value-bind (armed arm-effects)
+        (retrodeck:dashboard-reduce
+         state (list :controls :gamepad-actions '(:confirm)
+                     :keyboard-actions nil :layout deck-layout :now 1000
+                     :controller-quarantined-p nil))
+      (assert (= (getf armed :reboot-deadline) 5000))
+      (assert (null (getf armed :pending-launch)))
+      (assert (string= (getf (getf armed :dashboard) :status)
+                       retrodeck:*dashboard-reboot-confirmation-text*))
+      (assert (equal arm-effects
+                     '((:discard-touch) (:render) (:present)
+                       (:cue :confirm))))
+      (multiple-value-bind (still-armed effects)
+          (retrodeck:dashboard-reduce armed '(:tick :now 4999))
+        (assert (= (getf still-armed :reboot-deadline) 5000))
+        (assert (null effects)))
+      (multiple-value-bind (expired effects)
+          (retrodeck:dashboard-reduce armed '(:tick :now 5000))
+        (assert (zerop (getf expired :reboot-deadline)))
+        (assert (string= (getf (getf expired :dashboard) :status) ""))
+        (assert (equal effects '((:render) (:present)))))
+      (multiple-value-bind (confirmed confirm-effects)
+          (retrodeck:dashboard-reduce
+           armed (list :controls :gamepad-actions '(:confirm)
+                       :keyboard-actions nil :layout deck-layout :now 4999
+                       :controller-quarantined-p nil))
+        (assert (equal (getf confirmed :pending-launch)
+                       '(:kind :reboot :game-index 2)))
+        (assert (zerop (getf confirmed :reboot-deadline)))
+        (assert (equal confirm-effects
+                       '((:discard-touch) (:cue :confirm)))))
+      (multiple-value-bind (pressed ignored)
+          (retrodeck:dashboard-reduce
+           armed (list :touch :report '(-1 -1 t t nil)
+                       :layout deck-layout :now 4500))
+        (declare (ignore ignored))
+        (multiple-value-bind (cancelled effects)
+            (retrodeck:dashboard-reduce
+             pressed (list :touch :report '(-1 -1 nil nil t)
+                           :layout deck-layout :now 4501))
+          (assert (zerop (getf cancelled :reboot-deadline)))
+          (assert (string= (getf (getf cancelled :dashboard) :status) ""))
+          (assert (null effects)))))
+
+    (let ((nes-layout (retrodeck:render-dashboard games :nes 0 "")))
+      (multiple-value-bind (requested effects)
+          (retrodeck:dashboard-reduce
+           (retrodeck:dashboard-loop-initial-state games)
+           (list :controls :gamepad-actions '(:confirm)
+                 :keyboard-actions nil :layout nes-layout :now 1300
+                 :controller-quarantined-p nil))
+        (assert (equal (getf requested :pending-launch)
+                       '(:kind :game :game-index 0)))
+        (assert (equal effects '((:discard-touch) (:cue :confirm))))))))
+
 (format t "Lisp policy tests passed.~%")
