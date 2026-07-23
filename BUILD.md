@@ -100,15 +100,19 @@ and `dashboard.lisp`. These editable files own bitmap UI composition, systems,
 labels, colors, applications, launch plans, terminal status and sequencing,
 timing, settings and Wi-Fi editor state and actions, credits content and
 sequencing, dashboard geometry, touch policy, keyboard and THEGamepad mapping,
-modal command priority, controller burst recovery, and input scan timing.
+modal command priority, controller burst recovery, input scan timing, and the
+Wi-Fi selector status path.
 Startup finally loads an optional `local.lisp` beside them for device-local
 overrides without a Rust
 rebuild. Deployment updates the eight standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
-Native ABI 13 retains the widget-side Wayland and direct-fbdev primitives and
-adds only narrow canvas, raster, projected-text, evdev, regular-file, audio,
-process, and aggregate-input mechanisms for Lisp to orchestrate. One native
+Native ABI 14 retains the widget-side Wayland and direct-fbdev primitives and
+adds only narrow canvas, raster, projected-text, evdev, regular-file, network,
+audio, process, and aggregate-input mechanisms for Lisp to orchestrate. The
+network primitive reports the current `wlan0` SSID and IPv4 address, the `wg0`
+IPv4 address, and the bounded Wi-Fi selector status while Lisp owns its path,
+refresh timing, result shape, and rendering. One native
 input poll waits on the selected Wayland or fbdev touchscreen first, then the
 stable gamepad and keyboard descriptors, with one timeout. Ready controls are
 read before touch; the fixed result reports queue counts, touch loss, control

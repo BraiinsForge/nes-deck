@@ -724,9 +724,41 @@ production lines, including the existing catalog compiler, and 14,278 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Dashboard network status checkpoint
+
+Native ABI 14 adds one read-only Linux network-status mechanism. Rust preserves
+the authoritative `menu_network.cpp` behavior: the first IPv4 address for
+`wlan0` and `wg0` comes from `getifaddrs`, the `wlan0` SSID comes from
+`SIOCGIWESSID`, valid non-ASCII display codepoints become `?`, and the selector
+status comes only from an absolute bounded regular file without following a
+symbolic link. Missing interfaces and failed reads retain the original empty or
+`STATUS UNAVAILABLE` results.
+
+The fixed native result is `(ssid wlan-ipv4 wireguard-ipv4 selector)`. Lisp
+validates that tuple, owns `/var/run/deck-wifi/status` through editable
+`*dashboard-wifi-paths*`, converts the values to the dashboard network plist,
+and emits the existing `:network-result` completion. A runtime without an
+injected external handler now performs the concrete startup read and every
+scheduled `:network-action`; an injected handler can still replace the effect
+for fixtures or later composition. Settings writes, Wi-Fi profile updates, and
+child launch remain separate later slices. `RETRODECK:MAIN` remains unchanged
+and the C++ dashboard remains authoritative.
+
+Host tests, direct Cargo checks, `nix flake check`, and the complete ARM/ECL
+matrix passed. ABI 14 plus the updated startup, Wi-Fi policy, and dashboard files
+were installed on the Deck with matching hashes. A harmless installed fixture
+read `Zyxel_7B79_5G`, `192.168.1.213`, `10.0.0.17`, and `CONNECTED` through the
+concrete runtime effect without opening a display or input device. The C++
+dashboard retained PID 17517 and the Deck health check remained healthy.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 9,804
+production lines, including the existing catalog compiler, and 14,573 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
-Updated on 2026-07-23:
+Updated on 2026-07-24:
 
 - `./tests/run-host-tests.sh`: passed
 - `./tests/verify-arm-builds.sh`: passed
@@ -756,6 +788,9 @@ Updated on 2026-07-23:
 - ABI 13 aggregate polling preserved touch/gamepad/keyboard descriptor and read
   order, measured the installed empty-input timeout at 40 ms, and produced the
   normalized Lisp snapshot while C++ retained PID 17517
+- ABI 14 matched the authoritative wlan0/wg0/SSID/selector semantics through
+  ARM/ECL and the installed concrete Lisp runtime effect while C++ retained PID
+  17517
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
