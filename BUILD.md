@@ -106,11 +106,15 @@ overrides without a Rust
 rebuild. Deployment updates the eight standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
-Native ABI 12 retains the widget-side Wayland and direct-fbdev primitives and
-adds only narrow canvas, raster, projected-text, evdev, regular-file, audio, and
-process-facing mechanisms for Lisp to orchestrate. The control boundary scans
-numeric evdev nodes, keeps at most two exact THEGamepads and four complete
-keyboards in stable order, decodes resynchronization and rising edges, and
+Native ABI 13 retains the widget-side Wayland and direct-fbdev primitives and
+adds only narrow canvas, raster, projected-text, evdev, regular-file, audio,
+process, and aggregate-input mechanisms for Lisp to orchestrate. One native
+input poll waits on the selected Wayland or fbdev touchscreen first, then the
+stable gamepad and keyboard descriptors, with one timeout. Ready controls are
+read before touch; the fixed result reports queue counts, touch loss, control
+rescan, and Wayland shutdown while Lisp retains mapping, arbitration, timing,
+and audio quarantine. The control boundary keeps at most two exact THEGamepads
+and four complete keyboards, decodes resynchronization and rising edges, and
 returns raw reports for Lisp policy. The terminal primitive supervises one child
 process group, restores console state, accepts the original two-second touch
 return hold, and mirrors RGB565 console scanout only when the Wayland widget is

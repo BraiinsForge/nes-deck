@@ -689,6 +689,41 @@ production lines, including the existing catalog compiler, and 13,767 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Dashboard polling adapter checkpoint
+
+Native ABI 13 adds one aggregate input poll rather than serially blocking on
+separate touch and control dispatchers. Rust waits once on the selected Wayland
+connection or fbdev touchscreen, followed by stable gamepad and keyboard
+descriptors. Ready gamepads and keyboards are drained before touch, preserving
+the authoritative C++ descriptor and read order. Existing queue-first behavior,
+EINTR deadline handling, control loss and rescan, fbdev touch loss, Wayland
+shutdown, report decoding, and resynchronization stay inside their established
+native modules.
+
+The fixed native result is `(ready control-count touch-count touch-lost rescan
+shutdown)`. Startup-loaded Lisp validates it, drains and maps raw reports under
+editable policy, captures one post-poll input time, and produces the normalized
+snapshot consumed by the runtime adapter. Rust does not map actions or inspect
+audio state. The runtime still counts controller edges before applying its
+cached cue quarantine, while keyboard and touch remain responsive during menu
+sounds. `RETRODECK:MAIN` remains unchanged and the C++ dashboard remains
+authoritative.
+
+Host policy and mechanism tests, direct Cargo checks, `nix flake check`, and the
+complete static ARM/ECL matrix passed. ABI 13, `startup.lisp`, `policy.lisp`, and
+`dashboard.lisp` were installed on the ARMv7 Deck. A harmless installed fixture
+left the Goodix touchscreen closed, confirmed its controls scan remained zero
+keyboards and zero THEGamepads, measured the shared empty-input timeout at 40
+ms, and exercised the real native-to-Lisp normalized snapshot. The authoritative
+C++ dashboard retained PID 17517 and the Deck health check remained healthy.
+Connected keyboard/THEGamepad and Wayland-compositor physical acceptance remain
+blocked by the same unavailable hardware and firmware.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 9,586
+production lines, including the existing catalog compiler, and 14,278 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-23:
@@ -718,6 +753,9 @@ Updated on 2026-07-23:
 - The non-authoritative runtime adapter passed startup, launch/recovery, audio
   ownership, shutdown, and installed ARM/ECL fixture checks at hash
   `37e9949718aa8c45` while C++ retained PID 17517
+- ABI 13 aggregate polling preserved touch/gamepad/keyboard descriptor and read
+  order, measured the installed empty-input timeout at 40 ms, and produced the
+  normalized Lisp snapshot while C++ retained PID 17517
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
