@@ -204,7 +204,9 @@
       (>= (- now last-scan-ms) (dashboard-timing :controller-scan-ms))))
 
 (defun dashboard-controller-input-actions
-    (gamepad-actions keyboard-actions guard now)
+    (gamepad-actions keyboard-actions guard now
+     &key (controller-quarantined-p
+            (menu-sound-blocks-input-p :controller now)))
   (check-type gamepad-actions list)
   (check-type keyboard-actions list)
   (let ((next-guard guard)
@@ -217,7 +219,7 @@
               newly-suspended suspended)
         (unless accepted
           (setf accepted-gamepad nil))))
-    (when (menu-sound-blocks-input-p :controller now)
+    (when controller-quarantined-p
       (setf accepted-gamepad nil))
     (values (remove-duplicates
              (append accepted-gamepad keyboard-actions) :test #'eq)

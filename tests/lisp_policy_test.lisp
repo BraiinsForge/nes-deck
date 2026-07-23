@@ -1749,4 +1749,137 @@ secret!9
                    (:gb 0 t :next)
                    (:gb 0 t nil)))))
 
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff)
+                (:id "beta" :title "BETA" :system :nes
+                 :color #xafd75f)
+                (:id "gb" :title "GB" :system :gb :color #x87af87)))
+       (layout (retrodeck:render-dashboard games :nes 0 ""))
+       (state (retrodeck:dashboard-loop-initial-state
+               games :network '(:wifi "TEST") :now 25)))
+  (assert (eq (getf state :view) :dashboard))
+  (assert (equal (getf state :network) '(:wifi "TEST")))
+  (assert (= (getf state :network-refreshed-at) 25))
+  (assert (eq (getf (getf state :settings) :selected) :volume-down))
+  (assert (not (getf (getf state :settings) :open)))
+
+  (let* ((armed (copy-list state))
+         (dashboard (copy-list (getf state :dashboard))))
+    (setf (getf dashboard :pressed-target) :settings
+          (getf armed :dashboard) dashboard)
+    (multiple-value-bind (next effects)
+        (retrodeck:dashboard-reduce
+         armed (list :controls :gamepad-actions '(:right)
+                     :keyboard-actions nil :layout layout :now 100
+                      :controller-quarantined-p nil))
+      (assert (= (getf (getf next :dashboard) :game-position) 1))
+      (assert (null (getf (getf next :dashboard) :pressed-target)))
+      (assert (eq (getf (getf armed :dashboard) :pressed-target) :settings))
+      (assert (equal effects
+                     '((:discard-touch) (:render) (:present) (:cue :next))))))
+
+  (multiple-value-bind (next effects)
+      (retrodeck:dashboard-reduce
+       state (list :controls :gamepad-actions '(:confirm)
+                   :keyboard-actions '(:right) :layout layout :now 150
+                   :controller-quarantined-p t))
+    (assert (= (getf (getf next :dashboard) :game-position) 1))
+    (assert (equal (getf (getf next :controller-guard) :edge-times) '(150)))
+    (assert (equal effects
+                   '((:discard-touch) (:render) (:present) (:cue :next)))))
+
+  (multiple-value-bind (next effects)
+      (retrodeck:dashboard-reduce
+       state (list :controls :gamepad-actions '(:confirm)
+                   :keyboard-actions nil :layout layout :now 175
+                   :controller-quarantined-p t))
+    (assert (zerop (getf (getf next :dashboard) :game-position)))
+    (assert (equal (getf (getf next :controller-guard) :edge-times) '(175)))
+    (assert (null effects)))
+
+  (assert
+   (signals-error-p
+    (lambda ()
+      (retrodeck:dashboard-reduce
+       state (list :controls :gamepad-actions nil :keyboard-actions nil
+                   :layout layout :now 190)))))
+
+  (let ((suspended (copy-list state)))
+    (setf (getf suspended :controller-guard)
+          '(:edge-times (0) :suspended t :last-edge-at 100))
+    (multiple-value-bind (waiting effects)
+        (retrodeck:dashboard-reduce suspended '(:tick :now 1099))
+      (assert (getf (getf waiting :controller-guard) :suspended))
+      (assert (null effects)))
+    (multiple-value-bind (recovered effects)
+        (retrodeck:dashboard-reduce suspended '(:tick :now 1100))
+      (assert (equal (getf recovered :controller-guard)
+                     '(:edge-times nil :suspended nil :last-edge-at nil)))
+      (assert (equal effects '((:controller-resumed))))))
+
+  (multiple-value-bind (next effects)
+      (retrodeck:dashboard-reduce
+       state (list :controls :gamepad-actions '(:system-previous)
+                   :keyboard-actions nil :layout layout :now 200
+                    :controller-quarantined-p nil))
+    (assert (eq (getf (getf next :dashboard) :active-system) :gb))
+    (assert (equal effects
+                   '((:discard-touch) (:render) (:present)
+                     (:cue :previous)))))
+
+  (multiple-value-bind (settings effects)
+      (retrodeck:dashboard-reduce
+       state (list :controls :gamepad-actions '(:settings)
+                   :keyboard-actions nil :layout layout :now 250
+                    :controller-quarantined-p nil))
+    (assert (eq (getf settings :view) :settings))
+    (assert (getf (getf settings :settings) :open))
+    (assert (eq (getf (getf settings :settings) :selected) :volume-down))
+    (assert (equal effects
+                   '((:discard-touch) (:render) (:present)
+                     (:cue :confirm))))
+    (multiple-value-bind (moved move-effects)
+        (retrodeck:dashboard-reduce
+         settings (list :controls :gamepad-actions nil
+                        :keyboard-actions '(:right) :layout layout :now 275
+                        :controller-quarantined-p nil))
+      (assert (eq (getf (getf moved :settings) :selected) :volume-up))
+      (assert (equal move-effects
+                     '((:discard-touch) (:render) (:present) (:cue :next))))
+      (multiple-value-bind (closed close-effects)
+          (retrodeck:dashboard-reduce
+           moved (list :controls :gamepad-actions nil
+                       :keyboard-actions '(:back) :layout layout :now 300
+                       :controller-quarantined-p nil))
+        (assert (eq (getf closed :view) :dashboard))
+        (assert (equal close-effects
+                       '((:discard-touch) (:render) (:present)
+                         (:cue :back)))))))
+
+  (multiple-value-bind (pressed effects)
+      (retrodeck:dashboard-reduce
+       state (list :touch :report '(1084 282 t t nil) :layout layout
+                   :now 350))
+    (assert (null effects))
+    (multiple-value-bind (released release-effects)
+        (retrodeck:dashboard-reduce
+         pressed (list :touch :report '(1084 282 nil nil t) :layout layout
+                       :now 351))
+      (assert (= (getf (getf released :dashboard) :game-position) 1))
+      (assert (equal release-effects
+                     '((:render) (:present) (:cue :next))))))
+
+  (let* ((modal (copy-list state))
+         (credits (copy-list (getf state :credits))))
+    (setf (getf modal :view) :credits
+          (getf credits :pressed-target) :close
+          (getf modal :credits) credits)
+    (multiple-value-bind (next effects)
+        (retrodeck:dashboard-reduce
+         modal (list :controls :gamepad-actions '(:right)
+                     :keyboard-actions nil :layout layout :now 400
+                      :controller-quarantined-p nil))
+      (assert (eq (getf (getf next :credits) :pressed-target) :close))
+      (assert (null effects)))))
+
 (format t "Lisp policy tests passed.~%")

@@ -442,6 +442,250 @@
                          effect (list :render t :cue target)))))))))
       (values next effect))))
 
+(defun dashboard-adjacent-system (systems active-system direction)
+  (check-type systems list)
+  (check-type direction (member -1 1))
+  (if (null systems)
+      active-system
+      (let* ((count (length systems))
+             (position (or (position active-system systems :test #'eq) 0))
+             (next-position
+               (if (minusp direction)
+                   (if (zerop position) (1- count) (1- position))
+                   (mod (1+ position) count))))
+        (nth next-position systems))))
+
+(defun dashboard-loop-initial-state
+    (games &key (volume *dashboard-volume-default*) last-audible-volume
+                (brightness 100) (keymap "us") (network nil)
+                (wifi-state (wifi-initial-state))
+                (credits-state (credits-initial-state)) credits-crawl
+                reduced-motion (now 0))
+  (check-type games list)
+  (check-type network list)
+  (check-type now (integer 0 *))
+  (let ((settings (settings-initial-state
+                   :volume volume :last-audible-volume last-audible-volume
+                   :brightness brightness :keymap keymap))
+        (wifi (copy-list wifi-state)))
+    (setf (getf settings :open) nil
+          (getf wifi :open) nil)
+    (list :games (copy-tree games)
+          :view :dashboard
+          :dashboard (dashboard-initial-state games)
+          :settings settings
+          :wifi wifi
+          :credits (copy-list credits-state)
+          :network (copy-tree network)
+          :credits-crawl credits-crawl
+          :credits-started-at 0
+          :reduced-motion (not (null reduced-motion))
+          :controller-guard (dashboard-controller-guard-initial-state)
+          :last-control-scan-ms nil
+          :network-refreshed-at now
+          :reboot-deadline 0
+          :pending-launch nil)))
+
+(defun dashboard-loop-set-global-status (state status)
+  (check-type status string)
+  (let ((next (copy-list state))
+        (dashboard (copy-list (getf state :dashboard)))
+        (settings (copy-list (getf state :settings))))
+    (setf (getf dashboard :status) status
+          (getf settings :status) status
+          (getf next :dashboard) dashboard
+          (getf next :settings) settings)
+    next))
+
+(defun dashboard-loop-clear-pressed-targets (state)
+  (let ((next (copy-list state)))
+    (dolist (key '(:dashboard :settings :wifi :credits) next)
+      (let ((slice (copy-list (getf state key))))
+        (setf (getf slice :pressed-target) nil
+              (getf next key) slice)))))
+
+(defun dashboard-loop-set-view (state view)
+  (unless (member view '(:dashboard :settings :wifi :credits))
+    (error "Unknown dashboard view ~S" view))
+  (let* ((next (dashboard-loop-clear-pressed-targets state))
+         (settings (copy-list (getf next :settings)))
+         (wifi (copy-list (getf next :wifi))))
+    (setf (getf settings :open)
+          (not (null (member view '(:settings :wifi))))
+          (getf wifi :open) (eq view :wifi)
+          (getf next :settings) settings
+          (getf next :wifi) wifi
+          (getf next :view) view)
+    next))
+
+(defun dashboard-loop-cancel-reboot (state)
+  (let ((next (copy-list state)))
+    (setf (getf next :reboot-deadline) 0)
+    (if (string= (getf (getf state :dashboard) :status)
+                 *dashboard-reboot-confirmation-text*)
+        (dashboard-loop-set-global-status next "")
+        next)))
+
+(defun dashboard-loop-screen-effects (&optional cue)
+  (append '((:render) (:present))
+          (and cue (list (list :cue cue)))))
+
+(defun dashboard-loop-transition-effects (effect)
+  (when effect
+    (append (and (getf effect :render) '((:render) (:present)))
+            (and (getf effect :cue)
+                 (list (list :cue (getf effect :cue)))))))
+
+(defun dashboard-loop-command-transition (state command layout)
+  (let ((view (getf state :view)))
+    (case command
+      (:back
+       (let ((next (dashboard-loop-cancel-reboot state)))
+         (setf next
+               (case view
+                 (:credits
+                  (dashboard-loop-set-global-status
+                   (dashboard-loop-set-view next :dashboard) ""))
+                 (:wifi
+                  (dashboard-loop-set-global-status
+                   (dashboard-loop-set-view next :settings)
+                   (dashboard-wifi-label :closed)))
+                 (:settings
+                  (dashboard-loop-set-global-status
+                   (dashboard-loop-set-view next :dashboard) ""))
+                 (otherwise next)))
+         (values next (dashboard-loop-screen-effects :back))))
+      (:settings
+       (let* ((opening (not (eq view :settings)))
+              (next (dashboard-loop-cancel-reboot state))
+              (settings (copy-list (getf next :settings))))
+         (when opening
+           (setf (getf settings :selected) :volume-down))
+         (setf (getf next :settings) settings
+               next (dashboard-loop-set-view
+                     next (if opening :settings :dashboard))
+               next (dashboard-loop-set-global-status next ""))
+         (values next
+                 (dashboard-loop-screen-effects
+                  (if opening :confirm :back)))))
+      ((:system-previous :system-next)
+       (let* ((next (dashboard-loop-cancel-reboot state))
+              (dashboard (copy-list (getf next :dashboard)))
+              (direction (if (eq command :system-previous) -1 1)))
+         (setf (getf dashboard :active-system)
+               (dashboard-adjacent-system
+                (getf layout :systems) (getf dashboard :active-system)
+                direction)
+               (getf dashboard :game-position) 0
+               (getf next :dashboard) dashboard
+               next (dashboard-loop-set-global-status next ""))
+         (values next
+                 (dashboard-loop-screen-effects
+                  (if (minusp direction) :previous :next)))))
+      ((:previous :next)
+       (let ((next (dashboard-loop-cancel-reboot state)))
+         (if (eq view :settings)
+             (multiple-value-bind (settings effect)
+                 (settings-move-selection (getf next :settings) command)
+               (setf (getf next :settings) settings
+                     next (dashboard-loop-set-global-status
+                           next (getf settings :status)))
+               (values next
+                       (dashboard-loop-screen-effects (getf effect :cue))))
+             (let* ((dashboard (copy-list (getf next :dashboard)))
+                    (count (length (getf layout :game-indices)))
+                    (position (getf dashboard :game-position))
+                    (moved (plusp count)))
+               (when moved
+                 (setf (getf dashboard :game-position)
+                       (if (eq command :previous)
+                           (if (zerop position) (1- count) (1- position))
+                           (mod (1+ position) count))))
+               (setf (getf next :dashboard) dashboard
+                     next (dashboard-loop-set-global-status next ""))
+               (values next
+                       (dashboard-loop-screen-effects
+                        (and moved command)))))))
+      (:confirm
+       (if (eq view :settings)
+           (multiple-value-bind (settings plan)
+               (settings-controller-transition (getf state :settings) :confirm)
+             (let ((next (copy-list state)))
+               (setf (getf next :settings) settings)
+               (values next (and plan (list (list :settings-action plan))))))
+           (let ((game-index (getf layout :shown-game-index)))
+             (if (< game-index (length (getf state :games)))
+                 (values (copy-list state)
+                         (list (list :request-game game-index)
+                               '(:cue :confirm)))
+                 (values (copy-list state) nil)))))
+      (otherwise (values (copy-list state) nil)))))
+
+(defun dashboard-reduce-controls (state event)
+  (let* ((arguments (rest event))
+         (gamepad (or (getf arguments :gamepad-actions) nil))
+         (keyboard (or (getf arguments :keyboard-actions) nil))
+         (now (getf arguments :now))
+         (layout (getf arguments :layout))
+         (missing (gensym))
+         (quarantine (getf arguments :controller-quarantined-p missing)))
+    (when (eq quarantine missing)
+      (error "Dashboard controls need explicit audio quarantine state"))
+    (check-type now (integer 0 *))
+    (check-type layout list)
+    (let ((quarantined (not (null quarantine))))
+    (multiple-value-bind (actions guard newly-suspended)
+        (dashboard-controller-input-actions
+         gamepad keyboard (getf state :controller-guard) now
+         :controller-quarantined-p quarantined)
+      (let* ((next (copy-list state))
+             (view (getf state :view))
+             (command
+               (dashboard-controller-command
+                actions (member view '(:wifi :credits)) (eq view :settings)))
+             (prefix (and newly-suspended '((:controller-suspended)))))
+        (setf (getf next :controller-guard) guard)
+        (if command
+            (multiple-value-bind (command-state effects)
+                (dashboard-loop-command-transition
+                 (dashboard-loop-clear-pressed-targets next) command layout)
+              (values command-state
+                      (append prefix '((:discard-touch)) effects)))
+            (values next prefix)))))))
+
+(defun dashboard-reduce-tick (state event)
+  (let ((now (getf (rest event) :now)))
+    (check-type now (integer 0 *))
+    (multiple-value-bind (guard recovered)
+        (dashboard-controller-guard-recover-if-quiet
+         (getf state :controller-guard) now)
+      (let ((next (copy-list state)))
+        (setf (getf next :controller-guard) guard)
+        (values next (and recovered '((:controller-resumed))))))))
+
+(defun dashboard-reduce-touch (state event)
+  (let* ((arguments (rest event))
+         (report (getf arguments :report))
+         (layout (getf arguments :layout)))
+    (check-type report list)
+    (check-type layout list)
+    (if (eq (getf state :view) :dashboard)
+        (multiple-value-bind (dashboard effect)
+            (dashboard-touch-transition (getf state :dashboard) layout report)
+          (let ((next (copy-list state)))
+            (setf (getf next :dashboard) dashboard)
+            (values next (dashboard-loop-transition-effects effect))))
+        (values (copy-list state) nil))))
+
+(defun dashboard-reduce (state event)
+  (check-type state list)
+  (check-type event list)
+  (case (first event)
+    (:controls (dashboard-reduce-controls state event))
+    (:tick (dashboard-reduce-tick state event))
+    (:touch (dashboard-reduce-touch state event))
+    (otherwise (error "Unknown dashboard event ~S" event))))
+
 (defun apply-dashboard-touch (games state layout report volume-percent presenter)
   (check-type games list)
   (check-type volume-percent (integer 0 100))

@@ -154,6 +154,8 @@
            #:dashboard-wifi-path
            #:dashboard-initial-state
            #:dashboard-launch-plan
+           #:dashboard-loop-initial-state
+           #:dashboard-reduce
            #:dashboard-menu-geometry
            #:dashboard-system-label
            #:dashboard-target-at
