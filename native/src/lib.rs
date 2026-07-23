@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod canvas;
+pub mod controls;
 pub mod fbdev;
 mod font;
 pub mod input;
