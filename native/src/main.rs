@@ -1,5 +1,5 @@
 use retrodeck_native::{
-    audio, canvas, controls, fbdev, input, polling, process, regular_file, wayland,
+    audio, canvas, controls, fbdev, input, network, polling, process, regular_file, wayland,
 };
 use std::env;
 use std::ffi::{CString, OsStr, c_char, c_int, c_void};
@@ -37,7 +37,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 13;
+const ABI_VERSION: ClFixnum = 14;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -293,6 +293,10 @@ impl Ecl {
             (
                 "WAYLAND-DISPATCH",
                 native_wayland_dispatch as EclOneArgumentFunction,
+            ),
+            (
+                "NETWORK-STATUS",
+                native_network_status as EclOneArgumentFunction,
             ),
         ] {
             let name = c_string(name)?;
@@ -598,6 +602,27 @@ unsafe extern "C" fn native_read_regular_file(
         )
     })();
     native_optional_string(result)
+}
+
+unsafe extern "C" fn native_network_status(path: ClObject) -> ClObject {
+    let result: Result<network::NetworkStatus, String> = (|| {
+        Ok(network::read_network_status(&decode_path(
+            path,
+            "network selector status path",
+        )?))
+    })();
+    match result {
+        Ok(status) => make_object_list(&[
+            make_base_string(status.ssid.as_bytes(), "network SSID"),
+            make_base_string(status.wlan_ipv4.as_bytes(), "wlan0 address"),
+            make_base_string(status.wireguard_ipv4.as_bytes(), "wg0 address"),
+            make_base_string(status.selector.as_bytes(), "network selector status"),
+        ]),
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            ECL_NIL
+        }
+    }
 }
 
 unsafe extern "C" fn native_canvas_draw_raster(

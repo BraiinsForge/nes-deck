@@ -24,6 +24,7 @@
            #:fbdev-size
            #:finish-audio
            #:input-poll
+           #:network-status
            #:play-tones
            #:raster-clear
            #:raster-load-cover
@@ -69,6 +70,7 @@
                 #:fbdev-size
                 #:finish-audio
                 #:input-poll
+                #:network-status
                 #:play-tones
                 #:read-regular-file
                 #:run-terminal
@@ -219,6 +221,7 @@
            #:present-wayland-canvas
            #:present-wayland-solid
            #:read-bounded-regular-file
+           #:read-native-network-status
            #:reboot-confirmation-active-p
            #:scan-evdev-controls
            #:run-dashboard-terminal
@@ -253,7 +256,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 13)
+(defconstant +native-abi-version+ 14)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -345,6 +348,19 @@
 
 (defun native-path-string (path)
   (coerce (namestring (pathname path)) 'base-string))
+
+(defun read-native-network-status (selector-status-path)
+  (check-type selector-status-path string)
+  (let ((result (network-status (native-path-string selector-status-path))))
+    (unless (and (listp result)
+                 (= (length result) 4)
+                 (every #'stringp result))
+      (error "Invalid native network status ~S" result))
+    (destructuring-bind (ssid wlan-ipv4 wireguard-ipv4 selector) result
+      (list :ssid ssid
+            :wlan-ipv4 wlan-ipv4
+            :wireguard-ipv4 wireguard-ipv4
+            :selector selector))))
 
 (defun read-bounded-regular-file (path minimum-bytes maximum-bytes)
   (check-type minimum-bytes (and fixnum (integer 0 4194304)))

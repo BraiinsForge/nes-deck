@@ -3,7 +3,7 @@
 (in-package #:retrodeck)
 
 (defun main ()
-  (unless (= (retrodeck.native:abi-version) 13)
+  (unless (= (retrodeck.native:abi-version) 14)
     (error "Native ABI mismatch"))
   (unless (= (retrodeck.native:canvas-clear #x121212) 1)
     (error "Canvas clear callback did not accept one argument"))
@@ -32,6 +32,14 @@
       (error "Missing regular file unexpectedly loaded"))
     (when (retrodeck.native:read-regular-file "@credits@" 1 4194305)
       (error "Regular-file callback accepted an oversized bound"))
+    (let ((network (read-native-network-status "@wifi_status@")))
+      (unless (and (every #'stringp
+                          (list (getf network :ssid)
+                                (getf network :wlan-ipv4)
+                                (getf network :wireguard-ipv4)
+                                (getf network :selector)))
+                   (string= (getf network :selector) "CONNECTED"))
+        (error "Network status crossed the native boundary incorrectly")))
     (let ((mask (load-text-mask "HHHHHHHHHH" 4)))
       (unless mask
         (error "Projected text mask callback did not load text"))

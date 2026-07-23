@@ -30,6 +30,8 @@
 (defparameter *text-mask-clear-count* 0)
 (defparameter *regular-file-result* nil)
 (defparameter *regular-file-arguments* nil)
+(defparameter *network-status-result* '("" "" "" "STATUS UNAVAILABLE"))
+(defparameter *network-status-path* nil)
 (defparameter *canvas-fill-calls* nil)
 (defparameter *canvas-raster-status* 1)
 (defparameter *canvas-raster-arguments* nil)
@@ -105,6 +107,7 @@
            #:fbdev-size
            #:finish-audio
            #:input-poll
+           #:network-status
            #:play-tones
            #:raster-clear
            #:raster-load-cover
@@ -124,7 +127,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 13)
+      (lambda () 14)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () (incf *active-count*) *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -188,6 +191,10 @@
         (lambda (&rest arguments)
           (setf *regular-file-arguments* arguments)
           *regular-file-result*)
+        (symbol-function (find-symbol "NETWORK-STATUS" "RETRODECK.NATIVE"))
+        (lambda (path)
+          (setf *network-status-path* path)
+          *network-status-result*)
         (symbol-function (find-symbol "RUN-TERMINAL" "RETRODECK.NATIVE"))
         (lambda (&rest arguments)
           (setf *terminal-arguments* arguments)
@@ -396,6 +403,21 @@
 (assert (signals-type-error-p
          (lambda ()
            (retrodeck:read-bounded-regular-file "/tmp/x" 1 4194305))))
+
+(setf *network-status-result*
+      '("NET1" "10.0.1.11" "10.0.0.15" "CONNECTED"))
+(assert (equal (retrodeck:read-native-network-status "/tmp/wifi-status")
+               '(:ssid "NET1" :wlan-ipv4 "10.0.1.11"
+                 :wireguard-ipv4 "10.0.0.15" :selector "CONNECTED")))
+(assert (string= *network-status-path* "/tmp/wifi-status"))
+(dolist (invalid '(nil ("" "" "") ("" "" "" 4)))
+  (setf *network-status-result* invalid)
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:read-native-network-status "/tmp/wifi-status")))))
+(assert (signals-type-error-p
+         (lambda () (retrodeck:read-native-network-status 4))))
+(setf *network-status-result* '("" "" "" "STATUS UNAVAILABLE"))
 
 (setf *text-mask-result* 17)
 (assert (= (retrodeck:load-text-mask "HH" 4) 17))

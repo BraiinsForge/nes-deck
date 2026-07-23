@@ -911,8 +911,10 @@
           esac
           EOF
           chmod +x terminal-fixture
+          printf 'CONNECTED\n' > wifi-status
           substitute ${./tests/native_ecl_smoke.lisp.in} smoke.lisp \
             --subst-var-by startup "$PWD/startup.lisp" \
+            --subst-var-by wifi_status "$PWD/wifi-status" \
             --subst-var-by settings_icon "$PWD/settings-icon.png" \
             --subst-var-by terminal_fixture "$PWD/terminal-fixture" \
             --subst-var-by credits ${./deploy/menu/credits.tsv}
