@@ -1,4 +1,4 @@
-use retrodeck_native::{audio, canvas, fbdev, input, process, regular_file, wayland};
+use retrodeck_native::{audio, canvas, controls, fbdev, input, process, regular_file, wayland};
 use std::env;
 use std::ffi::{CString, OsStr, c_char, c_int, c_void};
 use std::mem;
@@ -35,7 +35,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 11;
+const ABI_VERSION: ClFixnum = 12;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -212,6 +212,18 @@ impl Ecl {
                 native_text_mask_clear as EclFixedFunction,
             ),
             (
+                "EVDEV-CONTROLS-SCAN",
+                native_evdev_controls_scan as EclFixedFunction,
+            ),
+            (
+                "EVDEV-CONTROLS-CLOSE",
+                native_evdev_controls_close as EclFixedFunction,
+            ),
+            (
+                "EVDEV-NEXT-CONTROL",
+                native_evdev_next_control as EclFixedFunction,
+            ),
+            (
                 "EVDEV-TOUCH-OPEN",
                 native_evdev_touch_open as EclFixedFunction,
             ),
@@ -258,6 +270,10 @@ impl Ecl {
             (
                 "CANVAS-CLEAR",
                 native_canvas_clear as EclOneArgumentFunction,
+            ),
+            (
+                "EVDEV-CONTROLS-DISPATCH",
+                native_evdev_controls_dispatch as EclOneArgumentFunction,
             ),
             (
                 "EVDEV-TOUCH-DISPATCH",
@@ -598,6 +614,48 @@ unsafe extern "C" fn native_canvas_draw_raster(
         )
     })();
     native_status(result)
+}
+
+unsafe extern "C" fn native_evdev_controls_scan() -> ClObject {
+    match controls::scan() {
+        Ok((gamepads, keyboards)) => {
+            make_fixnum_list(&[gamepads as ClFixnum, keyboards as ClFixnum])
+        }
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            ECL_NIL
+        }
+    }
+}
+
+unsafe extern "C" fn native_evdev_controls_close() -> ClObject {
+    controls::close();
+    unsafe { ecl_make_integer(0) }
+}
+
+unsafe extern "C" fn native_evdev_controls_dispatch(timeout_ms: ClObject) -> ClObject {
+    let result = (|| {
+        let timeout_ms = decode_u32(timeout_ms, "evdev controls dispatch timeout")?;
+        controls::dispatch(timeout_ms)
+    })();
+    match result {
+        Ok((count, rescan)) => make_fixnum_list(&[count as ClFixnum, boolean_fixnum(rescan)]),
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            ECL_NIL
+        }
+    }
+}
+
+unsafe extern "C" fn native_evdev_next_control() -> ClObject {
+    let Some(report) = controls::next_report() else {
+        return ECL_NIL;
+    };
+    make_fixnum_list(&[
+        report.kind as ClFixnum,
+        report.value as ClFixnum,
+        report.flags as ClFixnum,
+    ])
 }
 
 unsafe extern "C" fn native_evdev_touch_open() -> ClObject {

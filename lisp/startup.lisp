@@ -9,6 +9,10 @@
            #:canvas-draw-raster
            #:canvas-fill-rect
            #:canvas-rgb565-hash-words
+           #:evdev-controls-close
+           #:evdev-controls-dispatch
+           #:evdev-controls-scan
+           #:evdev-next-control
            #:evdev-next-touch
            #:evdev-touch-close
            #:evdev-touch-dispatch
@@ -49,6 +53,10 @@
                 #:canvas-draw-raster
                 #:canvas-fill-rect
                 #:canvas-rgb565-hash-words
+                #:evdev-controls-close
+                #:evdev-controls-dispatch
+                #:evdev-controls-scan
+                #:evdev-next-control
                 #:evdev-next-touch
                 #:evdev-touch-close
                 #:evdev-touch-dispatch
@@ -112,6 +120,7 @@
            #:clear-credits-text-mask-cache
            #:clear-text-mask-cache
            #:configure-text-projection
+           #:close-evdev-controls
            #:close-evdev-touch
            #:close-fbdev
            #:close-wayland
@@ -143,6 +152,7 @@
            #:dashboard-terminal-title
            #:dashboard-timing
            #:dashboard-touch-transition
+           #:dispatch-evdev-controls
            #:dispatch-evdev-touch
            #:dispatch-wayland
            #:display-ascii
@@ -166,6 +176,7 @@
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
            #:menu-sound-notes
+           #:next-evdev-control
            #:next-evdev-touch
            #:next-wayland-touch
            #:open-evdev-touch
@@ -180,6 +191,7 @@
            #:present-wayland-solid
            #:read-bounded-regular-file
            #:reboot-confirmation-active-p
+           #:scan-evdev-controls
            #:run-dashboard-terminal
            #:render-dashboard
            #:render-dashboard-settings
@@ -211,7 +223,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 11)
+(defconstant +native-abi-version+ 12)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -370,6 +382,54 @@
   (when report
     (destructuring-bind (x y down pressed released) report
       (list x y (plusp down) (plusp pressed) (plusp released)))))
+
+(defun scan-evdev-controls ()
+  (let ((counts (evdev-controls-scan)))
+    (when counts
+      (unless (and (listp counts)
+                   (= (length counts) 2)
+                   (typep (first counts) '(integer 0 2))
+                   (typep (second counts) '(integer 0 4)))
+        (error "Invalid native evdev control counts ~S" counts))
+      (list :gamepads (first counts) :keyboards (second counts)))))
+
+(defun close-evdev-controls ()
+  (evdev-controls-close)
+  t)
+
+(defun dispatch-evdev-controls (&optional (timeout-ms 0))
+  (check-type timeout-ms (integer 0 4294967295))
+  (let ((result (evdev-controls-dispatch timeout-ms)))
+    (when result
+      (unless (and (listp result)
+                   (= (length result) 2)
+                   (typep (first result) '(integer 0 64))
+                   (member (second result) '(0 1)))
+        (error "Invalid native evdev dispatch result ~S" result))
+      (list :count (first result) :rescan (plusp (second result))))))
+
+(defun next-evdev-control ()
+  (let ((report (evdev-next-control)))
+    (when report
+      (unless (and (listp report)
+                   (= (length report) 3)
+                   (every #'integerp report))
+        (error "Invalid native evdev control report ~S" report))
+      (destructuring-bind (kind value flags) report
+        (case kind
+          (0
+           (unless (and (typep value '(integer 0 65535))
+                        (typep flags '(integer 0 3)))
+             (error "Invalid native keyboard report ~S" report))
+           (list :kind :keyboard :code value
+                 :shift (logbitp 0 flags)
+                 :repeat (logbitp 1 flags)))
+          (1
+           (unless (and (typep value '(integer 1 4095)) (zerop flags))
+             (error "Invalid native gamepad report ~S" report))
+           (list :kind :gamepad :edges value))
+          (otherwise
+           (error "Unknown native evdev control report ~S" report)))))))
 
 (defun open-evdev-touch ()
   (= (evdev-touch-open) 1))

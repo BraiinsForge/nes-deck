@@ -40,6 +40,11 @@
 (defparameter *raster-png-result* 0)
 (defparameter *raster-png-arguments* nil)
 (defparameter *raster-png-calls* nil)
+(defparameter *evdev-controls-scan-result* '(0 0))
+(defparameter *evdev-controls-close-count* 0)
+(defparameter *evdev-controls-dispatch-result* '(0 0))
+(defparameter *evdev-controls-dispatch-timeout* nil)
+(defparameter *evdev-control* nil)
 (defparameter *evdev-open-status* 1)
 (defparameter *evdev-close-count* 0)
 (defparameter *evdev-dispatch-result* 0)
@@ -75,6 +80,10 @@
            #:canvas-draw-raster
            #:canvas-fill-rect
            #:canvas-rgb565-hash-words
+           #:evdev-controls-close
+           #:evdev-controls-dispatch
+           #:evdev-controls-scan
+           #:evdev-next-control
            #:evdev-next-touch
            #:evdev-touch-close
            #:evdev-touch-dispatch
@@ -104,7 +113,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 11)
+      (lambda () 12)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -179,7 +188,18 @@
           (setf *text-mask-arguments* arguments)
           (push arguments *text-mask-calls*)
           *text-mask-result*)
-        (symbol-function (find-symbol "EVDEV-TOUCH-OPEN" "RETRODECK.NATIVE"))
+        (symbol-function (find-symbol "EVDEV-CONTROLS-SCAN" "RETRODECK.NATIVE"))
+         (lambda () *evdev-controls-scan-result*)
+         (symbol-function (find-symbol "EVDEV-CONTROLS-CLOSE" "RETRODECK.NATIVE"))
+         (lambda () (incf *evdev-controls-close-count*) 0)
+         (symbol-function (find-symbol "EVDEV-CONTROLS-DISPATCH"
+                                       "RETRODECK.NATIVE"))
+         (lambda (timeout-ms)
+           (setf *evdev-controls-dispatch-timeout* timeout-ms)
+           *evdev-controls-dispatch-result*)
+         (symbol-function (find-symbol "EVDEV-NEXT-CONTROL" "RETRODECK.NATIVE"))
+         (lambda () *evdev-control*)
+         (symbol-function (find-symbol "EVDEV-TOUCH-OPEN" "RETRODECK.NATIVE"))
          (lambda () *evdev-open-status*)
          (symbol-function (find-symbol "EVDEV-TOUCH-CLOSE" "RETRODECK.NATIVE"))
          (lambda () (incf *evdev-close-count*) 0)
@@ -1046,6 +1066,32 @@ secret!9
   (assert (not (member '(578 190 124 144 #x5f87ff) *canvas-fill-calls*
                        :test #'equal))))
 (setf *raster-cover-result* 0)
+
+(setf *evdev-controls-scan-result* '(2 3)
+      *evdev-controls-dispatch-result* '(2 1)
+      *evdev-control* '(0 15 1))
+(assert (equal (retrodeck:scan-evdev-controls)
+               '(:gamepads 2 :keyboards 3)))
+(assert (equal (retrodeck:dispatch-evdev-controls 25)
+               '(:count 2 :rescan t)))
+(assert (= *evdev-controls-dispatch-timeout* 25))
+(assert (equal (retrodeck:next-evdev-control)
+               '(:kind :keyboard :code 15 :shift t :repeat nil)))
+(setf *evdev-control* '(1 #x501 0))
+(assert (equal (retrodeck:next-evdev-control)
+               '(:kind :gamepad :edges #x501)))
+(setf *evdev-control* nil)
+(assert (null (retrodeck:next-evdev-control)))
+(assert (retrodeck:close-evdev-controls))
+(assert (= *evdev-controls-close-count* 1))
+(setf *evdev-controls-scan-result* '(3 0))
+(assert (signals-error-p #'retrodeck:scan-evdev-controls))
+(setf *evdev-controls-scan-result* nil
+      *evdev-controls-dispatch-result* nil)
+(assert (null (retrodeck:scan-evdev-controls)))
+(assert (null (retrodeck:dispatch-evdev-controls)))
+(assert (signals-type-error-p
+         (lambda () (retrodeck:dispatch-evdev-controls #x100000000))))
 
 (setf *evdev-touch* '(17 23 1 1 0)
       *evdev-dispatch-result* 3)
