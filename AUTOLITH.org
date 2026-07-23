@@ -1,0 +1,68 @@
+#+title: Autolith project adaptations
+
+* Purpose
+
+This voluntary file records reusable ways Autolith adapts its workflow to this
+project. It supplements AGENTS.md and never overrides repository policy, user
+instructions, or capability boundaries. It contains documentation, not
+executable Lisp.
+
+* Project profile
+
+RetroDeck is an exact migration, not a redesign. The C++ dashboard remains the
+authoritative running product until the Rust and Common Lisp replacement passes
+host, ARM/ECL, and physical Deck parity. Common Lisp owns policy and sequencing;
+Rust remains a thin native mechanism layer. RETRODECK:MAIN stays unchanged until
+explicitly approved.
+
+Repository work uses small imperative title-only commits and an immediate push.
+Stage exact paths so owner-supplied ROMs, firmware images, and unrelated work are
+never swept into a migration commit.
+
+* Active adaptations
+
+** Split focused Lisp iteration from integration checks
+
+- Problem: A persistent Lisp worker speeds focused iteration but retained
+  packages or definitions can hide startup and load-order defects.
+- Behavior: Use a named isolated =lisp.*= worker for exploratory loads and
+  assertions. Confirm checked-in Lisp with a fresh
+  =sbcl --noinform --disable-debugger --script tests/lisp_policy_test.lisp=
+  process and the repository host suite before committing.
+- Scope and location: Tracked project workflow note in this file. No active-image
+  mutation.
+- Verification: Both paths have exercised the dashboard reducer; the fresh
+  script and complete host suite pass.
+- Removal condition: Remove when the project replaces these entry points or no
+  longer supports host SBCL testing.
+
+** Use component working directories for direct tool checks
+
+- Problem: The Rust crate lives under =native/=, so root-level =cargo= commands
+  fail before checking code.
+- Behavior: Run direct =cargo check --locked --all-targets= and
+  =cargo test --locked= from =native/=; run flake and repository scripts from
+  the repository root.
+- Scope and location: Tracked project workflow note in this file. No active-image
+  mutation.
+- Verification: Cargo, flake, host, and ARM checks pass with these boundaries.
+- Removal condition: Remove if a workspace-level Cargo manifest is added.
+
+** Keep Deck fixtures non-authoritative and reversible
+
+- Problem: Migration fixtures must exercise installed ARM/ECL code without
+  displacing or perturbing the working C++ dashboard.
+- Behavior: Use alternate temporary startup files, simulated effect completions,
+  and in-memory canvas rendering unless a supervised physical test explicitly
+  requires display or input ownership. Verify the dashboard PID and run
+  =ops/check-deck.sh= afterward.
+- Scope and location: Tracked project workflow note in this file. No device-local
+  persistent override or active-image mutation.
+- Verification: The installed two-phase loop fixture completed while the C++
+  dashboard retained its PID and the Deck health check stayed healthy.
+- Removal condition: Remove after the Lisp runtime becomes the approved
+  authoritative dashboard.
+
+* Candidates
+
+None.
