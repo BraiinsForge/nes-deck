@@ -58,7 +58,8 @@
     :passphrase-minimum 8 :passphrase-maximum 63))
 
 (defparameter *dashboard-wifi-paths*
-  '(:profile-helper "/usr/sbin/deck-wifi-profile-add"))
+  '(:profile-helper "/usr/sbin/deck-wifi-profile-add"
+    :selector-status "/var/run/deck-wifi/status"))
 
 (defun dashboard-wifi-value (values name description)
   (let ((missing (gensym)))

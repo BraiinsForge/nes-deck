@@ -895,6 +895,8 @@
 (assert (= (retrodeck:dashboard-wifi-limit :passphrase-maximum) 63))
 (assert (string= (retrodeck:dashboard-wifi-path :profile-helper)
                  "/usr/sbin/deck-wifi-profile-add"))
+(assert (string= (retrodeck:dashboard-wifi-path :selector-status)
+                 "/var/run/deck-wifi/status"))
 (assert (string= (retrodeck:wifi-tail-for-field "short" 19) "short"))
 (assert (string= (retrodeck:wifi-tail-for-field "123456789" 5) "...89"))
 (assert (string= (retrodeck:wifi-tail-for-field "123456789" 3) "789"))
@@ -2715,10 +2717,26 @@ secret!9
        (*evdev-touch* nil)
        (*evdev-touch-queue* nil)
        (*input-poll-result* '(1 3 2 1 1 0))
-       (*input-poll-arguments* nil))
+       (*input-poll-arguments* nil)
+       (*network-status-result*
+         '("NET1" "10.0.1.11" "10.0.0.15" "CONNECTED"))
+       (*network-status-path* nil))
   (multiple-value-bind (initialized ignored-runtime)
       (retrodeck:dashboard-runtime-initialize state runtime 90)
     (declare (ignore ignored-runtime))
+    (assert (equal (getf initialized :network)
+                   '(:ssid "NET1" :wlan-ipv4 "10.0.1.11"
+                     :wireguard-ipv4 "10.0.0.15" :selector "CONNECTED")))
+    (assert (string= *network-status-path* "/var/run/deck-wifi/status"))
+    (setf *network-status-result*
+          '("NET2" "10.0.1.12" "10.0.0.16" "RECOVERING"))
+    (assert
+     (equal
+      (retrodeck::dashboard-runtime-handle-effect
+       runtime '(:network-action) initialized)
+      '(:network-result :network
+        (:ssid "NET2" :wlan-ipv4 "10.0.1.12"
+         :wireguard-ipv4 "10.0.0.16" :selector "RECOVERING"))))
     (setf *evdev-controls* '((1 #x224 0) (0 15 1) (0 106 2))
           *evdev-touch-queue* '((10 20 1 1 0) (11 21 0 0 1)))
     (let ((snapshot (retrodeck:dashboard-runtime-poll-input runtime 250)))
@@ -2933,10 +2951,12 @@ secret!9
        (*evdev-open-status* 1)
        (*evdev-close-count* 0)
        (*evdev-controls-scan-result* '(0 0))
-       (*evdev-controls-close-count* 0))
+       (*evdev-controls-close-count* 0)
+       (*network-status-path* nil))
   (multiple-value-bind (initialized ignored-runtime)
       (retrodeck:dashboard-runtime-initialize state runtime 55)
     (declare (ignore ignored-runtime))
+    (assert (null *network-status-path*))
     (assert (not (getf runtime :presentation-owned-p)))
     (assert (signals-error-p
              (lambda ()

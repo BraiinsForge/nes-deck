@@ -1320,15 +1320,18 @@
     (&key wayland
           adopt-presentation
           (volume-state (dashboard-settings-path :volume-state))
+          (network-status-path (dashboard-wifi-path :selector-status))
           external-effect-handler
           (clock #'monotonic-ms))
   (check-type volume-state string)
+  (check-type network-status-path string)
   (when external-effect-handler
     (check-type external-effect-handler function))
   (check-type clock function)
   (list :wayland (not (null wayland))
         :adopt-presentation (not (null adopt-presentation))
         :volume-state volume-state
+        :network-status-path network-status-path
         :external-effect-handler external-effect-handler
         :clock clock
         :layout nil
@@ -1436,9 +1439,13 @@
 
 (defun dashboard-runtime-external-effect (runtime effect state)
   (let ((handler (getf runtime :external-effect-handler)))
-    (unless handler
-      (error "Dashboard runtime cannot handle effect ~S" effect))
-    (funcall handler effect state)))
+    (cond
+      (handler (funcall handler effect state))
+      ((eq (first effect) :network-action)
+       (list :network-result :network
+             (read-native-network-status
+              (getf runtime :network-status-path))))
+      (t (error "Dashboard runtime cannot handle effect ~S" effect)))))
 
 (defun dashboard-runtime-handle-effect (runtime effect state)
   (check-type runtime list)
@@ -1529,21 +1536,18 @@
     (otherwise (error "Unknown dashboard runtime effect ~S" effect))))
 
 (defun dashboard-runtime-initialize-network (state runtime now)
-  (let ((next (copy-list state)))
-    (setf (getf next :network-refreshed-at) now)
-    (if (not (getf runtime :external-effect-handler))
-        next
-        (let ((pending (copy-list next)))
-          (setf (getf pending :pending-network) t)
-          (let ((completion
-                  (dashboard-runtime-external-effect
-                   runtime '(:network-action) pending)))
-            (unless completion
-              (error "Dashboard startup network read returned no result"))
-            (multiple-value-bind (refreshed effects)
-                (dashboard-reduce pending completion)
-              (declare (ignore effects))
-              refreshed))))))
+  (let ((pending (copy-list state)))
+    (setf (getf pending :network-refreshed-at) now
+          (getf pending :pending-network) t)
+    (let ((completion
+            (dashboard-runtime-external-effect
+             runtime '(:network-action) pending)))
+      (unless completion
+        (error "Dashboard startup network read returned no result"))
+      (multiple-value-bind (refreshed effects)
+          (dashboard-reduce pending completion)
+        (declare (ignore effects))
+        refreshed))))
 
 (defun dashboard-runtime-initialize (state runtime now)
   (check-type state list)
