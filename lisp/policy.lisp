@@ -95,6 +95,7 @@
     (:controller-burst-window-ms . 1000)
     (:controller-quiet-reset-ms . 1000)
     (:controller-scan-ms . 1000)
+    (:touch-reconnect-ms . 1000)
     (:main-poll-ms . 250)
     (:animated-poll-ms . 40)
     (:network-refresh-ms . 2000)

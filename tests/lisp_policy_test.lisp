@@ -1351,6 +1351,7 @@ secret!9
                  (:controller-burst-window-ms . 1000)
                  (:controller-quiet-reset-ms . 1000)
                  (:controller-scan-ms . 1000)
+                 (:touch-reconnect-ms . 1000)
                  (:main-poll-ms . 250)
                  (:animated-poll-ms . 40)
                  (:network-refresh-ms . 2000)
@@ -1806,16 +1807,20 @@ secret!9
 
   (let ((suspended (copy-list state)))
     (setf (getf suspended :controller-guard)
-          '(:edge-times (0) :suspended t :last-edge-at 100))
+          '(:edge-times (0) :suspended t :last-edge-at 100)
+          (getf suspended :last-control-scan-ms) 1000)
     (multiple-value-bind (waiting effects)
-        (retrodeck:dashboard-reduce suspended '(:tick :now 1099))
+        (retrodeck:dashboard-reduce
+         suspended '(:begin-iteration :now 1099 :wayland t))
       (assert (getf (getf waiting :controller-guard) :suspended))
-      (assert (null effects)))
+      (assert (equal effects '((:reap-sound)))))
     (multiple-value-bind (recovered effects)
-        (retrodeck:dashboard-reduce suspended '(:tick :now 1100))
+        (retrodeck:dashboard-reduce
+         suspended '(:begin-iteration :now 1100 :wayland t))
       (assert (equal (getf recovered :controller-guard)
                      '(:edge-times nil :suspended nil :last-edge-at nil)))
-      (assert (equal effects '((:controller-resumed))))))
+      (assert (equal effects
+                     '((:reap-sound) (:controller-resumed))))))
 
   (multiple-value-bind (next effects)
       (retrodeck:dashboard-reduce
@@ -2251,5 +2256,344 @@ secret!9
             (declare (ignore ignored))
             (assert (string= (getf (getf stopped :dashboard) :status)
                              "ALPHA STOPPED (SIGNAL 15)"))))))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")
+                (:id "beta" :title "BETA" :system :nes
+                 :color #xafd75f :rom "/tmp/beta.nes")))
+       (state (retrodeck:dashboard-loop-initial-state games))
+       (layout (retrodeck:render-dashboard games :nes 0 ""))
+       (now 3000))
+  (labels ((current-layout () layout)
+           (handle-effect (effect current)
+             (when (eq (first effect) :render)
+               (setf layout (retrodeck:render-dashboard-loop-state current now)))
+             nil))
+    (multiple-value-bind (next trace)
+        (retrodeck:dashboard-loop-dispatch-input
+         state
+         '(:gamepad-actions (:right) :keyboard-actions nil
+           :touch-reports ((1220 420 t t nil) (1220 420 nil nil t))
+           :now 3000 :controller-quarantined-p nil)
+         #'current-layout #'handle-effect)
+      (assert (= (getf (getf next :dashboard) :game-position) 1))
+      (assert (eq (getf next :view) :dashboard))
+      (assert (equal trace
+                     '((:discard-touch) (:render) (:present) (:cue :next))))))
+
+  (setf state (retrodeck:dashboard-loop-initial-state games)
+        layout (retrodeck:render-dashboard games :nes 0 ""))
+  (labels ((current-layout () layout)
+           (handle-effect (effect current)
+             (when (eq (first effect) :render)
+               (setf layout (retrodeck:render-dashboard-loop-state current now)))
+             nil))
+    (multiple-value-bind (next trace)
+        (retrodeck:dashboard-loop-dispatch-input
+         state
+         '(:gamepad-actions nil :keyboard-actions nil
+           :touch-reports ((1220 420 t t nil) (1220 420 nil nil t)
+                           (1000 50 t t nil) (1000 50 nil nil t))
+           :touch-times (3010 3011 3012 3013)
+           :now 3010 :controller-quarantined-p nil)
+         #'current-layout #'handle-effect)
+      (assert (eq (getf next :view) :wifi))
+      (assert (equal trace
+                     '((:render) (:present) (:cue :confirm)
+                       (:render) (:present) (:cue :confirm))))))
+
+  (setf state (retrodeck:dashboard-loop-initial-state games)
+        layout (retrodeck:render-dashboard games :nes 0 ""))
+  (labels ((current-layout () layout)
+           (handle-effect (effect current)
+             (case (first effect)
+               (:render
+                (setf layout
+                      (retrodeck:render-dashboard-loop-state current now))
+                nil)
+               (:launch
+                '(:child-returned
+                  :result (:started t :exited-for-touch nil
+                           :exit-code 0 :signal nil :error nil)))
+               (:scan-controls '(:controls-rescanned :now 3020))
+               (:open-presentation '(:presentation-opened))
+               (:reload-volume '(:child-complete :volume 47))
+               (otherwise nil))))
+    (multiple-value-bind (next trace)
+        (retrodeck:dashboard-loop-dispatch-input
+         state
+         '(:gamepad-actions (:confirm) :keyboard-actions nil
+           :touch-reports ((1220 420 t t nil) (1220 420 nil nil t))
+           :now 3020 :controller-quarantined-p nil :wayland t
+           :volume-state "/tmp/volume.state")
+         #'current-layout #'handle-effect)
+      (assert (eq (getf next :view) :dashboard))
+      (assert (null (getf next :active-launch)))
+      (assert (= (getf (getf next :settings) :volume) 47))
+      (assert (= (getf next :last-control-scan-ms) 3020))
+      (assert (string= (getf (getf next :dashboard) :status)
+                       "ALPHA EXITED"))
+      (assert (equal (mapcar #'first trace)
+                     '(:discard-touch :cue :render :present :finish-sound
+                       :close-controls :launch :scan-controls
+                       :open-presentation :reload-volume :render :present))))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")
+                (:id "beta" :title "BETA" :system :nes
+                 :color #xafd75f :rom "/tmp/beta.nes")))
+       (state (retrodeck:dashboard-loop-initial-state
+               games :now 1000 :touch-connected-p nil))
+       (layout (retrodeck:render-dashboard games :nes 0 ""))
+       (now 1100))
+  (setf (getf state :controller-guard)
+        '(:edge-times (0) :suspended t :last-edge-at 100)
+        (getf state :last-control-scan-ms) 0
+        (getf state :last-touch-reconnect-ms) 100)
+  (labels ((current-layout () layout)
+           (handle-effect (effect current)
+             (case (first effect)
+               (:render
+                (setf layout
+                      (retrodeck:render-dashboard-loop-state current now))
+                nil)
+               (:reconnect-touch '(:touch-reconnected))
+               (:scan-controls (list :controls-rescanned :now now))
+               (otherwise nil))))
+    (multiple-value-bind (started trace)
+        (retrodeck:dashboard-loop-begin-iteration
+         state '(:now 1100 :wayland nil) #'handle-effect)
+      (assert (equal trace
+                     '((:reap-sound) (:controller-resumed)
+                       (:reconnect-touch) (:render) (:present)
+                       (:scan-controls :force nil))))
+      (assert (not (getf (getf started :controller-guard) :suspended)))
+      (assert (getf started :touch-connected-p))
+      (assert (= (getf started :last-touch-reconnect-ms) 1100))
+      (assert (= (getf started :last-control-scan-ms) 1100))
+      (assert (string= (getf (getf started :dashboard) :status)
+                       "TOUCHSCREEN RECONNECTED"))
+      (multiple-value-bind (moved input-trace)
+          (retrodeck:dashboard-loop-dispatch-input
+           started
+           '(:gamepad-actions (:right) :keyboard-actions nil
+             :touch-reports nil :now 1101
+             :controller-quarantined-p nil)
+           #'current-layout #'handle-effect)
+        (assert (= (getf (getf moved :dashboard) :game-position) 1))
+        (assert (equal input-trace
+                       '((:discard-touch) (:render) (:present)
+                         (:cue :next))))))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")
+                (:id "beta" :title "BETA" :system :nes
+                 :color #xafd75f :rom "/tmp/beta.nes")))
+       (state (retrodeck:dashboard-loop-initial-state games :now 1000))
+       (layout (retrodeck:render-dashboard games :nes 0 "")))
+  (setf (getf state :controller-guard)
+        '(:edge-times (0) :suspended t :last-edge-at 100)
+        (getf state :last-control-scan-ms) 1000)
+  (multiple-value-bind (waiting begin-trace)
+      (retrodeck:dashboard-loop-begin-iteration
+       state '(:now 1099 :wayland t) (lambda (effect current)
+                                      (declare (ignore effect current))))
+    (assert (equal begin-trace '((:reap-sound))))
+    (multiple-value-bind (blocked input-trace)
+        (retrodeck:dashboard-loop-dispatch-input
+         waiting
+         '(:gamepad-actions (:right) :keyboard-actions nil
+           :touch-reports nil :now 1100 :controller-quarantined-p nil)
+         (lambda () layout)
+         (lambda (effect current) (declare (ignore effect current))))
+      (assert (null input-trace))
+      (assert (zerop (getf (getf blocked :dashboard) :game-position)))
+      (assert (getf (getf blocked :controller-guard) :suspended))
+      (assert (= (getf (getf blocked :controller-guard) :last-edge-at)
+                 1100)))))
+
+(let ((state (retrodeck:dashboard-loop-initial-state nil :now 5000)))
+  (setf (getf state :last-control-scan-ms) 5000)
+  (flet ((ignore-effect (effect current)
+           (declare (ignore effect current))))
+    (multiple-value-bind (waiting trace)
+        (retrodeck:dashboard-loop-begin-iteration
+         state '(:now 5999 :wayland t) #'ignore-effect)
+      (assert (equal trace '((:reap-sound))))
+      (assert (= (getf waiting :last-control-scan-ms) 5000))
+      (multiple-value-bind (due due-trace)
+          (retrodeck:dashboard-loop-begin-iteration
+           waiting '(:now 6000 :wayland t) #'ignore-effect)
+        (assert (equal due-trace
+                       '((:reap-sound) (:scan-controls :force nil))))
+        (assert (= (getf due :last-control-scan-ms) 6000))
+        (multiple-value-bind (rescanned rescan-trace)
+            (retrodeck:dashboard-loop-begin-iteration
+             due '(:now 6001 :wayland t :rescan-controls-p t)
+             #'ignore-effect)
+          (assert (equal rescan-trace
+                         '((:reap-sound) (:scan-controls :force t))))
+          (multiple-value-bind (forced force-trace)
+              (retrodeck:dashboard-loop-begin-iteration
+               rescanned
+               '(:now 6002 :wayland t :force-control-scan-p t)
+               #'ignore-effect)
+            (assert (equal force-trace
+                           '((:reap-sound)
+                             (:scan-controls :force t))))
+            (assert (= (getf forced :last-control-scan-ms) 6002))))))))
+
+(let ((state (retrodeck:dashboard-loop-initial-state
+              nil :now 9000 :touch-connected-p nil)))
+  (setf (getf state :last-touch-reconnect-ms) 9000
+        (getf state :last-control-scan-ms) 9999)
+  (flet ((ignore-effect (effect current)
+           (declare (ignore effect current))))
+    (multiple-value-bind (failed failed-trace)
+        (retrodeck:dashboard-loop-begin-iteration
+         state '(:now 10000 :wayland nil) #'ignore-effect)
+      (assert (equal failed-trace
+                     '((:reap-sound) (:reconnect-touch))))
+      (assert (not (getf failed :touch-connected-p)))
+      (assert (= (getf failed :last-touch-reconnect-ms) 10000))
+      (multiple-value-bind (throttled throttled-trace)
+          (retrodeck:dashboard-loop-begin-iteration
+           failed '(:now 10999 :wayland nil) #'ignore-effect)
+        (assert (not (find :reconnect-touch throttled-trace :key #'first)))
+        (multiple-value-bind (restored restored-trace)
+            (retrodeck:dashboard-loop-begin-iteration
+             throttled '(:now 11000 :wayland nil)
+             (lambda (effect current)
+               (declare (ignore current))
+               (and (eq (first effect) :reconnect-touch)
+                    '(:touch-reconnected))))
+          (assert (equal restored-trace
+                         '((:reap-sound) (:reconnect-touch)
+                           (:render) (:present))))
+          (assert (getf restored :touch-connected-p)))))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+       (state (retrodeck:dashboard-loop-initial-state games :now 7000))
+       (layout (retrodeck:render-dashboard games :nes 0 "")))
+  (labels ((current-layout () layout)
+           (handle-effect (effect current)
+             (when (eq (first effect) :render)
+               (setf layout
+                     (retrodeck:render-dashboard-loop-state current 7001)))
+             nil))
+    (multiple-value-bind (pressed press-trace)
+        (retrodeck:dashboard-loop-dispatch-input
+         state
+         '(:gamepad-actions nil :keyboard-actions nil
+           :touch-reports ((1220 420 t t nil)) :now 7000
+           :controller-quarantined-p nil)
+         #'current-layout #'handle-effect)
+      (assert (null press-trace))
+      (assert (eq (getf (getf pressed :dashboard) :pressed-target)
+                  :settings))
+      (multiple-value-bind (lost lost-trace)
+          (retrodeck:dashboard-loop-dispatch-input
+           pressed
+           '(:gamepad-actions nil :keyboard-actions nil
+             :touch-reports ((1220 420 nil nil t)) :touch-lost-p t
+             :now 7001 :controller-quarantined-p nil)
+           #'current-layout #'handle-effect)
+        (assert (eq (getf lost :view) :dashboard))
+        (assert (null (getf (getf lost :dashboard) :pressed-target)))
+        (assert (not (getf lost :touch-connected-p)))
+        (assert (string= (getf (getf lost :dashboard) :status)
+                         "WAITING FOR TOUCHSCREEN"))
+        (assert (equal lost-trace '((:render) (:present))))))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")
+                (:id "beta" :title "BETA" :system :nes
+                 :color #xafd75f :rom "/tmp/beta.nes")))
+       (state (retrodeck:dashboard-loop-initial-state games :now 7100))
+       (layout (retrodeck:render-dashboard games :nes 0 ""))
+       (rendered-statuses nil))
+  (labels ((current-layout () layout)
+           (handle-effect (effect current)
+             (when (eq (first effect) :render)
+               (push (getf (getf current :dashboard) :status)
+                     rendered-statuses)
+               (setf layout
+                     (retrodeck:render-dashboard-loop-state current 7101)))
+             nil))
+    (multiple-value-bind (pressed ignored)
+        (retrodeck:dashboard-loop-dispatch-input
+         state
+         '(:gamepad-actions nil :keyboard-actions nil
+           :touch-reports ((1220 420 t t nil)) :now 7100
+           :controller-quarantined-p nil)
+         #'current-layout #'handle-effect)
+      (declare (ignore ignored))
+      (multiple-value-bind (moved trace)
+          (retrodeck:dashboard-loop-dispatch-input
+           pressed
+           '(:gamepad-actions (:right) :keyboard-actions nil
+             :touch-reports ((1220 420 nil nil t)) :touch-lost-p t
+             :now 7101 :controller-quarantined-p nil)
+           #'current-layout #'handle-effect)
+        (assert (= (getf (getf moved :dashboard) :game-position) 1))
+        (assert (eq (getf moved :view) :dashboard))
+        (assert (not (getf moved :touch-connected-p)))
+        (assert (equal (nreverse rendered-statuses)
+                       '("WAITING FOR TOUCHSCREEN" "")))
+        (assert (equal trace
+                       '((:render) (:present) (:discard-touch)
+                         (:render) (:present) (:cue :next))))))))
+
+(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
+                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+       (network '(:ssid "LAB" :wlan-ipv4 "10.0.0.2"
+                  :wireguard-ipv4 "10.8.0.2" :selector "1"))
+       (state (retrodeck:dashboard-loop-initial-state games :now 1000))
+       (settings (copy-list (getf state :settings)))
+       (layout nil)
+       (rendered-networks nil))
+  (setf (getf state :view) :settings
+        (getf settings :open) t
+        (getf state :settings) settings
+        layout (retrodeck:render-dashboard-loop-state state 3000))
+  (labels ((current-layout () layout)
+           (handle-effect (effect current)
+             (case (first effect)
+               (:network-action
+                (list :network-result :network network))
+               (:render
+                (push (copy-tree (getf current :network)) rendered-networks)
+                (setf layout
+                      (retrodeck:render-dashboard-loop-state current 3000))
+                nil)
+               (otherwise nil))))
+    (multiple-value-bind (next trace)
+        (retrodeck:dashboard-loop-dispatch-input
+         state
+         '(:gamepad-actions (:right) :keyboard-actions nil
+           :touch-reports nil :tick-now 3000 :now 3001
+           :controller-quarantined-p nil)
+         #'current-layout #'handle-effect)
+      (assert (equal (getf next :network) network))
+      (assert (eq (getf (getf next :settings) :selected) :volume-up))
+      (assert (equal (nreverse rendered-networks) (list network network)))
+      (assert (equal trace
+                     '((:network-action) (:render) (:present)
+                       (:discard-touch) (:render) (:present)
+                       (:cue :next)))))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 8000))
+       (layout-reads 0))
+  (setf (getf state :view) :credits
+        (getf state :credits-started-at) 8000)
+  (multiple-value-bind (animated trace)
+      (retrodeck:dashboard-loop-dispatch-input
+       state '(:now 8040 :poll-ready-p nil)
+       (lambda () (incf layout-reads) nil)
+       (lambda (effect current) (declare (ignore effect current))))
+    (assert (eq (getf animated :view) :credits))
+    (assert (zerop layout-reads))
+    (assert (equal trace '((:render) (:present))))))
 
 (format t "Lisp policy tests passed.~%")

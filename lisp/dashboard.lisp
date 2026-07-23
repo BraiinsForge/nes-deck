@@ -460,7 +460,7 @@
                 (brightness 100) (keymap "us") (network nil)
                 (wifi-state (wifi-initial-state))
                 (credits-state (credits-initial-state)) credits-crawl
-                reduced-motion (now 0))
+                reduced-motion (now 0) (touch-connected-p t))
   (check-type games list)
   (check-type network list)
   (check-type now (integer 0 *))
@@ -482,6 +482,8 @@
           :reduced-motion (not (null reduced-motion))
           :controller-guard (dashboard-controller-guard-initial-state)
           :last-control-scan-ms nil
+          :touch-connected-p (not (null touch-connected-p))
+          :last-touch-reconnect-ms 0
           :network-refreshed-at now
           :reboot-deadline 0
           :pending-launch nil
@@ -725,34 +727,67 @@
                       (append prefix '((:discard-touch)) effects)))
             (values next prefix)))))))
 
-(defun dashboard-reduce-tick (state event)
-  (let ((now (getf (rest event) :now)))
+(defun dashboard-loop-recover-controller (state now)
+  (multiple-value-bind (guard recovered)
+      (dashboard-controller-guard-recover-if-quiet
+       (getf state :controller-guard) now)
+    (let ((next (copy-list state)))
+      (setf (getf next :controller-guard) guard)
+      (values next (and recovered '((:controller-resumed)))))))
+
+(defun dashboard-loop-touch-reconnect-due-p (state now)
+  (let ((last-attempt (or (getf state :last-touch-reconnect-ms) 0)))
+    (check-type last-attempt (integer 0 *))
+    (>= (- now last-attempt) (dashboard-timing :touch-reconnect-ms))))
+
+(defun dashboard-reduce-begin-iteration (state event)
+  (let* ((arguments (rest event))
+         (now (getf arguments :now))
+         (wayland (not (null (getf arguments :wayland))))
+         (force-scan (not (null (getf arguments :force-control-scan-p))))
+         (rescan (not (null (getf arguments :rescan-controls-p)))))
     (check-type now (integer 0 *))
-    (multiple-value-bind (guard recovered)
-        (dashboard-controller-guard-recover-if-quiet
-         (getf state :controller-guard) now)
-      (let ((next (copy-list state))
-            (effects (and recovered '((:controller-resumed)))))
-        (setf (getf next :controller-guard) guard)
-        (when (and (plusp (getf next :reboot-deadline))
-                   (not (reboot-confirmation-active-p
-                         (getf next :reboot-deadline) now)))
-          (setf (getf next :reboot-deadline) 0)
-          (when (string= (getf (getf next :dashboard) :status)
-                         *dashboard-reboot-confirmation-text*)
-            (setf next (dashboard-loop-set-global-status next "")
-                  effects (append effects
-                                  (dashboard-loop-screen-effects)))))
-        (when (and (member (getf next :view) '(:settings :wifi))
-                   (>= (- now (getf next :network-refreshed-at))
-                       (dashboard-timing :network-refresh-ms)))
-          (setf (getf next :network-refreshed-at) now
-                (getf next :pending-network) t
-                effects (append effects '((:network-action)))))
-        (when (and (eq (getf next :view) :credits)
-                   (not (getf next :reduced-motion)))
-          (setf effects (append effects (dashboard-loop-screen-effects))))
+    (multiple-value-bind (next recovery-effects)
+        (dashboard-loop-recover-controller state now)
+      (let ((effects (append '((:reap-sound)) recovery-effects)))
+        (when (and (not wayland)
+                   (not (getf next :touch-connected-p))
+                   (dashboard-loop-touch-reconnect-due-p next now))
+          (setf (getf next :last-touch-reconnect-ms) now
+                effects (append effects '((:reconnect-touch)))))
+        (when (dashboard-controller-scan-due-p
+               (getf next :last-control-scan-ms) now
+               :force force-scan :rescan rescan)
+          (setf (getf next :last-control-scan-ms) now
+                effects
+                (append effects
+                        (list (list :scan-controls :force
+                                    (or force-scan rescan))))))
         (values next effects)))))
+
+(defun dashboard-reduce-tick (state event)
+  (let ((now (getf (rest event) :now))
+        (next (copy-list state))
+        (effects nil))
+    (check-type now (integer 0 *))
+    (when (and (plusp (getf next :reboot-deadline))
+               (not (reboot-confirmation-active-p
+                     (getf next :reboot-deadline) now)))
+      (setf (getf next :reboot-deadline) 0)
+      (when (string= (getf (getf next :dashboard) :status)
+                     *dashboard-reboot-confirmation-text*)
+        (setf next (dashboard-loop-set-global-status next "")
+              effects (append effects (dashboard-loop-screen-effects)))))
+    (when (and (member (getf next :view) '(:settings :wifi))
+               (>= (- now (getf next :network-refreshed-at))
+                   (dashboard-timing :network-refresh-ms)))
+      (setf (getf next :network-refreshed-at) now
+            (getf next :pending-network) t
+            effects (append effects '((:network-action)))))
+    (when (and (eq (getf next :view) :credits)
+               (not (getf next :reduced-motion)))
+      (setf effects (append effects (dashboard-loop-screen-effects))))
+    (values next effects)))
 
 (defun dashboard-loop-poll-timeout (state)
   (if (and (eq (getf state :view) :credits)
@@ -768,8 +803,9 @@
           (getf next :pending-network) nil)
     (values next (and changed (dashboard-loop-screen-effects)))))
 
-(defun dashboard-reduce-touch-status (state status)
+(defun dashboard-reduce-touch-status (state status connected-p)
   (let ((next (dashboard-loop-clear-pressed-targets state)))
+    (setf (getf next :touch-connected-p) (not (null connected-p)))
     (if (eq (getf next :view) :wifi)
         (let ((wifi (copy-list (getf next :wifi))))
           (setf (getf wifi :status) status
@@ -1077,8 +1113,11 @@
     (when now
       (check-type now (integer 0 *))
       (setf (getf next :last-control-scan-ms) now))
-    (setf (getf next :child-return-stage) :presentation)
-    (values next '((:open-presentation)))))
+    (if (eq (getf next :child-return-stage) :controls)
+        (progn
+          (setf (getf next :child-return-stage) :presentation)
+          (values next '((:open-presentation))))
+        (values next nil))))
 
 (defun dashboard-reduce-presentation-opened (state)
   (let ((next (copy-list state)))
@@ -1138,6 +1177,7 @@
   (check-type event list)
   (dashboard-loop-check-pending-event state event)
   (case (first event)
+    (:begin-iteration (dashboard-reduce-begin-iteration state event))
     (:child-complete (dashboard-reduce-child-complete state event))
     (:child-returned (dashboard-reduce-child-returned state event))
     (:controls (dashboard-reduce-controls state event))
@@ -1150,13 +1190,127 @@
     (:touch (dashboard-reduce-touch state event))
     (:touch-lost
      (dashboard-reduce-touch-status
-      state (dashboard-loop-label :touch-waiting)))
+      state (dashboard-loop-label :touch-waiting) nil))
     (:touch-reconnected
      (dashboard-reduce-touch-status
-      state (dashboard-loop-label :touch-reconnected)))
+      state (dashboard-loop-label :touch-reconnected) t))
     (:volume-tone-result (dashboard-reduce-volume-tone-result state event))
     (:wifi-result (dashboard-reduce-wifi-result state event))
     (otherwise (error "Unknown dashboard event ~S" event))))
+
+(defun render-dashboard-loop-state (state now)
+  (check-type state list)
+  (check-type now (integer 0 *))
+  (let ((settings (getf state :settings)))
+    (case (getf state :view)
+      (:dashboard
+       (let ((dashboard (getf state :dashboard)))
+         (render-dashboard
+          (getf state :games) (getf dashboard :active-system)
+          (getf dashboard :game-position) (getf dashboard :status))))
+      (:settings
+       (render-dashboard-settings
+        (getf settings :volume) (getf settings :brightness)
+        (getf settings :keymap) (getf settings :selected)
+        (getf settings :status) (getf state :network)))
+      (:wifi
+       (render-dashboard-wifi (getf state :wifi) (getf state :network)))
+      (:credits
+       (render-project-credits
+        (getf state :credits-crawl) (getf state :reduced-motion)
+        (- now (getf state :credits-started-at))))
+      (otherwise (error "Unknown dashboard view ~S" (getf state :view))))))
+
+(defun dashboard-loop-step (state event effect-handler)
+  (check-type effect-handler function)
+  (let ((trace nil))
+    (labels ((run-effects (current effects)
+               (dolist (effect effects current)
+                 (push (copy-tree effect) trace)
+                 (let ((completion (funcall effect-handler effect current)))
+                   (when completion
+                     (setf current (run-event current completion))))))
+             (run-event (current normalized-event)
+               (multiple-value-bind (next effects)
+                   (dashboard-reduce current normalized-event)
+                 (run-effects next effects))))
+      (let ((next (run-event state event)))
+        (values next (nreverse trace))))))
+
+(defun dashboard-loop-begin-iteration (state context effect-handler)
+  (check-type state list)
+  (check-type context list)
+  (check-type effect-handler function)
+  (let ((now (getf context :now)))
+    (check-type now (integer 0 *))
+    (dashboard-loop-step
+     state
+     (list :begin-iteration :now now
+           :wayland (not (null (getf context :wayland)))
+           :force-control-scan-p
+           (not (null (getf context :force-control-scan-p)))
+           :rescan-controls-p
+           (not (null (getf context :rescan-controls-p))))
+     effect-handler)))
+
+(defun dashboard-loop-dispatch-input
+    (state input layout-reader effect-handler)
+  (check-type state list)
+  (check-type input list)
+  (check-type layout-reader function)
+  (check-type effect-handler function)
+  (let* ((now (getf input :now))
+         (tick-now (or (getf input :tick-now) now))
+         (poll-ready-p (not (null (getf input :poll-ready-p t))))
+         (reports (or (getf input :touch-reports) nil))
+         (touch-times (or (getf input :touch-times)
+                          (make-list (length reports) :initial-element now)))
+         (touch-lost-p (not (null (getf input :touch-lost-p))))
+         (quarantine-marker (gensym))
+         (quarantined
+           (getf input :controller-quarantined-p quarantine-marker))
+         (next state)
+         (trace nil))
+    (check-type now (integer 0 *))
+    (check-type tick-now (integer 0 *))
+    (when (and poll-ready-p (eq quarantined quarantine-marker))
+      (error "Dashboard input needs explicit audio quarantine state"))
+    (unless (= (length reports) (length touch-times))
+      (error "Dashboard touch reports and times differ in length"))
+    (labels ((append-step (event)
+               (multiple-value-bind (updated effects)
+                   (dashboard-loop-step next event effect-handler)
+                 (setf next updated
+                       trace (append trace effects))))
+             (current-layout ()
+               (let ((layout (funcall layout-reader)))
+                 (check-type layout list)
+                 layout)))
+      (append-step (list :tick :now tick-now))
+      (unless poll-ready-p
+        (return-from dashboard-loop-dispatch-input (values next trace)))
+      (when touch-lost-p
+        (append-step '(:touch-lost))
+        (setf reports nil
+              touch-times nil))
+      (append-step
+       (list :controls
+             :gamepad-actions (or (getf input :gamepad-actions) nil)
+             :keyboard-actions (or (getf input :keyboard-actions) nil)
+             :layout (current-layout) :now now
+             :controller-quarantined-p (not (null quarantined))))
+      (unless (find :discard-touch trace :key #'first)
+        (loop for report in reports
+              for report-now in touch-times
+              do (append-step
+                  (list :touch :report report :layout (current-layout)
+                        :now report-now))))
+      (when (getf next :pending-launch)
+        (append-step
+         (list :prepare-launch
+               :wayland (not (null (getf input :wayland)))
+               :volume-state (getf input :volume-state))))
+      (values next trace))))
 
 (defun apply-dashboard-touch (games state layout report volume-percent presenter)
   (check-type games list)

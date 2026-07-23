@@ -155,9 +155,12 @@
            #:dashboard-wifi-path
            #:dashboard-initial-state
            #:dashboard-launch-plan
+           #:dashboard-loop-begin-iteration
+           #:dashboard-loop-dispatch-input
            #:dashboard-loop-initial-state
            #:dashboard-loop-label
            #:dashboard-loop-poll-timeout
+           #:dashboard-loop-step
            #:dashboard-reduce
            #:dashboard-menu-geometry
            #:dashboard-system-label
@@ -209,6 +212,7 @@
            #:scan-evdev-controls
            #:run-dashboard-terminal
            #:render-dashboard
+           #:render-dashboard-loop-state
            #:render-dashboard-settings
            #:render-dashboard-wifi
            #:render-project-credits
