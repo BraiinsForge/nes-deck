@@ -785,6 +785,37 @@ production lines, including the existing catalog compiler, and 14,647 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Lisp-owned volume state checkpoint
+
+Native ABI 15 adds one generic state-file mechanism rather than volume policy.
+Reads preserve the C++ distinction between missing files and exact bounded bytes,
+follow existing symlinks, and reject nonregular or larger-than-64-byte state.
+Writes publish exact bytes through private `0600` `O_EXCL` temporary files,
+file sync, close, rename, and best-effort parent-directory sync. Rust does not
+parse volume values or append canonical delimiters.
+
+Startup-loaded Lisp now owns the exact `RETRO_DECK_VOLUME_PERCENT` default,
+including empty, decimal, range, and leading-zero behavior; canonical `0` through
+`100` state parsing; missing-state initialization; `on\n` and `off\n` migration;
+settings saves; and post-child reload. Runtime initialization retains the startup
+default for later missing or legacy child state, updates the remembered audible
+volume exactly, saves before reducer state changes, and treats child reload
+failure as logging-only recovery. Brightness and keymap effects remain delegated,
+`RETRODECK:MAIN` remains unchanged, and the C++ dashboard stays authoritative.
+
+The focused host suite, named and fresh SBCL runs, direct Cargo checks, `nix
+flake check`, and the complete ARM/ECL matrix passed. Installed ABI 15 and the
+startup, settings, and dashboard Lisp files matched repository hashes. A harmless
+Deck fixture exercised inherited default zero, missing initialization, legacy
+migration, canonical settings save, changed child reload, malformed child reload
+recovery, and a final `63\n` private state file without opening display or input.
+The C++ dashboard retained PID 16416 and the Deck health check remained healthy.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 10,154
+production lines, including the existing catalog compiler, and 15,225 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
@@ -823,6 +854,9 @@ Updated on 2026-07-24:
 - The one-iteration Lisp runtime coordinator selected both policy timeouts,
   preserved effect ordering and post-poll time, and completed an installed
   closed-input Deck fixture while C++ retained PID 17517
+- ABI 15 kept state-file mechanics generic while Lisp matched inherited defaults,
+  canonical and legacy volume state, settings save, and best-effort child reload
+  through ARM/ECL and an installed Deck fixture while C++ retained PID 16416
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
