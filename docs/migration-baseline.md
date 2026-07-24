@@ -895,6 +895,51 @@ production lines, including the existing catalog compiler, and 16,068 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Lisp-owned Wi-Fi profile save checkpoint
+
+Native ABI 17 adds one generic synchronous helper mechanism. Rust receives an
+executable and exact input bytes, starts a no-argument child with inherited
+environment, standard output, and standard error, writes and explicitly closes
+stdin, waits, and returns the start, input, wait, exit, or signal result. An
+input write or close failure takes precedence over the reaped child result.
+Rust contains no Wi-Fi path, text limits, validation, request formatting,
+status labels, cue selection, or dashboard state policy.
+
+Startup-loaded Lisp owns the authoritative profile-save contract. SSIDs remain
+one through 32 printable ASCII bytes and passphrases eight through 63. Lisp
+constructs the exact `SSID\nPASSPHRASE\n` request and helper path, rejects invalid
+input before execution, maps only native input failure to
+`WIFI PROFILE WRITE FAILED`, and maps start, wait, nonzero exit, or signal to
+`WIFI PROFILE WAS NOT SAVED`. Success alone clears the passphrase and reports
+`WIFI SAVED - USED AFTER CURRENT WIFI DISCONNECTS`; every completion keeps the
+original Confirm cue and render, cue, present ordering. The concrete fallback
+runs only when no injected external handler is present. `RETRODECK:MAIN` remains
+unchanged and the C++ dashboard stays authoritative.
+
+Fresh and named SBCL runs, direct Cargo checks, the complete host suite, ARM/ECL
+matrix, `nix flake check`, and two independent parity reviews passed. ARM/ECL
+pinned exact stdin, exit 7, signal 15, and input-failure precedence over exit 7.
+Installed hashes were
+`e9a89cec4f8eaee11d99522ced7bd7a4d8cf2ddd11660f6c4273200fb3ec99e9`
+for ABI 17,
+`0fa21b078b1104fc8270481ca7744d47450ed0cbaad9c0f3660d78bd7fc9b504`
+for startup,
+`53f0760969bbbef2755b10d2444decb606a82ba321a1d23987e7c7f6cdc0b70a`
+for Wi-Fi policy, and
+`4768701d3645e3dd17ea28b3af9a8ed6bb64b36caecf2610fd56426b084c1a2d`
+for the dashboard. Harmless installed `/tmp` helpers, never the real profile
+helper, exercised no-handler success and exit-7 failure, exact write-failure
+status, signal classification, and phase precedence. The captured 18-byte
+request had SHA-256
+`92d60672226800b929ffedd2d32cb7ec1ff0d65b81937b4b591a4f5ac6a81182`.
+Installed permissions remained `0700` for the host and `0600` for Lisp; the C++
+dashboard retained PID 2051 and the Deck health check remained healthy.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 10,650
+production lines, including the existing catalog compiler, and 16,408 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
@@ -942,6 +987,10 @@ Updated on 2026-07-24:
   hardware adoption, startup normalization, hardware-before-state failure ordering,
   and settings fallback through ARM/ECL and an installed regular-file Deck fixture
   while C++ retained PID 22788
+- ABI 17 kept helper execution generic while Lisp matched exact Wi-Fi validation,
+  request bytes, success, write failure, process failure, passphrase retention, and
+  Confirm cue policy through ARM/ECL and harmless installed `/tmp` helpers while
+  C++ retained PID 2051
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 

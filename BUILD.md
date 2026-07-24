@@ -100,7 +100,8 @@ and `dashboard.lisp`. These editable files own bitmap UI composition, systems,
 labels, colors, applications, launch plans, terminal status and sequencing,
 timing, settings and Wi-Fi editor state and actions, exact inherited and
 persistent volume policy, exact brightness hardware and state policy, exact
-terminal keymap state policy, credits content and sequencing, dashboard geometry,
+terminal keymap state policy, Wi-Fi profile validation, helper request bytes,
+completion statuses and cues, credits content and sequencing, dashboard geometry,
 touch policy, keyboard and THEGamepad mapping, modal command priority,
 controller burst recovery, input scan timing, and the Wi-Fi selector status path.
 Startup finally loads an optional `local.lisp` beside them for device-local
@@ -108,17 +109,22 @@ overrides without a Rust
 rebuild. Deployment updates the eight standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
-Native ABI 16 retains the widget-side Wayland and direct-fbdev primitives and
+Native ABI 17 retains the widget-side Wayland and direct-fbdev primitives and
 adds only narrow canvas, raster, projected-text, evdev, regular-file, network,
-state-file, control-file, audio, process, and aggregate-input mechanisms for Lisp
-to orchestrate. The bounded state-file mechanism distinguishes missing files
+state-file, control-file, helper-process, audio, terminal-process, and
+aggregate-input mechanisms for Lisp to orchestrate. The bounded state-file
+mechanism distinguishes missing files
 from exact bytes and performs private atomic replacement; Lisp owns inherited
 volume parsing, defaults, legacy migration, canonical saves, child reload policy,
 and the exact missing/default/canonical terminal keymap state contract. The
 control-file mechanism follows existing links, reads at most 63 exact bytes, and
 writes bounded exact bytes to an existing path. Lisp owns brightness parsing,
 rounding, startup normalization, hardware-before-state ordering, and settings
-failure policy; Rust contains no backlight path or percentage knowledge.
+failure policy; Rust contains no backlight path or percentage knowledge. The
+generic helper primitive starts one no-argument child with inherited environment
+and output, writes and closes exact stdin bytes, waits, and reports the start,
+input, wait, exit, or signal result. Lisp owns the Wi-Fi helper path, validation,
+request construction, user-visible status, state update, and confirmation cue.
 The network primitive reports the current `wlan0` SSID and IPv4 address, the
 `wg0` IPv4 address, and the bounded Wi-Fi selector status while Lisp owns its
 path, refresh timing, result shape, and rendering. One native
@@ -176,7 +182,8 @@ This rejects a missing executable, a non-ARM or dynamically linked binary, a
 Nix store reference, an incomplete ECL or fbterm runtime, and a changed CC0
 music payload. It also runs the ARM host under QEMU to exercise the embedded
 ECL callbacks, including Wayland and fbdev boundaries, projected credits frames,
-large elapsed times, and the audio-worker lifecycle.
+large elapsed times, helper stdin and process-result classification, and the
+audio-worker lifecycle.
 
 ## Run the host test suite
 
