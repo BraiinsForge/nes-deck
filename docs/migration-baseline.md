@@ -848,6 +848,53 @@ production lines, including the existing catalog compiler, and 15,392 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Lisp-owned brightness state checkpoint
+
+Native ABI 16 adds one generic control-file mechanism rather than brightness
+policy. Reads follow existing links and return at most the first 63 exact bytes;
+writes accept at most 64 exact bytes for an existing absolute path. Regular-file
+truncation mirrors C++, while `EINVAL` and `EPERM` remain acceptable for sysfs.
+Rust contains no backlight paths, whitespace rules, numeric parsing, newline
+construction, percentages, rounding, defaults, or settings policy.
+
+Startup-loaded Lisp now owns the exact dashboard brightness contract. It reads
+maximum then current hardware before state, trims only ASCII bytes 9, 10, 11,
+12, 13, and 32, accepts only decimal digits through `UINT_MAX`, rejects zero
+maximum and current above maximum, and accepts only canonical `10\n` through
+`100\n` in ten-point steps. Missing state computes
+`(current*100 + maximum/2) / maximum`, rounds with `(observed+5)/10*10`, and
+clamps 10 through 100. Startup always maps with
+`(percent*maximum + 50)/100`, clamps 1 through maximum, writes hardware, then
+atomically saves state. Malformed existing state is fatal and preserved; hardware
+failure prevents the state write, while state failure leaves hardware changed
+without updating reducer memory.
+
+The non-authoritative runtime now initializes volume, brightness, then keymap
+before opening presentation or input. It retains the startup maximum only after
+successful normalization, clears it on every failed initialization or shutdown,
+and uses it for the no-handler settings fallback. A settings failure preserves
+the old percentage, reports `BRIGHTNESS ERROR - CHECK LOG`, and still emits the
+original Previous or Next cue. `RETRODECK:MAIN` remains unchanged and the C++
+dashboard stays authoritative.
+
+Named and fresh SBCL runs, the complete host suite, direct Cargo checks, the
+ARM/ECL matrix, `nix flake check`, and an independent parity review passed.
+Installed hashes were `ffef972cc96b74139e076cb9dcc8843bb6a0143bacb85c012c977c82b50390f5`
+for ABI 16, `96b4440bd715b975ee4b1154c29aa4c55dc14de5ef1a491be74e49a2e454b7ea`
+for startup, `5b27c41f5fb9afb1ae0a91b1ac6cf147931a0b3ae31ed8bacd3e76a74be61376`
+for settings, and `22e20831ba7786fb0ade87fbea68c8260af5e9392043ecfc3dcb5dad5e218dc3`
+for the dashboard. A harmless installed regular-file fixture, never the real
+backlight, exercised missing adoption to `60\n`, existing `70\n` application to
+raw `14\n`, malformed `05\n` rejection and preservation, and the runtime settings
+fallback. Its final device and private state files were exact three-byte `14\n`
+and `70\n`, with state mode `0600`; the C++ dashboard retained PID 22788 and the
+Deck health check remained healthy.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 10,488
+production lines, including the existing catalog compiler, and 16,068 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
@@ -889,6 +936,12 @@ Updated on 2026-07-24:
 - ABI 15 kept state-file mechanics generic while Lisp matched inherited defaults,
   canonical and legacy volume state, settings save, and best-effort child reload
   through ARM/ECL and an installed Deck fixture while C++ retained PID 16416
+- Lisp-owned keymap state matched missing US initialization, existing Czech state,
+  malformed-state preservation, and settings save while C++ retained PID 22788
+- ABI 16 kept control-file mechanics generic while Lisp matched brightness parsing,
+  hardware adoption, startup normalization, hardware-before-state failure ordering,
+  and settings fallback through ARM/ECL and an installed regular-file Deck fixture
+  while C++ retained PID 22788
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
