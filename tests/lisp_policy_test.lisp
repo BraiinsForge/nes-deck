@@ -31,7 +31,9 @@
 (defparameter *regular-file-result* nil)
 (defparameter *regular-file-arguments* nil)
 (defparameter *state-file-read-result* '(0))
+(defparameter *state-file-read-results* nil)
 (defparameter *state-file-read-path* nil)
+(defparameter *state-file-read-paths* nil)
 (defparameter *state-file-write-status* 1)
 (defparameter *state-file-write-arguments* nil)
 (defparameter *network-status-result* '("" "" "" "STATUS UNAVAILABLE"))
@@ -200,7 +202,9 @@
         (symbol-function (find-symbol "READ-STATE-FILE" "RETRODECK.NATIVE"))
          (lambda (path)
            (setf *state-file-read-path* path)
-           *state-file-read-result*)
+           (push path *state-file-read-paths*)
+           (let ((entry (assoc path *state-file-read-results* :test #'string=)))
+             (if entry (cdr entry) *state-file-read-result*)))
          (symbol-function (find-symbol "WRITE-STATE-FILE" "RETRODECK.NATIVE"))
          (lambda (&rest arguments)
            (setf *state-file-write-arguments* arguments)
@@ -511,7 +515,49 @@
 (assert (signals-type-error-p
          (lambda ()
            (retrodeck:save-dashboard-volume-state "/tmp/volume.state" 101))))
+(dolist (fixture (list (list (format nil "us~%") "us")
+                       (list (format nil "cz~%") "cz")))
+  (assert (string= (retrodeck:parse-dashboard-keymap-state (first fixture))
+                   (second fixture))))
+(dolist (invalid (list "" "us" (format nil "US~%") (format nil "de~%")
+                       (format nil "us~%~%") (format nil "us ~%")
+                       (format nil "us~C~%" #\Return)))
+  (assert (signals-error-p
+           (lambda () (retrodeck:parse-dashboard-keymap-state invalid)))))
+(setf *state-file-read-result* '(0)
+      *state-file-write-status* 1
+      *state-file-write-arguments* nil)
+(assert (string= (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state")
+                 "us"))
+(assert (equal *state-file-write-arguments*
+               (list "/tmp/keymap.state" (format nil "us~%"))))
+(setf *state-file-read-result* (list 1 (format nil "cz~%"))
+      *state-file-write-arguments* nil)
+(assert (string= (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state")
+                 "cz"))
+(assert (null *state-file-write-arguments*))
+(setf *state-file-read-result* (list 1 (format nil "de~%")))
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state"))))
+(setf *state-file-read-result* '(0)
+      *state-file-write-status* 0)
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state"))))
+(setf *state-file-write-status* 1
+      *state-file-write-arguments* nil)
+(assert (retrodeck:save-dashboard-keymap-state "/tmp/keymap.state" "cz"))
+(assert (equal *state-file-write-arguments*
+               (list "/tmp/keymap.state" (format nil "cz~%"))))
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck:save-dashboard-keymap-state "/tmp/keymap.state" "de"))))
 (setf *state-file-read-result* (list 1 (format nil "42~%"))
+      *state-file-read-results*
+      (list (cons "/mnt/data/nes-deck/state/terminal-keymap.state"
+                  (list 1 (format nil "us~%"))))
+      *state-file-read-paths* nil
       *state-file-write-status* 1)
 
 (setf *network-status-result*
@@ -894,11 +940,28 @@
         (retrodeck:settings-complete-action state keymap-plan t)
       (assert (equal effect '(:cue :confirm)))
       (assert (string= (getf czech :keymap) "cz"))
-      (assert (string= (getf czech :status) "TERMINAL KEYS: CZECH"))))
+      (assert (string= (getf czech :status) "TERMINAL KEYS: CZECH")))
+    (multiple-value-bind (failed effect)
+        (retrodeck:settings-complete-action state keymap-plan nil)
+      (assert (equal effect '(:cue :confirm)))
+      (assert (string= (getf failed :keymap) "us"))
+      (assert (string= (getf failed :status) "KEYMAP STATE ERROR"))))
   (assert (equal (retrodeck:settings-activation-plan state :terminal)
                  '(:action :terminal :mode "shell" :cue :confirm)))
   (assert (equal (retrodeck:settings-activation-plan state :wifi)
                  '(:action :wifi :cue :confirm))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state nil :keymap "us"))
+       (plan (retrodeck:settings-activation-plan
+              (getf state :settings) :keymap)))
+  (setf (getf state :pending-settings-plan) plan)
+  (multiple-value-bind (failed effects)
+      (retrodeck:dashboard-reduce state '(:settings-result :succeeded-p nil))
+    (assert (null (getf failed :pending-settings-plan)))
+    (assert (string= (getf (getf failed :settings) :keymap) "us"))
+    (assert (string= (getf (getf failed :settings) :status)
+                     "KEYMAP STATE ERROR"))
+    (assert (equal effects '((:render) (:present) (:cue :confirm))))))
 
 (let* ((layout '(:close (1212 12 56 56)
                  :wifi (926 20 262 108)
@@ -2809,9 +2872,39 @@ secret!9
 (let* ((state (retrodeck:dashboard-loop-initial-state nil :now 1))
        (runtime (retrodeck:make-dashboard-runtime
                  :volume-state "/tmp/volume.state"
+                 :keymap-state "/tmp/keymap.state"
+                 :default-volume 42))
+       (*state-file-read-result* (list 1 (format nil "42~%")))
+       (*state-file-read-results*
+        (list (cons "/tmp/keymap.state" (list 1 (format nil "de~%")))))
+       (*state-file-read-paths* nil)
+       (*state-file-write-status* 1)
+       (*state-file-write-arguments* nil)
+       (*fbdev-open-count* 0)
+       (*evdev-open-count* 0)
+       (*evdev-controls-scan-count* 0))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:dashboard-runtime-initialize state runtime 1))))
+  (assert (equal (reverse *state-file-read-paths*)
+                 '("/tmp/volume.state" "/tmp/keymap.state")))
+  (assert (null *state-file-write-arguments*))
+  (assert (zerop *fbdev-open-count*))
+  (assert (zerop *evdev-open-count*))
+  (assert (zerop *evdev-controls-scan-count*))
+  (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
+  (assert (not (getf runtime :initialized-p))))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 1))
+       (runtime (retrodeck:make-dashboard-runtime
+                 :volume-state "/tmp/volume.state"
                  :default-volume 42))
        (plan (retrodeck:settings-activation-plan
               (getf state :settings) :volume-down))
+       (keymap-plan (retrodeck:settings-activation-plan
+                     (getf state :settings) :keymap))
+       (brightness-plan (retrodeck:settings-activation-plan
+                         (getf state :settings) :brightness-up))
        (*state-file-read-result* (list 1 (format nil "42~%")))
        (*state-file-write-status* 1)
        (*state-file-write-arguments* nil)
@@ -2828,9 +2921,28 @@ secret!9
            (retrodeck::dashboard-runtime-handle-effect
             runtime (list :settings-action plan) state)
            '(:settings-result :succeeded-p nil)))
+  (setf (getf keymap-plan :path) "/tmp/keymap.state"
+        *state-file-write-status* 1
+        *state-file-write-arguments* nil)
+  (assert (equal
+           (retrodeck::dashboard-runtime-handle-effect
+            runtime (list :settings-action keymap-plan) state)
+           '(:settings-result :succeeded-p t)))
+  (assert (equal *state-file-write-arguments*
+                 (list "/tmp/keymap.state" (format nil "cz~%"))))
+  (setf *state-file-write-status* 0)
+  (assert (equal
+           (retrodeck::dashboard-runtime-handle-effect
+            runtime (list :settings-action keymap-plan) state)
+           '(:settings-result :succeeded-p nil)))
   (setf *state-file-write-status* 1
-        *state-file-write-arguments* nil
-        *state-file-read-result* (list 1 (format nil "55~%")))
+        *state-file-write-arguments* nil)
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck::dashboard-runtime-handle-effect
+              runtime (list :settings-action brightness-plan) state))))
+  (assert (null *state-file-write-arguments*))
+  (setf *state-file-read-result* (list 1 (format nil "55~%")))
   (assert (equal
            (retrodeck::dashboard-runtime-handle-effect
             runtime '(:reload-volume) state)
@@ -2895,14 +3007,21 @@ secret!9
          '("NET1" "10.0.1.11" "10.0.0.15" "CONNECTED"))
        (*network-status-path* nil)
        (*state-file-read-result* (list 1 (format nil "37~%")))
-       (*state-file-read-path* nil))
+       (*state-file-read-results*
+        (list (cons "/mnt/data/nes-deck/state/terminal-keymap.state"
+                    (list 1 (format nil "cz~%")))))
+       (*state-file-read-path* nil)
+       (*state-file-read-paths* nil))
   (multiple-value-bind (initialized ignored-runtime)
       (retrodeck:dashboard-runtime-initialize state runtime 90)
     (declare (ignore ignored-runtime))
     (assert (= (getf (getf initialized :settings) :volume) 37))
     (assert (= (getf (getf initialized :settings) :last-audible-volume) 37))
-    (assert (string= *state-file-read-path*
-                     "/mnt/data/nes-deck/state/menu-volume.state"))
+    (assert (string= (getf (getf initialized :settings) :keymap) "cz"))
+    (assert
+     (equal (reverse *state-file-read-paths*)
+            '("/mnt/data/nes-deck/state/menu-volume.state"
+              "/mnt/data/nes-deck/state/terminal-keymap.state")))
     (assert (equal (getf initialized :network)
                    '(:ssid "NET1" :wlan-ipv4 "10.0.1.11"
                      :wireguard-ipv4 "10.0.0.15" :selector "CONNECTED")))

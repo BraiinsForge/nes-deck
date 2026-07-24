@@ -1321,11 +1321,13 @@
           adopt-presentation
           (volume-state (dashboard-settings-path :volume-state))
           (default-volume (dashboard-inherited-volume))
+          (keymap-state (dashboard-settings-path :keymap-state))
           (network-status-path (dashboard-wifi-path :selector-status))
           external-effect-handler
           (clock #'monotonic-ms))
   (check-type volume-state string)
   (check-type default-volume (integer 0 100))
+  (check-type keymap-state string)
   (check-type network-status-path string)
   (when external-effect-handler
     (check-type external-effect-handler function))
@@ -1334,6 +1336,7 @@
         :adopt-presentation (not (null adopt-presentation))
         :volume-state volume-state
         :default-volume default-volume
+        :keymap-state keymap-state
         :network-status-path network-status-path
         :external-effect-handler external-effect-handler
         :clock clock
@@ -1420,6 +1423,14 @@
     (setf (getf next :settings) settings)
     next))
 
+(defun dashboard-runtime-initialize-keymap (state runtime)
+  (let ((settings (copy-list (getf state :settings)))
+        (next (copy-list state)))
+    (setf (getf settings :keymap)
+          (load-dashboard-keymap-state (getf runtime :keymap-state))
+          (getf next :settings) settings)
+    next))
+
 (defun dashboard-runtime-poll-input (runtime timeout-ms)
   (check-type runtime list)
   (check-type timeout-ms (integer 0 4294967295))
@@ -1464,12 +1475,17 @@
              (read-native-network-status
               (getf runtime :network-status-path))))
       ((and (eq (first effect) :settings-action)
-            (eq (getf (second effect) :action) :volume))
+             (member (getf (second effect) :action) '(:volume :keymap)))
        (let ((plan (second effect)))
          (list :settings-result :succeeded-p
                (handler-case
-                   (save-dashboard-volume-state
-                    (getf plan :path) (getf plan :value))
+                   (case (getf plan :action)
+                     (:volume
+                      (save-dashboard-volume-state
+                       (getf plan :path) (getf plan :value)))
+                     (:keymap
+                      (save-dashboard-keymap-state
+                       (getf plan :path) (getf plan :value))))
                  (error (condition)
                    (format *error-output* "retrodeck: ~A~%" condition)
                    (finish-output *error-output*)
@@ -1603,7 +1619,9 @@
   (check-type now (integer 0 *))
   (when (getf runtime :initialized-p)
     (error "Dashboard runtime is already initialized"))
-  (let ((current (dashboard-runtime-initialize-volume state runtime))
+  (let ((current
+          (dashboard-runtime-initialize-keymap
+           (dashboard-runtime-initialize-volume state runtime) runtime))
         (presentation-owned-p nil)
         (touch-open-p nil)
         (controls-open-p nil)

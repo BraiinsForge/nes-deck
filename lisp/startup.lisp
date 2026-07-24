@@ -204,6 +204,7 @@
            #:fit-text-width
            #:load-cover-raster
            #:load-png-raster
+           #:load-dashboard-keymap-state
            #:load-dashboard-volume-state
            #:load-project-credits
            #:load-text-mask
@@ -220,6 +221,7 @@
            #:open-fbdev
            #:open-wayland-widget
            #:parse-dashboard-inherited-volume
+           #:parse-dashboard-keymap-state
            #:parse-dashboard-volume-state
            #:play-menu-sound
            #:poll-native-input
@@ -240,6 +242,7 @@
            #:render-dashboard-settings
            #:render-dashboard-wifi
            #:render-project-credits
+           #:save-dashboard-keymap-state
            #:save-dashboard-volume-state
            #:settings-activation-plan
            #:settings-brightness-after-target

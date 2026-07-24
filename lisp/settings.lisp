@@ -379,6 +379,33 @@
         (error "cannot save volume state ~A" path))
       volume)))
 
+(defun dashboard-keymap-state-text (keymap)
+  (check-type keymap string)
+  (unless (member keymap '("us" "cz") :test #'string=)
+    (error "terminal keymap must be 'us' or 'cz'"))
+  (coerce (format nil "~A~%" keymap) 'base-string))
+
+(defun parse-dashboard-keymap-state (text)
+  (check-type text string)
+  (cond
+    ((string= text (format nil "us~%")) "us")
+    ((string= text (format nil "cz~%")) "cz")
+    (t (error "terminal keymap state must contain exactly 'us\\n' or 'cz\\n'"))))
+
+(defun save-dashboard-keymap-state (path keymap)
+  (check-type path string)
+  (write-native-state-file path (dashboard-keymap-state-text keymap)))
+
+(defun load-dashboard-keymap-state (path)
+  (check-type path string)
+  (multiple-value-bind (text present-p) (read-native-state-file path)
+    (when present-p
+      (return-from load-dashboard-keymap-state
+        (parse-dashboard-keymap-state text)))
+    (unless (save-dashboard-keymap-state path "us")
+      (error "cannot save terminal keymap state ~A" path))
+    "us"))
+
 (defun settings-volume-after-target (target volume last-audible-volume)
   (check-type volume (integer 0 100))
   (check-type last-audible-volume (integer 0 100))

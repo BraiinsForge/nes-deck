@@ -912,7 +912,7 @@
           EOF
           chmod +x terminal-fixture
           printf 'CONNECTED\n' > wifi-status
-          rm -f state-file
+          rm -f state-file state-file.keymap
           substitute ${./tests/native_ecl_smoke.lisp.in} smoke.lisp \
             --subst-var-by startup "$PWD/startup.lisp" \
             --subst-var-by state_file "$PWD/state-file" \
