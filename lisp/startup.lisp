@@ -29,10 +29,12 @@
            #:raster-clear
            #:raster-load-cover
            #:raster-load-png
+           #:read-control-file
            #:read-regular-file
            #:read-state-file
            #:run-terminal
            #:stop-audio
+           #:write-control-file
            #:write-state-file
            #:text-mask-clear
            #:text-mask-load
@@ -74,10 +76,12 @@
                 #:input-poll
                 #:network-status
                 #:play-tones
+                #:read-control-file
                 #:read-regular-file
                 #:read-state-file
                 #:run-terminal
                 #:stop-audio
+                #:write-control-file
                 #:write-state-file
                 #:text-mask-clear
                 #:text-mask-load
@@ -232,6 +236,7 @@
            #:present-wayland-canvas
            #:present-wayland-solid
            #:read-bounded-regular-file
+           #:read-native-control-file
            #:read-native-network-status
            #:read-native-state-file
            #:reboot-confirmation-active-p
@@ -267,11 +272,12 @@
            #:wifi-valid-text-p
            #:stroke-canvas-rect
            #:wayland-shutdown-requested-p
+           #:write-native-control-file
            #:write-native-state-file))
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 15)
+(defconstant +native-abi-version+ 16)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -376,6 +382,18 @@
             :wlan-ipv4 wlan-ipv4
             :wireguard-ipv4 wireguard-ipv4
             :selector selector))))
+
+(defun read-native-control-file (path)
+  (check-type path string)
+  (or (read-control-file (native-path-string path))
+      (error "Native control file read failed for ~A" path)))
+
+(defun write-native-control-file (path value)
+  (check-type path string)
+  (check-type value string)
+  (= (write-control-file (native-path-string path)
+                         (coerce value 'base-string))
+     1))
 
 (defun read-native-state-file (path)
   (check-type path string)

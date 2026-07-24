@@ -1,6 +1,6 @@
 use retrodeck_native::{
-    audio, canvas, controls, fbdev, input, network, polling, process, regular_file, state_file,
-    wayland,
+    audio, canvas, control_file, controls, fbdev, input, network, polling, process, regular_file,
+    state_file, wayland,
 };
 use std::env;
 use std::ffi::{CString, OsStr, c_char, c_int, c_void};
@@ -38,7 +38,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 15;
+const ABI_VERSION: ClFixnum = 16;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -168,6 +168,10 @@ impl Ecl {
                 native_canvas_draw_projected_text as EclTwoArgumentFunction,
             ),
             ("INPUT-POLL", native_input_poll as EclTwoArgumentFunction),
+            (
+                "WRITE-CONTROL-FILE",
+                native_write_control_file as EclTwoArgumentFunction,
+            ),
             (
                 "WRITE-STATE-FILE",
                 native_write_state_file as EclTwoArgumentFunction,
@@ -302,6 +306,10 @@ impl Ecl {
             (
                 "NETWORK-STATUS",
                 native_network_status as EclOneArgumentFunction,
+            ),
+            (
+                "READ-CONTROL-FILE",
+                native_read_control_file as EclOneArgumentFunction,
             ),
             (
                 "READ-STATE-FILE",
@@ -611,6 +619,26 @@ unsafe extern "C" fn native_read_regular_file(
         )
     })();
     native_optional_string(result)
+}
+
+unsafe extern "C" fn native_read_control_file(path: ClObject) -> ClObject {
+    let result: Result<Option<Vec<u8>>, String> = (|| {
+        Ok(Some(control_file::read(&decode_path(
+            path,
+            "control file path",
+        )?)?))
+    })();
+    native_optional_string(result)
+}
+
+unsafe extern "C" fn native_write_control_file(path: ClObject, value: ClObject) -> ClObject {
+    let result = (|| {
+        control_file::write(
+            &decode_path(path, "control file path")?,
+            &decode_base_string(value, "control file value")?,
+        )
+    })();
+    native_status(result)
 }
 
 unsafe extern "C" fn native_read_state_file(path: ClObject) -> ClObject {

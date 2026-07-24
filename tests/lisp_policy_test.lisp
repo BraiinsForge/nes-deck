@@ -30,6 +30,12 @@
 (defparameter *text-mask-clear-count* 0)
 (defparameter *regular-file-result* nil)
 (defparameter *regular-file-arguments* nil)
+(defparameter *control-file-read-result* "")
+(defparameter *control-file-read-results* nil)
+(defparameter *control-file-read-paths* nil)
+(defparameter *control-file-write-status* 1)
+(defparameter *control-file-write-arguments* nil)
+(defparameter *control-file-write-calls* nil)
 (defparameter *state-file-read-result* '(0))
 (defparameter *state-file-read-results* nil)
 (defparameter *state-file-read-path* nil)
@@ -118,10 +124,12 @@
            #:raster-clear
            #:raster-load-cover
            #:raster-load-png
+           #:read-control-file
            #:read-regular-file
            #:read-state-file
            #:run-terminal
            #:stop-audio
+           #:write-control-file
            #:write-state-file
            #:text-mask-clear
            #:text-mask-load
@@ -135,7 +143,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 15)
+      (lambda () 16)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () (incf *active-count*) *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -195,6 +203,11 @@
          (setf *raster-png-arguments* arguments)
          (push arguments *raster-png-calls*)
          *raster-png-result*)
+       (symbol-function (find-symbol "READ-CONTROL-FILE" "RETRODECK.NATIVE"))
+        (lambda (path)
+          (push path *control-file-read-paths*)
+          (let ((entry (assoc path *control-file-read-results* :test #'string=)))
+            (if entry (cdr entry) *control-file-read-result*)))
        (symbol-function (find-symbol "READ-REGULAR-FILE" "RETRODECK.NATIVE"))
         (lambda (&rest arguments)
           (setf *regular-file-arguments* arguments)
@@ -205,6 +218,11 @@
            (push path *state-file-read-paths*)
            (let ((entry (assoc path *state-file-read-results* :test #'string=)))
              (if entry (cdr entry) *state-file-read-result*)))
+         (symbol-function (find-symbol "WRITE-CONTROL-FILE" "RETRODECK.NATIVE"))
+         (lambda (&rest arguments)
+           (setf *control-file-write-arguments* arguments)
+           (push arguments *control-file-write-calls*)
+           *control-file-write-status*)
          (symbol-function (find-symbol "WRITE-STATE-FILE" "RETRODECK.NATIVE"))
          (lambda (&rest arguments)
            (setf *state-file-write-arguments* arguments)
@@ -421,6 +439,28 @@
 (assert (signals-type-error-p
          (lambda ()
            (retrodeck:read-bounded-regular-file "/tmp/x" 1 4194305))))
+
+(setf *control-file-read-result* (format nil "12~%")
+      *control-file-read-paths* nil)
+(assert (string= (retrodeck:read-native-control-file "/tmp/brightness")
+                 (format nil "12~%")))
+(assert (equal *control-file-read-paths* '("/tmp/brightness")))
+(setf *control-file-read-result* nil)
+(assert (signals-error-p
+         (lambda () (retrodeck:read-native-control-file "/tmp/brightness"))))
+(assert (signals-type-error-p
+         (lambda () (retrodeck:read-native-control-file 4))))
+(setf *control-file-write-status* 1
+      *control-file-write-arguments* nil
+      *control-file-write-calls* nil)
+(assert (retrodeck:write-native-control-file "/tmp/brightness"
+                                               (format nil "14~%")))
+(assert (equal *control-file-write-arguments*
+               (list "/tmp/brightness" (format nil "14~%"))))
+(setf *control-file-write-status* 0)
+(assert (not (retrodeck:write-native-control-file "/tmp/brightness" "0")))
+(assert (signals-type-error-p
+         (lambda () (retrodeck:write-native-control-file "/tmp/x" 4))))
 
 (setf *state-file-read-result* '(0))
 (multiple-value-bind (value present-p)
