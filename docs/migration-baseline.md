@@ -800,7 +800,7 @@ including empty, decimal, range, and leading-zero behavior; canonical `0` throug
 settings saves; and post-child reload. Runtime initialization retains the startup
 default for later missing or legacy child state, updates the remembered audible
 volume exactly, saves before reducer state changes, and treats child reload
-failure as logging-only recovery. Brightness and keymap effects remain delegated,
+failure as logging-only recovery. Brightness effects remain delegated,
 `RETRODECK:MAIN` remains unchanged, and the C++ dashboard stays authoritative.
 
 The focused host suite, named and fresh SBCL runs, direct Cargo checks, `nix
@@ -813,6 +813,38 @@ The C++ dashboard retained PID 16416 and the Deck health check remained healthy.
 
 At this checkpoint the physical Rust and Common Lisp footprint is 10,154
 production lines, including the existing catalog compiler, and 15,225 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
+## Lisp-owned terminal keymap state checkpoint
+
+Native ABI 15 remains a generic exact-byte state-file mechanism. Startup-loaded
+Lisp now owns the authoritative terminal keymap contract: only lowercase `us`
+and `cz` are valid, state is exactly `us\n` or `cz\n`, a missing file defaults
+to US and writes `us\n`, and malformed existing bytes are rejected and
+preserved rather than reset or migrated.
+
+The non-authoritative runtime accepts the editable keymap state path and loads
+volume followed by keymap before opening presentation or input resources. Its
+no-handler settings fallback saves volume and keymap through ABI 15 before the
+reducer mutates state; a keymap save failure preserves the prior selection,
+shows `KEYMAP STATE ERROR`, and still emits the confirmation cue. Brightness
+remains delegated to an injected external handler. Terminal launch continues to
+receive the current selection only through `RETRO_DECK_KEYMAP`, and child return
+reloads volume but not keymap. `RETRODECK:MAIN` remains unchanged and the C++
+dashboard stays authoritative.
+
+Named and fresh SBCL runs, the complete host suite, ARM/ECL matrix, `nix flake
+check`, and an independent parity review passed. The deployed native host and
+startup, settings, and dashboard Lisp files matched repository hashes. A
+harmless installed fixture exercised missing initialization, existing Czech
+state, malformed-state rejection and preservation, and an exact canonical
+settings save without opening display or input. Its final `cz\n` file was three
+bytes with mode `0600`; the C++ dashboard retained PID 22788 and the Deck health
+check remained healthy.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 10,202
+production lines, including the existing catalog compiler, and 15,392 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
