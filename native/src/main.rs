@@ -1,5 +1,6 @@
 use retrodeck_native::{
-    audio, canvas, controls, fbdev, input, network, polling, process, regular_file, wayland,
+    audio, canvas, controls, fbdev, input, network, polling, process, regular_file, state_file,
+    wayland,
 };
 use std::env;
 use std::ffi::{CString, OsStr, c_char, c_int, c_void};
@@ -37,7 +38,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 14;
+const ABI_VERSION: ClFixnum = 15;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -167,6 +168,10 @@ impl Ecl {
                 native_canvas_draw_projected_text as EclTwoArgumentFunction,
             ),
             ("INPUT-POLL", native_input_poll as EclTwoArgumentFunction),
+            (
+                "WRITE-STATE-FILE",
+                native_write_state_file as EclTwoArgumentFunction,
+            ),
         ] {
             let name = c_string(name)?;
             let symbol = unsafe { ecl_make_symbol(name.as_ptr(), package_name.as_ptr()) };
@@ -297,6 +302,10 @@ impl Ecl {
             (
                 "NETWORK-STATUS",
                 native_network_status as EclOneArgumentFunction,
+            ),
+            (
+                "READ-STATE-FILE",
+                native_read_state_file as EclOneArgumentFunction,
             ),
         ] {
             let name = c_string(name)?;
@@ -602,6 +611,31 @@ unsafe extern "C" fn native_read_regular_file(
         )
     })();
     native_optional_string(result)
+}
+
+unsafe extern "C" fn native_read_state_file(path: ClObject) -> ClObject {
+    let result = (|| state_file::read(&decode_path(path, "state file path")?))();
+    match result {
+        Ok(state_file::StateRead::Missing) => make_fixnum_list(&[0]),
+        Ok(state_file::StateRead::Value(value)) => make_object_list(&[
+            unsafe { ecl_make_integer(1) },
+            make_base_string(&value, "state file"),
+        ]),
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            ECL_NIL
+        }
+    }
+}
+
+unsafe extern "C" fn native_write_state_file(path: ClObject, value: ClObject) -> ClObject {
+    let result = (|| {
+        state_file::write(
+            &decode_path(path, "state file path")?,
+            &decode_base_string(value, "state file value")?,
+        )
+    })();
+    native_status(result)
 }
 
 unsafe extern "C" fn native_network_status(path: ClObject) -> ClObject {

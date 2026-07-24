@@ -30,6 +30,10 @@
 (defparameter *text-mask-clear-count* 0)
 (defparameter *regular-file-result* nil)
 (defparameter *regular-file-arguments* nil)
+(defparameter *state-file-read-result* '(0))
+(defparameter *state-file-read-path* nil)
+(defparameter *state-file-write-status* 1)
+(defparameter *state-file-write-arguments* nil)
 (defparameter *network-status-result* '("" "" "" "STATUS UNAVAILABLE"))
 (defparameter *network-status-path* nil)
 (defparameter *canvas-fill-calls* nil)
@@ -113,8 +117,10 @@
            #:raster-load-cover
            #:raster-load-png
            #:read-regular-file
+           #:read-state-file
            #:run-terminal
            #:stop-audio
+           #:write-state-file
            #:text-mask-clear
            #:text-mask-load
            #:wayland-close
@@ -127,7 +133,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 14)
+      (lambda () 15)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () (incf *active-count*) *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -191,7 +197,15 @@
         (lambda (&rest arguments)
           (setf *regular-file-arguments* arguments)
           *regular-file-result*)
-        (symbol-function (find-symbol "NETWORK-STATUS" "RETRODECK.NATIVE"))
+        (symbol-function (find-symbol "READ-STATE-FILE" "RETRODECK.NATIVE"))
+         (lambda (path)
+           (setf *state-file-read-path* path)
+           *state-file-read-result*)
+         (symbol-function (find-symbol "WRITE-STATE-FILE" "RETRODECK.NATIVE"))
+         (lambda (&rest arguments)
+           (setf *state-file-write-arguments* arguments)
+           *state-file-write-status*)
+         (symbol-function (find-symbol "NETWORK-STATUS" "RETRODECK.NATIVE"))
         (lambda (path)
           (setf *network-status-path* path)
           *network-status-result*)
@@ -403,6 +417,35 @@
 (assert (signals-type-error-p
          (lambda ()
            (retrodeck:read-bounded-regular-file "/tmp/x" 1 4194305))))
+
+(setf *state-file-read-result* '(0))
+(multiple-value-bind (value present-p)
+    (retrodeck:read-native-state-file "/tmp/volume.state")
+  (assert (and (null value) (not present-p))))
+(assert (string= *state-file-read-path* "/tmp/volume.state"))
+(let ((contents (format nil "42~%")))
+  (setf *state-file-read-result* (list 1 contents))
+  (multiple-value-bind (value present-p)
+      (retrodeck:read-native-state-file "/tmp/volume.state")
+    (assert (and present-p (string= value contents)))))
+(dolist (invalid '(nil (0 nil) (1) (1 42) (2)))
+  (setf *state-file-read-result* invalid)
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:read-native-state-file "/tmp/volume.state")))))
+(assert (signals-type-error-p
+         (lambda () (retrodeck:read-native-state-file 4))))
+(let ((contents (format nil "37~%")))
+  (setf *state-file-write-status* 1)
+  (assert (retrodeck:write-native-state-file "/tmp/volume.state" contents))
+  (assert (equal *state-file-write-arguments*
+                 (list "/tmp/volume.state" contents))))
+(setf *state-file-write-status* 0)
+(assert (not (retrodeck:write-native-state-file "/tmp/volume.state" "0")))
+(assert (signals-type-error-p
+         (lambda () (retrodeck:write-native-state-file "/tmp/x" 4))))
+(setf *state-file-read-result* '(0)
+      *state-file-write-status* 1)
 
 (setf *network-status-result*
       '("NET1" "10.0.1.11" "10.0.0.15" "CONNECTED"))

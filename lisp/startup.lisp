@@ -30,8 +30,10 @@
            #:raster-load-cover
            #:raster-load-png
            #:read-regular-file
+           #:read-state-file
            #:run-terminal
            #:stop-audio
+           #:write-state-file
            #:text-mask-clear
            #:text-mask-load
            #:wayland-close
@@ -73,8 +75,10 @@
                 #:network-status
                 #:play-tones
                 #:read-regular-file
+                #:read-state-file
                 #:run-terminal
                 #:stop-audio
+                #:write-state-file
                 #:text-mask-clear
                 #:text-mask-load
                 #:wayland-close
@@ -223,6 +227,7 @@
            #:present-wayland-solid
            #:read-bounded-regular-file
            #:read-native-network-status
+           #:read-native-state-file
            #:reboot-confirmation-active-p
            #:scan-evdev-controls
            #:run-dashboard-terminal
@@ -253,11 +258,12 @@
            #:wifi-touch-transition
            #:wifi-valid-text-p
            #:stroke-canvas-rect
-           #:wayland-shutdown-requested-p))
+           #:wayland-shutdown-requested-p
+           #:write-native-state-file))
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 14)
+(defconstant +native-abi-version+ 15)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -362,6 +368,26 @@
             :wlan-ipv4 wlan-ipv4
             :wireguard-ipv4 wireguard-ipv4
             :selector selector))))
+
+(defun read-native-state-file (path)
+  (check-type path string)
+  (let ((result (read-state-file (native-path-string path))))
+    (unless (and (consp result)
+                 (case (first result)
+                   (0 (= (length result) 1))
+                   (1 (and (= (length result) 2)
+                           (stringp (second result))))))
+      (error "Invalid native state file result ~S" result))
+    (if (zerop (first result))
+        (values nil nil)
+        (values (second result) t))))
+
+(defun write-native-state-file (path value)
+  (check-type path string)
+  (check-type value string)
+  (= (write-state-file (native-path-string path)
+                       (coerce value 'base-string))
+     1))
 
 (defun read-bounded-regular-file (path minimum-bytes maximum-bytes)
   (check-type minimum-bytes (and fixnum (integer 0 4194304)))
