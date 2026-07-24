@@ -379,6 +379,118 @@
         (error "cannot save volume state ~A" path))
       volume)))
 
+(defun dashboard-ascii-space-p (character)
+  (member (char-code character) '(9 10 11 12 13 32)))
+
+(defun parse-dashboard-control-integer (text role)
+  (check-type text string)
+  (check-type role string)
+  (let ((begin 0)
+        (end (length text)))
+    (loop while (and (< begin end)
+                     (dashboard-ascii-space-p (char text begin)))
+          do (incf begin))
+    (loop while (and (> end begin)
+                     (dashboard-ascii-space-p (char text (1- end))))
+          do (decf end))
+    (when (= begin end)
+      (error "~A is empty" role))
+    (let ((value 0))
+      (loop for index from begin below end do
+        (let ((character (char text index)))
+          (unless (char<= #\0 character #\9)
+            (error "~A must contain an unsigned integer" role))
+          (setf value (+ (* value 10)
+                         (- (char-code character) (char-code #\0))))
+          (when (> value 4294967295)
+            (error "~A is too large" role))))
+      value)))
+
+(defun dashboard-brightness-percent-p (percent)
+  (and (integerp percent)
+       (<= *dashboard-brightness-minimum* percent 100)
+       (zerop (mod percent *dashboard-brightness-step*))))
+
+(defun dashboard-brightness-state-text (percent)
+  (unless (dashboard-brightness-percent-p percent)
+    (error "brightness must be a 10-point step from 10 through 100"))
+  (coerce (format nil "~D~%" percent) 'base-string))
+
+(defun parse-dashboard-brightness-state (text)
+  (check-type text string)
+  (flet ((invalid ()
+           (error "brightness state must contain a 10-point step from 10 through 100 followed by a newline")))
+    (handler-case
+        (let ((percent (parse-dashboard-volume-state text)))
+          (unless (dashboard-brightness-percent-p percent)
+            (invalid))
+          percent)
+      (error () (invalid)))))
+
+(defun dashboard-brightness-raw-value (percent maximum)
+  (check-type percent (integer 0 4294967295))
+  (check-type maximum (integer 0 4294967295))
+  (if (zerop maximum)
+      0
+      (max 1 (min maximum (floor (+ (* percent maximum) 50) 100)))))
+
+(defun dashboard-observed-brightness-percent (current maximum)
+  (check-type current (integer 0 4294967295))
+  (check-type maximum (integer 1 4294967295))
+  (when (> current maximum)
+    (error "brightness is outside the backlight range"))
+  (let* ((observed
+           (floor (+ (* current 100) (floor maximum 2)) maximum))
+         (rounded
+           (* (floor (+ observed (floor *dashboard-brightness-step* 2))
+                     *dashboard-brightness-step*)
+              *dashboard-brightness-step*)))
+    (max *dashboard-brightness-minimum* (min 100 rounded))))
+
+(defun save-dashboard-brightness-state (path percent)
+  (check-type path string)
+  (write-native-state-file path (dashboard-brightness-state-text percent)))
+
+(defun set-dashboard-brightness-percent
+    (device-path state-path maximum percent)
+  (check-type device-path string)
+  (check-type state-path string)
+  (check-type maximum (integer 0 4294967295))
+  (unless (and (plusp maximum) (dashboard-brightness-percent-p percent))
+    (error "brightness must be a 10-point step from 10 through 100"))
+  (unless (write-native-control-file
+           device-path
+           (coerce (format nil "~D~%"
+                           (dashboard-brightness-raw-value percent maximum))
+                   'base-string))
+    (error "cannot write brightness ~A" device-path))
+  (unless (save-dashboard-brightness-state state-path percent)
+    (error "cannot save brightness state ~A" state-path))
+  percent)
+
+(defun load-dashboard-brightness (device-path maximum-path state-path)
+  (check-type device-path string)
+  (check-type maximum-path string)
+  (check-type state-path string)
+  (let ((maximum
+          (parse-dashboard-control-integer
+           (read-native-control-file maximum-path) "maximum brightness")))
+    (when (zerop maximum)
+      (error "brightness is outside the backlight range"))
+    (let ((current
+            (parse-dashboard-control-integer
+             (read-native-control-file device-path) "brightness")))
+      (when (> current maximum)
+        (error "brightness is outside the backlight range"))
+      (multiple-value-bind (text present-p) (read-native-state-file state-path)
+        (let ((percent
+                (if present-p
+                    (parse-dashboard-brightness-state text)
+                    (dashboard-observed-brightness-percent current maximum))))
+          (set-dashboard-brightness-percent
+           device-path state-path maximum percent)
+          (values percent maximum))))))
+
 (defun dashboard-keymap-state-text (keymap)
   (check-type keymap string)
   (unless (member keymap '("us" "cz") :test #'string=)

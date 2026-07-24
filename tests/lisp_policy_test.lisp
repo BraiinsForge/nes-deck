@@ -36,6 +36,7 @@
 (defparameter *control-file-write-status* 1)
 (defparameter *control-file-write-arguments* nil)
 (defparameter *control-file-write-calls* nil)
+(defparameter *storage-write-trace* nil)
 (defparameter *state-file-read-result* '(0))
 (defparameter *state-file-read-results* nil)
 (defparameter *state-file-read-path* nil)
@@ -222,10 +223,12 @@
          (lambda (&rest arguments)
            (setf *control-file-write-arguments* arguments)
            (push arguments *control-file-write-calls*)
+           (push (cons :control arguments) *storage-write-trace*)
            *control-file-write-status*)
          (symbol-function (find-symbol "WRITE-STATE-FILE" "RETRODECK.NATIVE"))
          (lambda (&rest arguments)
            (setf *state-file-write-arguments* arguments)
+           (push (cons :state arguments) *storage-write-trace*)
            *state-file-write-status*)
          (symbol-function (find-symbol "NETWORK-STATUS" "RETRODECK.NATIVE"))
         (lambda (path)
@@ -555,6 +558,140 @@
 (assert (signals-type-error-p
          (lambda ()
            (retrodeck:save-dashboard-volume-state "/tmp/volume.state" 101))))
+(dolist (fixture (list (list (format nil "12~%") 12)
+                       (list (format nil "~C~C~C12~C~C~C"
+                                          #\Space #\Tab (code-char 11)
+                                          (code-char 12) #\Return #\Newline)
+                             12)
+                       '("00020" 20)
+                       '("4294967295" 4294967295)))
+  (assert (= (retrodeck::parse-dashboard-control-integer
+              (first fixture) "brightness")
+             (second fixture))))
+(dolist (invalid (list "" (format nil " ~C~C~%" #\Tab #\Return)
+                       "-1" "12x" "4294967296"))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck::parse-dashboard-control-integer
+              invalid "brightness")))))
+(dolist (fixture (list (list (format nil "10~%") 10)
+                       (list (format nil "60~%") 60)
+                       (list (format nil "100~%") 100)))
+  (assert (= (retrodeck:parse-dashboard-brightness-state (first fixture))
+             (second fixture))))
+(dolist (invalid (list "" (format nil "0~%") (format nil "5~%")
+                       (format nil "05~%") (format nil "55~%")
+                       (format nil "110~%") "60"
+                       (format nil "60~%~%") (format nil " 60~%")))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:parse-dashboard-brightness-state invalid)))))
+(assert (= (retrodeck::dashboard-brightness-raw-value 10 20) 2))
+(assert (= (retrodeck::dashboard-brightness-raw-value 60 20) 12))
+(assert (= (retrodeck::dashboard-brightness-raw-value 100 20) 20))
+(assert (= (retrodeck::dashboard-brightness-raw-value 10 1) 1))
+(assert (zerop (retrodeck::dashboard-brightness-raw-value 60 0)))
+(dolist (fixture '((0 20 10) (1 20 10) (12 20 60)
+                   (13 20 70) (19 20 100) (20 20 100)))
+  (assert (= (retrodeck::dashboard-observed-brightness-percent
+              (first fixture) (second fixture))
+             (third fixture))))
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck::dashboard-observed-brightness-percent 21 20))))
+(setf *control-file-write-status* 1
+      *state-file-write-status* 1
+      *control-file-write-arguments* nil
+      *state-file-write-arguments* nil
+      *storage-write-trace* nil)
+(assert (= (retrodeck:set-dashboard-brightness-percent
+            "/tmp/brightness" "/tmp/brightness.state" 20 70)
+           70))
+(assert (equal (reverse *storage-write-trace*)
+               (list (list :control "/tmp/brightness" (format nil "14~%"))
+                     (list :state "/tmp/brightness.state"
+                           (format nil "70~%")))))
+(setf *control-file-write-status* 0
+      *state-file-write-arguments* nil
+      *storage-write-trace* nil)
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck:set-dashboard-brightness-percent
+            "/tmp/brightness" "/tmp/brightness.state" 20 70))))
+(assert (null *state-file-write-arguments*))
+(assert (equal (mapcar #'first (reverse *storage-write-trace*)) '(:control)))
+(setf *control-file-write-status* 1
+      *state-file-write-status* 0
+      *storage-write-trace* nil)
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck:set-dashboard-brightness-percent
+            "/tmp/brightness" "/tmp/brightness.state" 20 70))))
+(assert (equal (mapcar #'first (reverse *storage-write-trace*))
+               '(:control :state)))
+(setf *state-file-write-status* 1
+      *storage-write-trace* nil)
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck:set-dashboard-brightness-percent
+            "/tmp/brightness" "/tmp/brightness.state" 20 65))))
+(assert (null *storage-write-trace*))
+(setf *control-file-read-results*
+      (list (cons "/tmp/max_brightness" (format nil "20~%"))
+            (cons "/tmp/brightness" (format nil "12~%")))
+      *control-file-read-paths* nil
+      *state-file-read-results* (list (cons "/tmp/brightness.state" '(0)))
+      *state-file-read-paths* nil
+      *control-file-write-status* 1
+      *state-file-write-status* 1
+      *storage-write-trace* nil)
+(multiple-value-bind (percent maximum)
+    (retrodeck:load-dashboard-brightness
+     "/tmp/brightness" "/tmp/max_brightness" "/tmp/brightness.state")
+  (assert (= percent 60))
+  (assert (= maximum 20)))
+(assert (equal (reverse *control-file-read-paths*)
+               '("/tmp/max_brightness" "/tmp/brightness")))
+(assert (equal (reverse *state-file-read-paths*)
+               '("/tmp/brightness.state")))
+(assert (equal (reverse *storage-write-trace*)
+               (list (list :control "/tmp/brightness" (format nil "12~%"))
+                     (list :state "/tmp/brightness.state"
+                           (format nil "60~%")))))
+(setf *state-file-read-results*
+      (list (cons "/tmp/brightness.state" (list 1 (format nil "70~%"))))
+      *storage-write-trace* nil)
+(multiple-value-bind (percent maximum)
+    (retrodeck:load-dashboard-brightness
+     "/tmp/brightness" "/tmp/max_brightness" "/tmp/brightness.state")
+  (assert (= percent 70))
+  (assert (= maximum 20)))
+(assert (equal (reverse *storage-write-trace*)
+               (list (list :control "/tmp/brightness" (format nil "14~%"))
+                     (list :state "/tmp/brightness.state"
+                           (format nil "70~%")))))
+(setf *state-file-read-results*
+      (list (cons "/tmp/brightness.state" (list 1 (format nil "05~%"))))
+      *storage-write-trace* nil)
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck:load-dashboard-brightness
+            "/tmp/brightness" "/tmp/max_brightness"
+            "/tmp/brightness.state"))))
+(assert (null *storage-write-trace*))
+(setf *control-file-read-results*
+      (list (cons "/tmp/max_brightness" (format nil "0~%"))
+            (cons "/tmp/brightness" (format nil "12~%")))
+      *control-file-read-paths* nil
+      *state-file-read-paths* nil)
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck:load-dashboard-brightness
+            "/tmp/brightness" "/tmp/max_brightness"
+            "/tmp/brightness.state"))))
+(assert (equal (reverse *control-file-read-paths*) '("/tmp/max_brightness")))
+(assert (null *state-file-read-paths*))
+
 (dolist (fixture (list (list (format nil "us~%") "us")
                        (list (format nil "cz~%") "cz")))
   (assert (string= (retrodeck:parse-dashboard-keymap-state (first fixture))
@@ -593,12 +730,23 @@
 (assert (signals-error-p
          (lambda ()
            (retrodeck:save-dashboard-keymap-state "/tmp/keymap.state" "de"))))
-(setf *state-file-read-result* (list 1 (format nil "42~%"))
+(setf *control-file-read-result* ""
+      *control-file-read-results*
+      (list (cons "/sys/class/backlight/display-bl/max_brightness"
+                  (format nil "20~%"))
+            (cons "/sys/class/backlight/display-bl/brightness"
+                  (format nil "12~%")))
+      *control-file-read-paths* nil
+      *control-file-write-status* 1
+      *state-file-read-result* (list 1 (format nil "42~%"))
       *state-file-read-results*
-      (list (cons "/mnt/data/nes-deck/state/terminal-keymap.state"
+      (list (cons "/mnt/data/nes-deck/state/menu-brightness.state"
+                  (list 1 (format nil "60~%")))
+            (cons "/mnt/data/nes-deck/state/terminal-keymap.state"
                   (list 1 (format nil "us~%"))))
       *state-file-read-paths* nil
-      *state-file-write-status* 1)
+      *state-file-write-status* 1
+      *storage-write-trace* nil)
 
 (setf *network-status-result*
       '("NET1" "10.0.1.11" "10.0.0.15" "CONNECTED"))
@@ -2912,11 +3060,20 @@ secret!9
 (let* ((state (retrodeck:dashboard-loop-initial-state nil :now 1))
        (runtime (retrodeck:make-dashboard-runtime
                  :volume-state "/tmp/volume.state"
+                 :brightness-device "/tmp/brightness"
+                 :brightness-maximum-path "/tmp/max_brightness"
+                 :brightness-state "/tmp/brightness.state"
                  :keymap-state "/tmp/keymap.state"
                  :default-volume 42))
+       (*control-file-read-results*
+        (list (cons "/tmp/max_brightness" (format nil "20~%"))
+              (cons "/tmp/brightness" (format nil "12~%"))))
+       (*control-file-read-paths* nil)
+       (*control-file-write-calls* nil)
        (*state-file-read-result* (list 1 (format nil "42~%")))
        (*state-file-read-results*
-        (list (cons "/tmp/keymap.state" (list 1 (format nil "de~%")))))
+        (list (cons "/tmp/brightness.state" (list 1 (format nil "60~%")))
+              (cons "/tmp/keymap.state" (list 1 (format nil "de~%")))))
        (*state-file-read-paths* nil)
        (*state-file-write-status* 1)
        (*state-file-write-arguments* nil)
@@ -2926,16 +3083,105 @@ secret!9
   (assert (signals-error-p
            (lambda ()
              (retrodeck:dashboard-runtime-initialize state runtime 1))))
+  (assert (equal (reverse *control-file-read-paths*)
+                 '("/tmp/max_brightness" "/tmp/brightness")))
   (assert (equal (reverse *state-file-read-paths*)
-                 '("/tmp/volume.state" "/tmp/keymap.state")))
-  (assert (null *state-file-write-arguments*))
+                 '("/tmp/volume.state" "/tmp/brightness.state"
+                   "/tmp/keymap.state")))
+  (assert (equal (reverse *control-file-write-calls*)
+                 (list (list "/tmp/brightness" (format nil "12~%")))))
+  (assert (equal *state-file-write-arguments*
+                 (list "/tmp/brightness.state" (format nil "60~%"))))
   (assert (zerop *fbdev-open-count*))
   (assert (zerop *evdev-open-count*))
   (assert (zerop *evdev-controls-scan-count*))
   (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
-  (assert (not (getf runtime :initialized-p))))
+  (assert (not (getf runtime :initialized-p)))
+  (assert (null (getf runtime :brightness-maximum))))
 
-(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 1))
+(flet ((check-startup-brightness-failure
+           (maximum-text current-text state-result expected-control-reads
+            expected-state-reads expected-write-trace
+            &key (control-write-status 1) (state-write-status 1))
+         (let* ((state (retrodeck:dashboard-loop-initial-state
+                        nil :brightness 40 :now 1))
+                (runtime
+                  (retrodeck:make-dashboard-runtime
+                   :volume-state "/tmp/volume.state"
+                   :brightness-device "/tmp/brightness"
+                   :brightness-maximum-path "/tmp/max_brightness"
+                   :brightness-state "/tmp/brightness.state"
+                   :keymap-state "/tmp/keymap.state"
+                   :default-volume 42))
+                (*control-file-read-result* nil)
+                (*control-file-read-results*
+                  (list (cons "/tmp/max_brightness" maximum-text)
+                        (cons "/tmp/brightness" current-text)))
+                (*control-file-read-paths* nil)
+                (*control-file-write-status* control-write-status)
+                (*state-file-read-result* (list 1 (format nil "42~%")))
+                (*state-file-read-results*
+                  (list (cons "/tmp/brightness.state" state-result)
+                        (cons "/tmp/keymap.state"
+                              (list 1 (format nil "us~%")))))
+                (*state-file-read-paths* nil)
+                (*state-file-write-status* state-write-status)
+                (*storage-write-trace* nil)
+                (*fbdev-open-count* 0)
+                (*evdev-open-count* 0)
+                (*evdev-controls-scan-count* 0))
+           (assert (signals-error-p
+                    (lambda ()
+                      (retrodeck:dashboard-runtime-initialize
+                       state runtime 1))))
+           (assert (equal (reverse *control-file-read-paths*)
+                          expected-control-reads))
+           (assert (equal (reverse *state-file-read-paths*)
+                          expected-state-reads))
+           (assert (equal (reverse *storage-write-trace*)
+                          expected-write-trace))
+           (assert (= (getf (getf state :settings) :brightness) 40))
+           (assert (null (getf runtime :brightness-maximum)))
+           (assert (zerop *fbdev-open-count*))
+           (assert (zerop *evdev-open-count*))
+           (assert (zerop *evdev-controls-scan-count*))
+           (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
+           (assert (not (getf runtime :initialized-p))))))
+  (check-startup-brightness-failure
+   (format nil "20~%") (format nil "12~%")
+   (list 1 (format nil "05~%"))
+   '("/tmp/max_brightness" "/tmp/brightness")
+   '("/tmp/volume.state" "/tmp/brightness.state") nil)
+  (check-startup-brightness-failure
+   (format nil "0~%") (format nil "12~%")
+   (list 1 (format nil "60~%"))
+   '("/tmp/max_brightness") '("/tmp/volume.state") nil)
+  (check-startup-brightness-failure
+   (format nil "20~%") (format nil "21~%")
+   (list 1 (format nil "60~%"))
+   '("/tmp/max_brightness" "/tmp/brightness")
+   '("/tmp/volume.state") nil)
+  (check-startup-brightness-failure
+   nil (format nil "12~%") (list 1 (format nil "60~%"))
+   '("/tmp/max_brightness") '("/tmp/volume.state") nil)
+  (check-startup-brightness-failure
+   (format nil "20~%") (format nil "12~%")
+   (list 1 (format nil "60~%"))
+   '("/tmp/max_brightness" "/tmp/brightness")
+   '("/tmp/volume.state" "/tmp/brightness.state")
+   (list (list :control "/tmp/brightness" (format nil "12~%")))
+   :control-write-status 0)
+  (check-startup-brightness-failure
+   (format nil "20~%") (format nil "12~%")
+   (list 1 (format nil "60~%"))
+   '("/tmp/max_brightness" "/tmp/brightness")
+   '("/tmp/volume.state" "/tmp/brightness.state")
+   (list (list :control "/tmp/brightness" (format nil "12~%"))
+         (list :state "/tmp/brightness.state" (format nil "60~%")))
+   :state-write-status 0))
+
+(let* ((state (retrodeck:dashboard-loop-initial-state
+               nil :brightness 60 :now 1))
        (runtime (retrodeck:make-dashboard-runtime
                  :volume-state "/tmp/volume.state"
                  :default-volume 42))
@@ -2975,14 +3221,57 @@ secret!9
            (retrodeck::dashboard-runtime-handle-effect
             runtime (list :settings-action keymap-plan) state)
            '(:settings-result :succeeded-p nil)))
+  (setf (getf brightness-plan :device-path) "/tmp/brightness"
+        (getf brightness-plan :state-path) "/tmp/brightness.state"
+        (getf runtime :brightness-maximum) 20
+        *control-file-write-status* 1
+        *state-file-write-status* 1
+        *storage-write-trace* nil)
+  (let ((result
+          (retrodeck::dashboard-runtime-handle-effect
+           runtime (list :settings-action brightness-plan) state)))
+    (assert (equal result '(:settings-result :succeeded-p t)))
+    (assert (equal (reverse *storage-write-trace*)
+                   (list (list :control "/tmp/brightness" (format nil "14~%"))
+                         (list :state "/tmp/brightness.state"
+                               (format nil "70~%")))))
+    (let ((pending (copy-list state)))
+      (setf (getf pending :pending-settings-plan) brightness-plan)
+      (multiple-value-bind (saved effects)
+          (retrodeck:dashboard-reduce pending result)
+        (assert (= (getf (getf saved :settings) :brightness) 70))
+        (assert (string= (getf (getf saved :settings) :status)
+                         "BRIGHTNESS 70%"))
+        (assert (equal effects '((:render) (:present) (:cue :next)))))))
+  (setf *control-file-write-status* 0
+        *state-file-write-status* 1
+        *storage-write-trace* nil)
+  (let ((result
+          (retrodeck::dashboard-runtime-handle-effect
+           runtime (list :settings-action brightness-plan) state)))
+    (assert (equal result '(:settings-result :succeeded-p nil)))
+    (assert (equal (mapcar #'first (reverse *storage-write-trace*))
+                   '(:control))))
+  (setf *control-file-write-status* 1
+        *state-file-write-status* 0
+        *storage-write-trace* nil)
+  (let ((result
+          (retrodeck::dashboard-runtime-handle-effect
+           runtime (list :settings-action brightness-plan) state)))
+    (assert (equal result '(:settings-result :succeeded-p nil)))
+    (assert (equal (mapcar #'first (reverse *storage-write-trace*))
+                   '(:control :state)))
+    (let ((pending (copy-list state)))
+      (setf (getf pending :pending-settings-plan) brightness-plan)
+      (multiple-value-bind (failed effects)
+          (retrodeck:dashboard-reduce pending result)
+        (assert (= (getf (getf failed :settings) :brightness) 60))
+        (assert (string= (getf (getf failed :settings) :status)
+                         "BRIGHTNESS ERROR - CHECK LOG"))
+        (assert (equal effects '((:render) (:present) (:cue :next)))))))
   (setf *state-file-write-status* 1
-        *state-file-write-arguments* nil)
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck::dashboard-runtime-handle-effect
-              runtime (list :settings-action brightness-plan) state))))
-  (assert (null *state-file-write-arguments*))
-  (setf *state-file-read-result* (list 1 (format nil "55~%")))
+        *state-file-write-arguments* nil
+        *state-file-read-result* (list 1 (format nil "55~%")))
   (assert (equal
            (retrodeck::dashboard-runtime-handle-effect
             runtime '(:reload-volume) state)
@@ -3046,9 +3335,12 @@ secret!9
        (*network-status-result*
          '("NET1" "10.0.1.11" "10.0.0.15" "CONNECTED"))
        (*network-status-path* nil)
+       (*control-file-read-paths* nil)
        (*state-file-read-result* (list 1 (format nil "37~%")))
        (*state-file-read-results*
-        (list (cons "/mnt/data/nes-deck/state/terminal-keymap.state"
+        (list (cons "/mnt/data/nes-deck/state/menu-brightness.state"
+                    (list 1 (format nil "60~%")))
+              (cons "/mnt/data/nes-deck/state/terminal-keymap.state"
                     (list 1 (format nil "cz~%")))))
        (*state-file-read-path* nil)
        (*state-file-read-paths* nil))
@@ -3057,10 +3349,17 @@ secret!9
     (declare (ignore ignored-runtime))
     (assert (= (getf (getf initialized :settings) :volume) 37))
     (assert (= (getf (getf initialized :settings) :last-audible-volume) 37))
+    (assert (= (getf (getf initialized :settings) :brightness) 60))
+    (assert (= (getf runtime :brightness-maximum) 20))
     (assert (string= (getf (getf initialized :settings) :keymap) "cz"))
+    (assert
+     (equal (reverse *control-file-read-paths*)
+            '("/sys/class/backlight/display-bl/max_brightness"
+              "/sys/class/backlight/display-bl/brightness")))
     (assert
      (equal (reverse *state-file-read-paths*)
             '("/mnt/data/nes-deck/state/menu-volume.state"
+              "/mnt/data/nes-deck/state/menu-brightness.state"
               "/mnt/data/nes-deck/state/terminal-keymap.state")))
     (assert (equal (getf initialized :network)
                    '(:ssid "NET1" :wlan-ipv4 "10.0.1.11"

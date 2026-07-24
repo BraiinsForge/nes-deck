@@ -208,6 +208,7 @@
            #:fit-text-width
            #:load-cover-raster
            #:load-png-raster
+           #:load-dashboard-brightness
            #:load-dashboard-keymap-state
            #:load-dashboard-volume-state
            #:load-project-credits
@@ -224,6 +225,7 @@
            #:open-evdev-touch
            #:open-fbdev
            #:open-wayland-widget
+           #:parse-dashboard-brightness-state
            #:parse-dashboard-inherited-volume
            #:parse-dashboard-keymap-state
            #:parse-dashboard-volume-state
@@ -247,8 +249,10 @@
            #:render-dashboard-settings
            #:render-dashboard-wifi
            #:render-project-credits
+           #:save-dashboard-brightness-state
            #:save-dashboard-keymap-state
            #:save-dashboard-volume-state
+           #:set-dashboard-brightness-percent
            #:settings-activation-plan
            #:settings-brightness-after-target
            #:settings-complete-action

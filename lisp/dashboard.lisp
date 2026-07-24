@@ -1321,12 +1321,19 @@
           adopt-presentation
           (volume-state (dashboard-settings-path :volume-state))
           (default-volume (dashboard-inherited-volume))
+          (brightness-device (dashboard-settings-path :brightness))
+          (brightness-maximum-path
+            (dashboard-settings-path :brightness-maximum))
+          (brightness-state (dashboard-settings-path :brightness-state))
           (keymap-state (dashboard-settings-path :keymap-state))
           (network-status-path (dashboard-wifi-path :selector-status))
           external-effect-handler
           (clock #'monotonic-ms))
   (check-type volume-state string)
   (check-type default-volume (integer 0 100))
+  (check-type brightness-device string)
+  (check-type brightness-maximum-path string)
+  (check-type brightness-state string)
   (check-type keymap-state string)
   (check-type network-status-path string)
   (when external-effect-handler
@@ -1336,6 +1343,10 @@
         :adopt-presentation (not (null adopt-presentation))
         :volume-state volume-state
         :default-volume default-volume
+        :brightness-device brightness-device
+        :brightness-maximum-path brightness-maximum-path
+        :brightness-state brightness-state
+        :brightness-maximum nil
         :keymap-state keymap-state
         :network-status-path network-status-path
         :external-effect-handler external-effect-handler
@@ -1394,6 +1405,7 @@
   (setf (getf runtime :layout) nil
         (getf runtime :initialized-p) nil
         (getf runtime :running) nil
+        (getf runtime :brightness-maximum) nil
         (getf runtime :sound-active-p) nil
         (getf runtime :rescan-controls-p) nil)
   runtime)
@@ -1422,6 +1434,19 @@
                   *dashboard-volume-step*)))
     (setf (getf next :settings) settings)
     next))
+
+(defun dashboard-runtime-initialize-brightness (state runtime)
+  (multiple-value-bind (brightness maximum)
+      (load-dashboard-brightness
+       (getf runtime :brightness-device)
+       (getf runtime :brightness-maximum-path)
+       (getf runtime :brightness-state))
+    (let ((settings (copy-list (getf state :settings)))
+          (next (copy-list state)))
+      (setf (getf settings :brightness) brightness
+            (getf next :settings) settings
+            (getf runtime :brightness-maximum) maximum)
+      next)))
 
 (defun dashboard-runtime-initialize-keymap (state runtime)
   (let ((settings (copy-list (getf state :settings)))
@@ -1475,21 +1500,30 @@
              (read-native-network-status
               (getf runtime :network-status-path))))
       ((and (eq (first effect) :settings-action)
-             (member (getf (second effect) :action) '(:volume :keymap)))
+             (member (getf (second effect) :action)
+                     '(:volume :brightness :keymap)))
        (let ((plan (second effect)))
          (list :settings-result :succeeded-p
-               (handler-case
+               (not
+                (null
+                 (handler-case
                    (case (getf plan :action)
                      (:volume
                       (save-dashboard-volume-state
                        (getf plan :path) (getf plan :value)))
+                     (:brightness
+                      (set-dashboard-brightness-percent
+                       (getf plan :device-path)
+                       (getf plan :state-path)
+                       (getf runtime :brightness-maximum)
+                       (getf plan :value)))
                      (:keymap
                       (save-dashboard-keymap-state
                        (getf plan :path) (getf plan :value))))
                  (error (condition)
                    (format *error-output* "retrodeck: ~A~%" condition)
                    (finish-output *error-output*)
-                   nil)))))
+                   nil)))))))
       ((eq (first effect) :reload-volume)
        (let ((current (getf (getf state :settings) :volume)))
          (handler-case
@@ -1619,16 +1653,19 @@
   (check-type now (integer 0 *))
   (when (getf runtime :initialized-p)
     (error "Dashboard runtime is already initialized"))
-  (let ((current
-          (dashboard-runtime-initialize-keymap
-           (dashboard-runtime-initialize-volume state runtime) runtime))
+  (let ((current nil)
         (presentation-owned-p nil)
         (touch-open-p nil)
         (controls-open-p nil)
         (initialized-p nil))
-    (setf (getf runtime :now) now)
     (unwind-protect
         (progn
+          (setf current
+                (dashboard-runtime-initialize-keymap
+                 (dashboard-runtime-initialize-brightness
+                  (dashboard-runtime-initialize-volume state runtime) runtime)
+                 runtime)
+                (getf runtime :now) now)
           (multiple-value-bind (opened owned)
               (dashboard-runtime-open-presentation runtime)
             (unless opened
@@ -1673,6 +1710,7 @@
         (setf (getf runtime :layout) nil
               (getf runtime :initialized-p) nil
               (getf runtime :running) nil
+              (getf runtime :brightness-maximum) nil
               (getf runtime :presentation-owned-p) nil
               (getf runtime :touch-owned-p) nil
               (getf runtime :controls-owned-p) nil)))))
