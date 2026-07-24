@@ -3,11 +3,11 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::mem::MaybeUninit;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
-use std::process::{Command, ExitStatus};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -251,6 +251,76 @@ impl TerminalInteraction {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HelperPhase {
+    Complete,
+    Start,
+    Input,
+    Wait,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct HelperResult {
+    pub phase: HelperPhase,
+    pub exit_code: Option<i32>,
+    pub signal: Option<i32>,
+    pub error: Option<String>,
+}
+
+pub fn run_helper(executable: &Path, input: &[u8]) -> HelperResult {
+    let mut child = match Command::new(executable).stdin(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            return HelperResult {
+                phase: HelperPhase::Start,
+                exit_code: None,
+                signal: None,
+                error: Some(error.to_string()),
+            };
+        }
+    };
+    let input_error = child
+        .stdin
+        .take()
+        .map_or_else(
+            || Some(io::Error::other("helper stdin is unavailable")),
+            |mut stdin| {
+                let write_error = stdin.write_all(input).err();
+                let descriptor = stdin.into_raw_fd();
+                let close_error =
+                    (unsafe { libc::close(descriptor) } != 0).then(io::Error::last_os_error);
+                write_error.or(close_error)
+            },
+        )
+        .map(|error| error.to_string());
+    let (exit_code, signal, wait_error) = match child.wait() {
+        Ok(status) => (status.code(), status.signal(), None),
+        Err(error) => (None, None, Some(error.to_string())),
+    };
+    if let Some(error) = input_error {
+        return HelperResult {
+            phase: HelperPhase::Input,
+            exit_code,
+            signal,
+            error: Some(error),
+        };
+    }
+    if let Some(error) = wait_error {
+        return HelperResult {
+            phase: HelperPhase::Wait,
+            exit_code: None,
+            signal: None,
+            error: Some(error),
+        };
+    }
+    HelperResult {
+        phase: HelperPhase::Complete,
+        exit_code,
+        signal,
+        error: None,
+    }
+}
+
 pub fn run_terminal(executable: &Path, keymap: &OsStr, mode: &OsStr, label: &str) -> ChildResult {
     let mut interaction = TerminalInteraction::new();
     let tty = TtySnapshot::capture();
@@ -389,6 +459,7 @@ fn duration_ms(duration: Duration) -> u32 {
 mod tests {
     use super::*;
     use std::env;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -449,6 +520,64 @@ mod tests {
         ];
         environment.extend_from_slice(extra);
         (executable, arguments, environment)
+    }
+
+    fn temporary_path(label: &str) -> PathBuf {
+        env::temp_dir().join(format!(
+            "retrodeck-{label}-{}-{}",
+            std::process::id(),
+            FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    fn helper_script(body: &str) -> PathBuf {
+        let path = temporary_path("helper");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        path
+    }
+
+    #[test]
+    fn helper_writes_exact_input_and_classifies_failures() {
+        let capture = temporary_path("helper-input");
+        let helper = helper_script(&format!(
+            "cat > '{}'
+",
+            capture.display()
+        ));
+        let input = b"test net\nsecret!9\n";
+        let result = run_helper(&helper, input);
+        assert_eq!(result.phase, HelperPhase::Complete);
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(std::fs::read(&capture).unwrap(), input);
+        std::fs::remove_file(&capture).unwrap();
+        std::fs::remove_file(&helper).unwrap();
+
+        let helper = helper_script("cat >/dev/null\nexit 7\n");
+        let result = run_helper(&helper, input);
+        assert_eq!(result.phase, HelperPhase::Complete);
+        assert_eq!(result.exit_code, Some(7));
+        std::fs::remove_file(&helper).unwrap();
+
+        let helper = helper_script("cat >/dev/null\nkill -TERM $$\n");
+        let result = run_helper(&helper, input);
+        assert_eq!(result.phase, HelperPhase::Complete);
+        assert_eq!(result.signal, Some(libc::SIGTERM));
+        std::fs::remove_file(&helper).unwrap();
+
+        let helper = helper_script("exit 7\n");
+        let result = run_helper(&helper, &vec![b'x'; 1024 * 1024]);
+        assert_eq!(result.phase, HelperPhase::Input);
+        assert_eq!(result.exit_code, Some(7));
+        assert_eq!(result.signal, None);
+        assert!(result.error.is_some());
+        std::fs::remove_file(&helper).unwrap();
+
+        let result = run_helper(Path::new("/no/such/retrodeck-helper"), input);
+        assert_eq!(result.phase, HelperPhase::Start);
+        assert!(result.error.is_some());
     }
 
     fn run_fixture(action: &str) -> ChildResult {

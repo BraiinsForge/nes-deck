@@ -3,8 +3,71 @@
 (in-package #:retrodeck)
 
 (defun main ()
-  (unless (= (retrodeck.native:abi-version) 16)
+  (unless (= (retrodeck.native:abi-version) 17)
     (error "Native ABI mismatch"))
+  (let ((request (format nil "test net~%secret!9~%")))
+    (unless (equal (retrodeck.native:run-helper
+                    (native-path-string "@helper_fixture@")
+                    (coerce request 'base-string))
+                   '(0 0 -1 nil))
+      (error "Helper callback did not report success"))
+    (unless (string= (read-native-control-file "@helper_capture@") request)
+      (error "Helper callback changed the exact stdin bytes"))
+    (unless (equal (retrodeck.native:run-helper
+                    (native-path-string "@helper_failure_fixture@")
+                    (coerce request 'base-string))
+                   '(0 7 -1 nil))
+      (error "Helper callback did not report exit status 7"))
+    (unless (equal (retrodeck.native:run-helper
+                    (native-path-string "@helper_signal_fixture@")
+                    (coerce request 'base-string))
+                   '(0 -1 15 nil))
+      (error "Helper callback did not report signal 15"))
+    (let ((result
+            (retrodeck.native:run-helper
+             (native-path-string "@helper_reject_fixture@")
+             (make-array (* 1024 1024) :element-type 'base-char
+                         :initial-element #\x))))
+      (unless (and (equal (subseq result 0 3) '(2 7 -1))
+                   (stringp (fourth result)))
+        (error "Helper callback lost input-failure precedence"))))
+  (labels ((exercise-wifi-helper (helper succeeded-p expected-status
+                                  expected-passphrase)
+             (let* ((*dashboard-wifi-paths* (copy-list *dashboard-wifi-paths*))
+                    (wifi (wifi-initial-state
+                           :ssid "test net" :passphrase "secret!9"))
+                    (plan (progn
+                            (setf (getf *dashboard-wifi-paths* :profile-helper)
+                                  helper)
+                            (wifi-save-plan wifi)))
+                    (state (dashboard-loop-initial-state nil :wifi-state wifi))
+                    (runtime (make-dashboard-runtime)))
+               (setf (getf state :pending-wifi-plan) plan)
+               (let ((completion
+                       (dashboard-runtime-handle-effect
+                        runtime (list :wifi-action plan) state)))
+                 (unless (equal completion
+                                (list :wifi-result :succeeded-p succeeded-p))
+                   (error "Wi-Fi helper completion was classified incorrectly"))
+                 (multiple-value-bind (next effects)
+                     (dashboard-reduce state completion)
+                   (unless (and
+                            (string= (getf (getf next :wifi) :status)
+                                     expected-status)
+                            (string= (getf (getf next :wifi) :passphrase)
+                                     expected-passphrase)
+                            (null (getf next :pending-wifi-plan))
+                            (equal effects
+                                   '((:render) (:cue :confirm) (:present))))
+                     (error "Wi-Fi helper runtime completion diverged")))))))
+    (exercise-wifi-helper
+     "@helper_fixture@" t
+     "WIFI SAVED - USED AFTER CURRENT WIFI DISCONNECTS" "")
+    (unless (string= (read-native-control-file "@helper_capture@")
+                     (format nil "test net~%secret!9~%"))
+      (error "Wi-Fi runtime changed the exact helper stdin bytes"))
+    (exercise-wifi-helper
+     "@helper_failure_fixture@" nil "WIFI PROFILE WAS NOT SAVED" "secret!9"))
   (unless (= (retrodeck.native:canvas-clear #x121212) 1)
     (error "Canvas clear callback did not accept one argument"))
   (unless (= (retrodeck.native:canvas-draw-glyph -4 8 65 2 #xfe6c27) 1)

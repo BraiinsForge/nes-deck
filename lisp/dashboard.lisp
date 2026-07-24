@@ -1499,6 +1499,8 @@
        (list :network-result :network
              (read-native-network-status
               (getf runtime :network-status-path))))
+      ((eq (first effect) :wifi-action)
+       (run-dashboard-wifi-profile (second effect)))
       ((and (eq (first effect) :settings-action)
              (member (getf (second effect) :action)
                      '(:volume :brightness :keymap)))

@@ -911,8 +911,32 @@
           esac
           EOF
           chmod +x terminal-fixture
+          cat > helper-fixture <<'EOF'
+          #!${pkgs.runtimeShell}
+          [ "$#" -eq 0 ] || exit 90
+          cat > helper-capture
+          EOF
+          cat > helper-failure-fixture <<'EOF'
+          #!${pkgs.runtimeShell}
+          [ "$#" -eq 0 ] || exit 90
+          cat >/dev/null
+          exit 7
+          EOF
+          cat > helper-signal-fixture <<'EOF'
+          #!${pkgs.runtimeShell}
+          [ "$#" -eq 0 ] || exit 90
+          cat >/dev/null
+          kill -TERM "$$"
+          EOF
+          cat > helper-reject-fixture <<'EOF'
+          #!${pkgs.runtimeShell}
+          [ "$#" -eq 0 ] || exit 90
+          exit 7
+          EOF
+          chmod +x helper-fixture helper-failure-fixture \
+            helper-signal-fixture helper-reject-fixture
           printf 'CONNECTED\n' > wifi-status
-          rm -f state-file state-file.keymap state-file.control \
+          rm -f helper-capture state-file state-file.keymap state-file.control \
             state-file.brightness state-file.brightness-max \
             state-file.brightness-state
           printf '12\n' > state-file.control
@@ -924,6 +948,11 @@
             --subst-var-by wifi_status "$PWD/wifi-status" \
             --subst-var-by settings_icon "$PWD/settings-icon.png" \
             --subst-var-by terminal_fixture "$PWD/terminal-fixture" \
+            --subst-var-by helper_fixture "$PWD/helper-fixture" \
+            --subst-var-by helper_failure_fixture "$PWD/helper-failure-fixture" \
+            --subst-var-by helper_signal_fixture "$PWD/helper-signal-fixture" \
+            --subst-var-by helper_reject_fixture "$PWD/helper-reject-fixture" \
+            --subst-var-by helper_capture "$PWD/helper-capture" \
             --subst-var-by credits ${./deploy/menu/credits.tsv}
           RETRO_DECK_VOLUME_PERCENT=0 \
             ECLDIR=${eclArm}/lib/ecl/ \

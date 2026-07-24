@@ -23,6 +23,7 @@
     :passphrase-error "PASSWORD MUST BE 8 TO 63 CHARACTERS"
     :save-success "WIFI SAVED - USED AFTER CURRENT WIFI DISCONNECTS"
     :save-failure "WIFI PROFILE WAS NOT SAVED"
+    :write-failure "WIFI PROFILE WRITE FAILED"
     :closed "WIFI EDITOR CLOSED"))
 
 (defparameter *dashboard-wifi-geometry*
@@ -349,6 +350,62 @@
               :failure-status (dashboard-wifi-label :save-failure)
               :cue :confirm)
         nil)))))
+
+(defun decode-native-helper-result (result)
+  (unless (and (listp result) (= (length result) 4))
+    (error "Native helper result is invalid"))
+  (destructuring-bind (phase exit-code signal error) result
+    (unless (member phase '(0 1 2 3) :test #'eql)
+      (error "Native helper phase is invalid"))
+    (unless (and (integerp exit-code)
+                 (or (= exit-code -1) (<= 0 exit-code 255)))
+      (error "Native helper exit code is invalid"))
+    (unless (and (integerp signal)
+                 (or (= signal -1) (<= 1 signal 255)))
+      (error "Native helper signal is invalid"))
+    (when error
+      (check-type error string))
+    (case phase
+      (0
+       (unless (and (null error)
+                    (not (and (/= exit-code -1) (/= signal -1)))
+                    (or (/= exit-code -1) (/= signal -1)))
+         (error "Completed native helper result is invalid")))
+      ((1 3)
+       (unless (and (= exit-code -1) (= signal -1) (stringp error))
+         (error "Failed native helper result is invalid")))
+      (2
+       (unless (and (stringp error)
+                    (not (and (/= exit-code -1) (/= signal -1))))
+         (error "Native helper input result is invalid"))))
+    (list :phase (nth phase '(:complete :start :input :wait))
+          :exit-code (unless (= exit-code -1) exit-code)
+          :signal (unless (= signal -1) signal)
+          :error error)))
+
+(defun run-dashboard-wifi-profile (plan)
+  (unless (and (listp plan) (eq (getf plan :action) :save))
+    (error "Unknown Wi-Fi helper plan ~S" plan))
+  (let ((executable (getf plan :executable))
+        (input (getf plan :input)))
+    (check-type executable string)
+    (check-type input string)
+    (let* ((result
+             (decode-native-helper-result
+              (run-helper (native-path-string executable)
+                          (coerce input 'base-string))))
+           (phase (getf result :phase))
+           (error (getf result :error)))
+      (when error
+        (format *error-output* "retrodeck: Wi-Fi helper failed: ~A~%" error)
+        (finish-output *error-output*))
+      (cond
+        ((and (eq phase :complete) (eql (getf result :exit-code) 0))
+         '(:wifi-result :succeeded-p t))
+        ((eq phase :input)
+         (list :wifi-result :succeeded-p nil
+               :failure-status (dashboard-wifi-label :write-failure)))
+        (t '(:wifi-result :succeeded-p nil))))))
 
 (defun wifi-complete-save (state plan succeeded-p &key failure-status)
   (unless (eq (getf plan :action) :save)

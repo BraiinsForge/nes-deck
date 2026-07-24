@@ -38,7 +38,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 16;
+const ABI_VERSION: ClFixnum = 17;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -168,6 +168,7 @@ impl Ecl {
                 native_canvas_draw_projected_text as EclTwoArgumentFunction,
             ),
             ("INPUT-POLL", native_input_poll as EclTwoArgumentFunction),
+            ("RUN-HELPER", native_run_helper as EclTwoArgumentFunction),
             (
                 "WRITE-CONTROL-FILE",
                 native_write_control_file as EclTwoArgumentFunction,
@@ -364,6 +365,35 @@ impl Drop for Ecl {
 
 unsafe extern "C" fn native_abi_version() -> ClObject {
     unsafe { ecl_make_integer(ABI_VERSION) }
+}
+
+unsafe extern "C" fn native_run_helper(executable: ClObject, input: ClObject) -> ClObject {
+    let result = (|| {
+        let executable = decode_path(executable, "helper executable")?;
+        let input = decode_base_string(input, "helper input")?;
+        Ok(process::run_helper(&executable, &input))
+    })();
+    let result = result.unwrap_or_else(|error| process::HelperResult {
+        phase: process::HelperPhase::Start,
+        exit_code: None,
+        signal: None,
+        error: Some(error),
+    });
+    let phase = match result.phase {
+        process::HelperPhase::Complete => 0,
+        process::HelperPhase::Start => 1,
+        process::HelperPhase::Input => 2,
+        process::HelperPhase::Wait => 3,
+    };
+    let error = result.error.as_deref().map_or(ECL_NIL, |error| {
+        make_base_string(error.as_bytes(), "helper error")
+    });
+    make_object_list(&[
+        unsafe { ecl_make_integer(phase) },
+        unsafe { ecl_make_integer(result.exit_code.map_or(-1, |value| value as ClFixnum)) },
+        unsafe { ecl_make_integer(result.signal.map_or(-1, |value| value as ClFixnum)) },
+        error,
+    ])
 }
 
 unsafe extern "C" fn native_run_terminal(

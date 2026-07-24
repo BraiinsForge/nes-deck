@@ -91,6 +91,8 @@
 (defparameter *wayland-touch-queue* nil)
 (defparameter *wayland-size* nil)
 (defparameter *wayland-shutdown-status* 0)
+(defparameter *helper-result* '(0 0 -1 nil))
+(defparameter *helper-arguments* nil)
 (defparameter *terminal-result* '(1 0 0 -1 nil))
 (defparameter *terminal-arguments* nil)
 
@@ -128,6 +130,7 @@
            #:read-control-file
            #:read-regular-file
            #:read-state-file
+           #:run-helper
            #:run-terminal
            #:stop-audio
            #:write-control-file
@@ -144,7 +147,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 16)
+      (lambda () 17)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () (incf *active-count*) *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -234,6 +237,10 @@
         (lambda (path)
           (setf *network-status-path* path)
           *network-status-result*)
+        (symbol-function (find-symbol "RUN-HELPER" "RETRODECK.NATIVE"))
+        (lambda (&rest arguments)
+          (setf *helper-arguments* arguments)
+          *helper-result*)
         (symbol-function (find-symbol "RUN-TERMINAL" "RETRODECK.NATIVE"))
         (lambda (&rest arguments)
           (setf *terminal-arguments* arguments)
@@ -1361,6 +1368,118 @@ secret!9
         (assert (string= (getf failed :status)
                          "WIFI PROFILE WRITE FAILED"))
         (assert (equal effect '(:cue :confirm)))))))
+
+(dolist (fixture
+         '(((0 0 -1 nil)
+            (:phase :complete :exit-code 0 :signal nil :error nil))
+           ((0 7 -1 nil)
+            (:phase :complete :exit-code 7 :signal nil :error nil))
+           ((0 -1 15 nil)
+            (:phase :complete :exit-code nil :signal 15 :error nil))
+           ((1 -1 -1 "start")
+            (:phase :start :exit-code nil :signal nil :error "start"))
+           ((2 0 -1 "pipe")
+            (:phase :input :exit-code 0 :signal nil :error "pipe"))
+           ((3 -1 -1 "wait")
+            (:phase :wait :exit-code nil :signal nil :error "wait"))))
+  (assert (equal (retrodeck::decode-native-helper-result (first fixture))
+                 (second fixture))))
+
+(dolist (result
+         '(() (0 0 -1) (0 0 . -1) (4 0 -1 nil)
+           (0 -2 -1 nil) (0 256 -1 nil) (0 0 0 nil)
+           (0 -1 -1 nil) (0 0 15 nil) (0 0 -1 "error")
+           (1 0 -1 "start") (1 -1 -1 nil)
+           (2 0 15 "pipe") (2 0 -1 nil)
+           (3 -1 15 "wait") (3 -1 -1 nil)))
+  (assert (signals-error-p
+           (lambda () (retrodeck::decode-native-helper-result result)))))
+
+(let* ((wifi (retrodeck:wifi-initial-state
+              :ssid "test net" :passphrase "secret!9"))
+       (plan (retrodeck:wifi-save-plan wifi))
+       (*helper-result* '(0 0 -1 nil))
+       (*helper-arguments* nil))
+  (assert (equal (retrodeck:run-dashboard-wifi-profile plan)
+                 '(:wifi-result :succeeded-p t)))
+  (assert (equal *helper-arguments*
+                 (list "/usr/sbin/deck-wifi-profile-add"
+                       (format nil "test net~%secret!9~%")))))
+
+(flet ((exercise-wifi-helper (native-result)
+         (let* ((wifi (retrodeck:wifi-initial-state
+                       :ssid "test net" :passphrase "secret!9"))
+                (plan (retrodeck:wifi-save-plan wifi))
+                (state (retrodeck:dashboard-loop-initial-state
+                        nil :wifi-state wifi))
+                (runtime (retrodeck:make-dashboard-runtime))
+                (*helper-result* native-result)
+                (*helper-arguments* nil)
+                (diagnostics (make-string-output-stream)))
+           (setf (getf state :pending-wifi-plan) plan)
+           (let* ((*error-output* diagnostics)
+                  (completion
+                    (retrodeck::dashboard-runtime-handle-effect
+                     runtime (list :wifi-action plan) state)))
+             (multiple-value-bind (next effects)
+                 (retrodeck:dashboard-reduce state completion)
+               (list completion next effects *helper-arguments*
+                     (get-output-stream-string diagnostics)))))))
+  (dolist (fixture
+           '(((0 0 -1 nil) t
+              "WIFI SAVED - USED AFTER CURRENT WIFI DISCONNECTS" "")
+             ((0 7 -1 nil) nil "WIFI PROFILE WAS NOT SAVED" "secret!9")
+             ((2 0 -1 "pipe") nil "WIFI PROFILE WRITE FAILED" "secret!9")
+             ((1 -1 -1 "start") nil "WIFI PROFILE WAS NOT SAVED" "secret!9")
+             ((3 -1 -1 "wait") nil "WIFI PROFILE WAS NOT SAVED" "secret!9")
+             ((0 -1 15 nil) nil "WIFI PROFILE WAS NOT SAVED" "secret!9")))
+    (destructuring-bind (native-result succeeded-p status passphrase) fixture
+      (destructuring-bind (completion next effects arguments diagnostics)
+          (exercise-wifi-helper native-result)
+        (assert (equal completion
+                       (if succeeded-p
+                           '(:wifi-result :succeeded-p t)
+                           (if (= (first native-result) 2)
+                               '(:wifi-result :succeeded-p nil
+                                 :failure-status "WIFI PROFILE WRITE FAILED")
+                               '(:wifi-result :succeeded-p nil)))))
+        (assert (string= (getf (getf next :wifi) :status) status))
+        (assert (string= (getf (getf next :wifi) :passphrase) passphrase))
+        (assert (null (getf next :pending-wifi-plan)))
+        (assert (equal effects '((:render) (:cue :confirm) (:present))))
+        (assert (equal arguments
+                       (list "/usr/sbin/deck-wifi-profile-add"
+                             (format nil "test net~%secret!9~%"))))
+        (assert (null (search "secret!9" diagnostics)))))))
+
+(let* ((wifi (retrodeck:wifi-initial-state
+              :ssid "test net" :passphrase "secret!9"))
+       (plan (retrodeck:wifi-save-plan wifi))
+       (state (retrodeck:dashboard-loop-initial-state nil :wifi-state wifi))
+       (handled nil)
+       (runtime
+         (retrodeck:make-dashboard-runtime
+          :external-effect-handler
+          (lambda (effect current)
+            (declare (ignore current))
+            (setf handled effect)
+            '(:wifi-result :succeeded-p nil))))
+       (*helper-arguments* nil))
+  (assert (equal (retrodeck::dashboard-runtime-handle-effect
+                  runtime (list :wifi-action plan) state)
+                 '(:wifi-result :succeeded-p nil)))
+  (assert (equal handled (list :wifi-action plan)))
+  (assert (null *helper-arguments*)))
+
+(let ((*helper-arguments* :not-called))
+  (dolist (wifi (list (retrodeck:wifi-initial-state
+                       :ssid "" :passphrase "secret!9")
+                      (retrodeck:wifi-initial-state
+                       :ssid "test net" :passphrase "short")))
+    (multiple-value-bind (plan error-status) (retrodeck:wifi-save-plan wifi)
+      (assert (null plan))
+      (assert (stringp error-status))))
+  (assert (eq *helper-arguments* :not-called)))
 
 (let* ((network '(:ssid "net1" :wlan-ipv4 "10.249.110.248"
                   :wireguard-ipv4 "10.0.0.10" :selector "CONNECTED"))
