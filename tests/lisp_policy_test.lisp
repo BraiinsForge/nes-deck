@@ -444,7 +444,74 @@
 (assert (not (retrodeck:write-native-state-file "/tmp/volume.state" "0")))
 (assert (signals-type-error-p
          (lambda () (retrodeck:write-native-state-file "/tmp/x" 4))))
+(dolist (fixture (list (list (format nil "0~%") 0)
+                       (list (format nil "5~%") 5)
+                       (list (format nil "42~%") 42)
+                       (list (format nil "100~%") 100)))
+  (assert (= (retrodeck:parse-dashboard-volume-state (first fixture))
+             (second fixture))))
+(dolist (invalid (list "" (format nil "~%") (format nil "00~%")
+                       (format nil "042~%") (format nil "101~%") "42"
+                       (format nil "42~%0") (format nil "42~%~%")
+                       (format nil "-1~%") (format nil "on~%")))
+  (assert (signals-error-p
+           (lambda () (retrodeck:parse-dashboard-volume-state invalid)))))
+(assert (signals-type-error-p
+         (lambda () (retrodeck:parse-dashboard-volume-state 42))))
+(assert (= (retrodeck:parse-dashboard-inherited-volume nil) 42))
+(dolist (fixture '(("0" 0) ("00" 0) ("042" 42) ("100" 100)))
+  (assert (= (retrodeck:parse-dashboard-inherited-volume (first fixture))
+             (second fixture))))
+(dolist (invalid '("" "loud" "101" "-1" "1x"))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:parse-dashboard-inherited-volume invalid)))))
+(let ((retrodeck:*dashboard-volume-default* 0))
+  (assert (zerop (retrodeck:parse-dashboard-inherited-volume nil))))
+(assert (= (retrodeck:dashboard-inherited-volume) 42))
+
 (setf *state-file-read-result* '(0)
+      *state-file-write-status* 1
+      *state-file-write-arguments* nil)
+(assert (= (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42)
+           42))
+(assert (equal *state-file-write-arguments*
+               (list "/tmp/volume.state" (format nil "42~%"))))
+(setf *state-file-read-result* (list 1 (format nil "37~%"))
+      *state-file-write-arguments* nil)
+(assert (= (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42)
+           37))
+(assert (null *state-file-write-arguments*))
+(dolist (fixture (list (list (format nil "on~%") 37 37)
+                       (list (format nil "off~%") 37 0)))
+  (setf *state-file-read-result* (list 1 (first fixture))
+        *state-file-write-arguments* nil)
+  (assert (= (retrodeck:load-dashboard-volume-state
+              "/tmp/volume.state" (second fixture))
+             (third fixture)))
+  (assert (equal *state-file-write-arguments*
+                 (list "/tmp/volume.state"
+                       (format nil "~D~%" (third fixture))))))
+(setf *state-file-read-result* (list 1 (format nil "042~%"))
+      *state-file-write-arguments* nil)
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42))))
+(assert (null *state-file-write-arguments*))
+(setf *state-file-read-result* '(0)
+      *state-file-write-status* 0)
+(assert (signals-error-p
+         (lambda ()
+           (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42))))
+(setf *state-file-write-status* 1
+      *state-file-write-arguments* nil)
+(assert (retrodeck:save-dashboard-volume-state "/tmp/volume.state" 63))
+(assert (equal *state-file-write-arguments*
+               (list "/tmp/volume.state" (format nil "63~%"))))
+(assert (signals-type-error-p
+         (lambda ()
+           (retrodeck:save-dashboard-volume-state "/tmp/volume.state" 101))))
+(setf *state-file-read-result* (list 1 (format nil "42~%"))
       *state-file-write-status* 1)
 
 (setf *network-status-result*
@@ -2739,6 +2806,69 @@ secret!9
   (assert (signals-error-p
            (lambda () (retrodeck:dashboard-runtime-poll-input runtime 0)))))
 
+(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 1))
+       (runtime (retrodeck:make-dashboard-runtime
+                 :volume-state "/tmp/volume.state"
+                 :default-volume 42))
+       (plan (retrodeck:settings-activation-plan
+              (getf state :settings) :volume-down))
+       (*state-file-read-result* (list 1 (format nil "42~%")))
+       (*state-file-write-status* 1)
+       (*state-file-write-arguments* nil)
+       (*error-output* (make-broadcast-stream)))
+  (setf (getf plan :path) "/tmp/volume.state")
+  (assert (equal
+           (retrodeck::dashboard-runtime-handle-effect
+            runtime (list :settings-action plan) state)
+           '(:settings-result :succeeded-p t)))
+  (assert (equal *state-file-write-arguments*
+                 (list "/tmp/volume.state" (format nil "37~%"))))
+  (setf *state-file-write-status* 0)
+  (assert (equal
+           (retrodeck::dashboard-runtime-handle-effect
+            runtime (list :settings-action plan) state)
+           '(:settings-result :succeeded-p nil)))
+  (setf *state-file-write-status* 1
+        *state-file-write-arguments* nil
+        *state-file-read-result* (list 1 (format nil "55~%")))
+  (assert (equal
+           (retrodeck::dashboard-runtime-handle-effect
+            runtime '(:reload-volume) state)
+           '(:child-complete :volume 55)))
+  (assert (null *state-file-write-arguments*))
+  (let ((changed (copy-list state))
+        (settings (copy-list (getf state :settings))))
+    (setf (getf settings :volume) 37
+          (getf changed :settings) settings
+          *state-file-read-result* (list 1 (format nil "on~%"))
+          *state-file-write-arguments* nil)
+    (assert (equal
+             (retrodeck::dashboard-runtime-handle-effect
+              runtime '(:reload-volume) changed)
+             '(:child-complete :volume 42)))
+    (assert (equal *state-file-write-arguments*
+                   (list "/tmp/volume.state" (format nil "42~%"))))
+    (setf *state-file-read-result* '(0)
+          *state-file-write-arguments* nil)
+    (assert (equal
+             (retrodeck::dashboard-runtime-handle-effect
+              runtime '(:reload-volume) changed)
+             '(:child-complete :volume 42)))
+    (assert (equal *state-file-write-arguments*
+                   (list "/tmp/volume.state" (format nil "42~%")))))
+  (setf *state-file-read-result* (list 1 (format nil "off~%")))
+  (assert (equal
+           (retrodeck::dashboard-runtime-handle-effect
+            runtime '(:reload-volume) state)
+           '(:child-complete :volume 0)))
+  (assert (equal *state-file-write-arguments*
+                 (list "/tmp/volume.state" (format nil "0~%"))))
+  (setf *state-file-read-result* (list 1 (format nil "055~%")))
+  (assert (equal
+           (retrodeck::dashboard-runtime-handle-effect
+            runtime '(:reload-volume) state)
+           '(:child-complete))))
+
 (let* ((times '(101 102 103))
        (state (retrodeck:dashboard-loop-initial-state nil :now 90))
        (runtime (retrodeck:make-dashboard-runtime
@@ -2763,10 +2893,16 @@ secret!9
        (*input-poll-arguments* nil)
        (*network-status-result*
          '("NET1" "10.0.1.11" "10.0.0.15" "CONNECTED"))
-       (*network-status-path* nil))
+       (*network-status-path* nil)
+       (*state-file-read-result* (list 1 (format nil "37~%")))
+       (*state-file-read-path* nil))
   (multiple-value-bind (initialized ignored-runtime)
       (retrodeck:dashboard-runtime-initialize state runtime 90)
     (declare (ignore ignored-runtime))
+    (assert (= (getf (getf initialized :settings) :volume) 37))
+    (assert (= (getf (getf initialized :settings) :last-audible-volume) 37))
+    (assert (string= *state-file-read-path*
+                     "/mnt/data/nes-deck/state/menu-volume.state"))
     (assert (equal (getf initialized :network)
                    '(:ssid "NET1" :wlan-ipv4 "10.0.1.11"
                      :wireguard-ipv4 "10.0.0.15" :selector "CONNECTED")))

@@ -161,6 +161,7 @@
            #:dashboard-wifi-label
            #:dashboard-wifi-limit
            #:dashboard-wifi-path
+           #:dashboard-inherited-volume
            #:dashboard-initial-state
            #:dashboard-launch-plan
            #:dashboard-loop-begin-iteration
@@ -203,6 +204,7 @@
            #:fit-text-width
            #:load-cover-raster
            #:load-png-raster
+           #:load-dashboard-volume-state
            #:load-project-credits
            #:load-text-mask
            #:main
@@ -217,6 +219,8 @@
            #:open-evdev-touch
            #:open-fbdev
            #:open-wayland-widget
+           #:parse-dashboard-inherited-volume
+           #:parse-dashboard-volume-state
            #:play-menu-sound
            #:poll-native-input
            #:prepare-dashboard-rasters
@@ -236,6 +240,7 @@
            #:render-dashboard-settings
            #:render-dashboard-wifi
            #:render-project-credits
+           #:save-dashboard-volume-state
            #:settings-activation-plan
            #:settings-brightness-after-target
            #:settings-complete-action
@@ -372,6 +377,8 @@
 (defun read-native-state-file (path)
   (check-type path string)
   (let ((result (read-state-file (native-path-string path))))
+    (when (null result)
+      (error "Native state file read failed for ~A" path))
     (unless (and (consp result)
                  (case (first result)
                    (0 (= (length result) 1))

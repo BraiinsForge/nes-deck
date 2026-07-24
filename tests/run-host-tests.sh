@@ -7,6 +7,7 @@ set -euo pipefail
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 cd "$repo_root"
+unset RETRO_DECK_VOLUME_PERCENT
 
 cxx=${CXX:-g++}
 cc=${CC:-cc}

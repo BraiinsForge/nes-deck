@@ -920,7 +920,8 @@
             --subst-var-by settings_icon "$PWD/settings-icon.png" \
             --subst-var-by terminal_fixture "$PWD/terminal-fixture" \
             --subst-var-by credits ${./deploy/menu/credits.tsv}
-          ECLDIR=${eclArm}/lib/ecl/ \
+          RETRO_DECK_VOLUME_PERCENT=0 \
+            ECLDIR=${eclArm}/lib/ecl/ \
             ${pkgs.qemu-user}/bin/qemu-arm \
             ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \
             smoke.lisp

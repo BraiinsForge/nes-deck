@@ -1320,10 +1320,12 @@
     (&key wayland
           adopt-presentation
           (volume-state (dashboard-settings-path :volume-state))
+          (default-volume (dashboard-inherited-volume))
           (network-status-path (dashboard-wifi-path :selector-status))
           external-effect-handler
           (clock #'monotonic-ms))
   (check-type volume-state string)
+  (check-type default-volume (integer 0 100))
   (check-type network-status-path string)
   (when external-effect-handler
     (check-type external-effect-handler function))
@@ -1331,6 +1333,7 @@
   (list :wayland (not (null wayland))
         :adopt-presentation (not (null adopt-presentation))
         :volume-state volume-state
+        :default-volume default-volume
         :network-status-path network-status-path
         :external-effect-handler external-effect-handler
         :clock clock
@@ -1402,6 +1405,21 @@
     (check-type now (integer 0 *))
     now))
 
+(defun dashboard-runtime-initialize-volume (state runtime)
+  (let* ((settings (copy-list (getf state :settings)))
+         (default-volume (getf runtime :default-volume))
+         (volume
+           (load-dashboard-volume-state
+            (getf runtime :volume-state) default-volume))
+         (next (copy-list state)))
+    (setf (getf settings :volume) volume
+          (getf settings :last-audible-volume)
+          (if (plusp volume) volume
+              (if (plusp default-volume) default-volume
+                  *dashboard-volume-step*)))
+    (setf (getf next :settings) settings)
+    next))
+
 (defun dashboard-runtime-poll-input (runtime timeout-ms)
   (check-type runtime list)
   (check-type timeout-ms (integer 0 4294967295))
@@ -1445,6 +1463,36 @@
        (list :network-result :network
              (read-native-network-status
               (getf runtime :network-status-path))))
+      ((and (eq (first effect) :settings-action)
+            (eq (getf (second effect) :action) :volume))
+       (let ((plan (second effect)))
+         (list :settings-result :succeeded-p
+               (handler-case
+                   (save-dashboard-volume-state
+                    (getf plan :path) (getf plan :value))
+                 (error (condition)
+                   (format *error-output* "retrodeck: ~A~%" condition)
+                   (finish-output *error-output*)
+                   nil)))))
+      ((eq (first effect) :reload-volume)
+       (let ((current (getf (getf state :settings) :volume)))
+         (handler-case
+             (let ((volume
+                     (load-dashboard-volume-state
+                      (getf runtime :volume-state)
+                      (getf runtime :default-volume))))
+               (when (/= volume current)
+                 (format *error-output*
+                         "retrodeck: child updated game volume to ~D%~%"
+                         volume)
+                 (finish-output *error-output*))
+               (list :child-complete :volume volume))
+           (error (condition)
+             (format *error-output*
+                     "retrodeck: cannot reload child volume: ~A~%"
+                     condition)
+             (finish-output *error-output*)
+             '(:child-complete)))))
       (t (error "Dashboard runtime cannot handle effect ~S" effect)))))
 
 (defun dashboard-runtime-handle-effect (runtime effect state)
@@ -1555,7 +1603,7 @@
   (check-type now (integer 0 *))
   (when (getf runtime :initialized-p)
     (error "Dashboard runtime is already initialized"))
-  (let ((current state)
+  (let ((current (dashboard-runtime-initialize-volume state runtime))
         (presentation-owned-p nil)
         (touch-open-p nil)
         (controls-open-p nil)
